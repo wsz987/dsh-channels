@@ -1,0 +1,28 @@
+{
+  "name": "deepseek-harness-channels",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Harness-native Channel SDK for DeepSeek Harness (DSH Bundle + Channel Core + Adapters)",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@9.15.3",
+  "scripts": {
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:run": "vitest run",
+    "clean": "turbo run clean",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.27.0",
+    "@types/node": "^22.0.0",
+    "turbo": "^2.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

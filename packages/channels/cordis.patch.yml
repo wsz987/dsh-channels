@@ -1,0 +1,40 @@
+# DSH Bundle patch — @dsh/channels
+#
+# Inserts the ChannelService, the Harness bridge and the four official
+# adapters into a DeepSeek Harness profile.
+#
+# Every channel below can be disabled through its own plugin config
+# (e.g. `plugins.channels-weixin.enabled = false`).
+#
+# `inject` names follow the Harness public service surface at bundle time;
+# adjust when the upstream service names change (converged in channel-harness).
+
+- insert:
+    - id: channels-service
+      name: '@dsh/channel-core/plugin'
+
+    - id: channels-harness
+      name: '@dsh/channel-harness'
+      inject:
+        - channels
+        - agents
+
+    - id: channels-weixin
+      name: '@dsh/channel-weixin'
+      inject:
+        - channels
+
+    - id: channels-qq
+      name: '@dsh/channel-qq'
+      inject:
+        - channels
+
+    - id: channels-dingtalk
+      name: '@dsh/channel-dingtalk'
+      inject:
+        - channels
+
+    - id: channels-lark
+      name: '@dsh/channel-lark'
+      inject:
+        - channels

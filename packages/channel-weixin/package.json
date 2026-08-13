@@ -1,0 +1,33 @@
+{
+  "name": "@dsh/channel-weixin",
+  "version": "0.8.1",
+  "description": "Weixin channel adapter for DeepSeek Harness (upstream driver skeleton in M0)",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rimraf lib"
+  },
+  "dependencies": {
+    "@dsh/channel-core": "workspace:*",
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "devDependencies": {
+    "rimraf": "^6.0.0"
+  },
+  "license": "MIT"
+}

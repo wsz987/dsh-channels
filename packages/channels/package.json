@@ -1,0 +1,44 @@
+{
+  "name": "@dsh/channels",
+  "version": "0.9.0",
+  "description": "DeepSeek Harness DSH Bundle: official messaging channels (Weixin, QQ, DingTalk, Lark)",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rimraf lib"
+  },
+  "dependencies": {
+    "@dsh/channel-core": "workspace:*",
+    "@dsh/channel-dingtalk": "workspace:*",
+    "@dsh/channel-harness": "workspace:*",
+    "@dsh/channel-lark": "workspace:*",
+    "@dsh/channel-qq": "workspace:*",
+    "@dsh/channel-weixin": "workspace:*",
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "devDependencies": {
+    "rimraf": "^6.0.0"
+  },
+  "license": "MIT"
+}
