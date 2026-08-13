@@ -1,0 +1,13 @@
+{
+  "name": "auth success",
+  "channel": "weixin",
+  "upstreamVersion": "m1",
+  "payload": {
+    "state": "authenticated",
+    "userId": "wxid_main"
+  },
+  "expected": {
+    "state": "authenticated",
+    "userId": "wxid_main"
+  }
+}

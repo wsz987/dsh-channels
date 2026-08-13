@@ -1,0 +1,32 @@
+{
+  "name": "duplicate message (webhook retry)",
+  "channel": "weixin",
+  "upstreamVersion": "m1",
+  "payload": {
+    "type": "text",
+    "fromUserName": "user_123",
+    "msgId": "msg_dup_1",
+    "content": "hello harness"
+  },
+  "expected": {
+    "type": "message.received",
+    "channel": "weixin",
+    "accountId": "main",
+    "conversation": {
+      "id": "user_123",
+      "type": "dm"
+    },
+    "sender": {
+      "id": "user_123"
+    },
+    "message": {
+      "id": "msg_dup_1",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello harness"
+        }
+      ]
+    }
+  }
+}

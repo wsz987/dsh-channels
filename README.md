@@ -2,9 +2,9 @@
 
 Harness-native Channel SDK for [DeepSeek Harness](https://www.deepseek.com/harness/).
 
-## 状态：M0 — Harness-native Framework ✅
+## 状态
 
-按《deepseek-harness-channels-execution-plan.md》M0 里程碑完成：
+**M0 — Harness-native Framework ✅**（已提交 `fd0ac46`）
 
 ```text
 Monorepo
@@ -15,6 +15,21 @@ Harness Bridge（AgentManager / SessionBinding / ReplyRouter）
 DSH Bundle 骨架
 Fake E2E  ✅ Fake Channel → Harness Agent → session/event → Fake Channel
 ```
+
+**M1 — Weixin Adapter ✅**（当前）
+
+```text
+Config (Schemastery)
+Upstream Driver（HTTP long-poll / auth / send，fetch transport 可注入）
+Auth 状态机 + 持久化
+Mapper（text/image/audio/video/file/location/unknown → MessagePart[]）
+Inbound dedup + Outbound send
+Reconnect 指数退避
+Contract Tests 通过（runChannelAdapterContract）
+fixtures/weixin/（text/image/audio/unknown/duplicate/auth-success/auth-expired）
+```
+
+> 网络交互通过可注入的 `HttpTransport` 抽象——真实部署指向自托管微信 HTTP 网关，测试用 fake transport 全离线验证。
 
 ## 结构
 

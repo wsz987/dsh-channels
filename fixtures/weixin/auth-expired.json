@@ -1,0 +1,13 @@
+{
+  "name": "auth expired",
+  "channel": "weixin",
+  "upstreamVersion": "m1",
+  "payload": {
+    "state": "expired",
+    "detail": "QR code expired"
+  },
+  "expected": {
+    "state": "expired",
+    "detail": "QR code expired"
+  }
+}
