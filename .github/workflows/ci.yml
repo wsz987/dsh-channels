@@ -1,0 +1,101 @@
+# M4 — Compatibility Governance: CI gate for every push to `main` and every pull request.
+#
+# Task 14.3 CI matrix design (docs/deepseek-harness-channels-execution-plan.md):
+#
+#   "harness pinned-current"    This workflow against the COMMITTED pnpm-lock.yaml
+#                               (`pnpm install --frozen-lockfile`). Proves the pinned
+#                               dependency set stays green: build, typecheck, the full
+#                               offline test suite, and the governance checks.
+#
+#   "harness latest-compatible" Renovate dependency PRs. Every Renovate dep PR runs
+#                               this SAME ci.yml against the UPDATED deps — Renovate
+#                               commits its own lockfile changes, so the frozen
+#                               install exercises the proposed versions. All jobs
+#                               must be green before maintainers bump the manifest
+#                               `testedVersion` (plan §32 gate below).
+#
+# Upgrade gate (plan §32 / Phase 15): new dependency -> PR -> build / typecheck /
+# contract tests / fixtures / adapter tests / Harness compat / E2E all pass ->
+# update `manifest.testedVersion`. The scheduled upgrade.yml drift check raises the
+# signal, Renovate (renovate.json) proposes the PRs, this workflow is the gate.
+#
+# Range strategy note: renovate.json uses `rangeStrategy: "bump"` so Renovate rewrites
+# the declared range to the resolved version instead of keeping a static one — the
+# committed manifest `testedVersion` must mirror what the lockfile actually pins.
+# README warning (upstream snapshot): @deepseek-ai/dsh-session / dsh-brand / dsh-llm
+# etc. must stay in the 0.1.0-rc.6 family — npm `latest` is 0.0.1-rc.1, which breaks
+# rc.6 peer consistency; renovate.json caps those via allowedVersions.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build + typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.3
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm build
+      - name: Typecheck
+        run: pnpm typecheck
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.3
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Test
+        run: pnpm test
+
+  governance:
+    name: Governance (fixtures / manifests / doctor)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.3
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Compatibility governance
+        run: pnpm check:fixtures && pnpm check:manifests && pnpm doctor

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "dependencyDashboard": true,
+  "separateMajorMinor": true,
+  "schedule": [
+    "on the first day of the week"
+  ],
+  "rangeStrategy": "bump",
+  "packageRules": [
+    {
+      "matchPackagePatterns": [
+        "^@deepseek-ai/"
+      ],
+      "groupName": "deepseek-ai upstream"
+    },
+    {
+      "matchPackagePatterns": [
+        "^@deepseek-ai/dsh-"
+      ],
+      "allowedVersions": ">=0.1.0-rc.6 <0.2.0"
+    },
+    {
+      "matchPackagePatterns": [
+        "^@dsh/"
+      ],
+      "enabled": false
+    }
+  ]
+}

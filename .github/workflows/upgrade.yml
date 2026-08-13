@@ -1,0 +1,43 @@
+# M4 — Weekly upstream drift check (scheduled + manual trigger).
+#
+# Flow (plan §32 / Phase 15):
+#   1. `pnpm check:upstream` compares the versions pinned by the committed lockfile
+#      against the npm registry `latest` tag and exits 1 when a newer in-range
+#      @deepseek-ai/* version exists. A red run of THIS workflow is the drift signal.
+#   2. Renovate (renovate.json) proposes dependency PRs.
+#   3. ci.yml gates every Renovate PR ("harness latest-compatible" matrix leg):
+#      build + typecheck + full test suite + fixtures + governance must all pass.
+#   4. After all green, maintainers bump `manifest.testedVersion`.
+#   5. Governance checks (check:fixtures / check:manifests / doctor) keep the
+#      upstream manifests and fixtures honest against whatever the lockfile pins.
+
+name: Upgrade check
+
+on:
+  schedule:
+    # Every Monday 03:00 UTC.
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+jobs:
+  drift-check:
+    name: Upstream drift + governance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.3
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check upstream drift
+        run: pnpm check:upstream
+      - name: Compatibility governance
+        run: pnpm check:fixtures && pnpm check:manifests && pnpm doctor
