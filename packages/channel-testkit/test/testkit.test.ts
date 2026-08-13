@@ -4,6 +4,7 @@ import { ChannelService } from '@dsh/channel-core';
 import type { ChannelEvent, MessageReceived } from '@dsh/channel-core';
 import {
   FakeChannelAdapter,
+  FakeReplyHandle,
   FakeUpstream,
   FakeHarness,
   runChannelAdapterContract,
@@ -175,6 +176,88 @@ describe('FakeChannelAdapter', () => {
   });
 });
 
+describe('FakeChannelAdapter streaming replies', () => {
+  it('returns a recording FakeReplyHandle for edit streaming', async () => {
+    const fake = new FakeChannelAdapter({ id: 'edit-fake', streaming: 'edit' });
+    await fake.start(createTestContext(newChannelService()));
+
+    const reply = (await fake.createReply(makeChannelTarget(), { markdown: true })) as FakeReplyHandle;
+
+    expect(fake.capabilities.streaming).toBe('edit');
+    expect(reply).toBeInstanceOf(FakeReplyHandle);
+    expect(fake.replies).toEqual([reply]);
+
+    await reply.replace({ text: 'hi' });
+    await reply.replace({ text: 'hi world' });
+    expect(reply.text).toBe('hi world');
+    expect(reply.replaceCount).toBe(2);
+    expect(reply.calls).toEqual([
+      { type: 'replace', text: 'hi' },
+      { type: 'replace', text: 'hi world' },
+    ]);
+
+    await reply.finish();
+    expect(reply.finished).toBe(true);
+    expect(reply.finishCount).toBe(1);
+
+    await reply.fail(new Error('boom'));
+    expect(reply.failed).toBe(true);
+    expect(reply.failCount).toBe(1);
+    expect(reply.calls[2]).toEqual({ type: 'finish', text: 'hi world' });
+    expect(reply.calls[3]).toEqual({ type: 'fail', error: expect.any(Error) });
+
+    await fake.stop();
+  });
+
+  it('accumulates appended deltas for native streaming', async () => {
+    const fake = new FakeChannelAdapter({ id: 'native-fake', streaming: 'native' });
+    await fake.start(createTestContext(newChannelService()));
+
+    const reply = (await fake.createReply(makeChannelTarget())) as FakeReplyHandle;
+    await reply.append('hello ');
+    await reply.append('world');
+
+    expect(reply.text).toBe('hello world');
+    expect(reply.appendCount).toBe(2);
+
+    await fake.stop();
+  });
+
+  it('failNextCall makes the next append/replace/finish throw', async () => {
+    const fake = new FakeChannelAdapter({ id: 'failing-fake', streaming: 'edit' });
+    await fake.start(createTestContext(newChannelService()));
+
+    const reply = (await fake.createReply(makeChannelTarget())) as FakeReplyHandle;
+    reply.failNextCall(new Error('platform update failed'));
+    await expect(reply.replace({ text: 'hi' })).rejects.toThrow('platform update failed');
+    expect(reply.replaceCount).toBe(0); // the throwing call was not recorded
+
+    reply.failNextCall();
+    await expect(reply.append('x')).rejects.toThrow('fake reply failure');
+    await expect(reply.finish()).resolves.toBeUndefined();
+    expect(reply.finished).toBe(true);
+
+    await fake.stop();
+  });
+
+  it('keeps the default buffered createReply path unchanged', async () => {
+    const fake = new FakeChannelAdapter({ id: 'buffered-fake' });
+    await fake.start(createTestContext(newChannelService()));
+
+    const reply = await fake.createReply(makeChannelTarget());
+    await reply.append('a');
+    await reply.append('b');
+    await reply.finish();
+
+    expect(fake.capabilities.streaming).toBe('buffered');
+    expect(fake.replies).toEqual([]); // buffered replies are not recorded handles
+    expect(fake.sentMessages).toHaveLength(1);
+    expect(fake.sentMessages[0]?.message.text).toBe('ab');
+
+    await fake.stop();
+  });
+});
+
 describe('FakeUpstream', () => {
   it('registers handlers, counts connections and dispatches inbound payloads', async () => {
     const upstream = new FakeUpstream({ id: 'wx-upstream' });
@@ -294,6 +377,23 @@ describe('fake channel e2e', () => {
     expect(e2e.adapter.sentMessages).toHaveLength(2);
 
     await e2e.dispose();
+  });
+
+  it('works end to end with a streaming edit adapter', async () => {
+    const adapter = new FakeChannelAdapter({ id: 'edit-fake', streaming: 'edit' });
+    const e2e = await runFakeChannelE2E({ channel: 'edit-fake', adapter });
+
+    await e2e.sendInbound('hello harness');
+
+    expect(e2e.receivedByAgent).toHaveLength(1);
+    expect(e2e.replayedEvents).toHaveLength(1);
+    // The E2E stream port delivers replayed events through adapter.send
+    // directly (createReply is not exercised by the fake-harness port), which
+    // must keep recording outbound messages unchanged.
+    expect(e2e.adapter.sentMessages).toHaveLength(1);
+
+    await e2e.dispose();
+    expect(e2e.adapter.stopCount).toBe(1);
   });
 });
 

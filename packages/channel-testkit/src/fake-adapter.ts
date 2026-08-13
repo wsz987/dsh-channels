@@ -24,6 +24,7 @@ import type {
   OutboundMessage,
   ReplyHandle,
   SendResult,
+  StreamingMode,
 } from '@dsh/channel-core';
 
 export interface FakeChannelAdapterOptions {
@@ -42,6 +43,87 @@ export interface FakeChannelAdapterOptions {
    * same message id are forwarded only once. Used by the contract dedup group.
    */
   dedup?: boolean;
+  /**
+   * Streaming strategy produced by `createReply`. Defaults to `'buffered'`
+   * (a `BufferedReply` that delivers through `send()`), preserving the
+   * existing behavior. With `'edit'` or `'native'`, `createReply` returns a
+   * recording `FakeReplyHandle` instead.
+   */
+  streaming?: StreamingMode;
+}
+
+/** One recorded call on a `FakeReplyHandle`. */
+export interface FakeReplyCall {
+  type: 'append' | 'replace' | 'finish' | 'fail';
+  /** For `append`/`replace`/`finish`: the message text involved. */
+  text?: string;
+  /** For `fail`: the recorded error. */
+  error?: unknown;
+}
+
+/**
+ * Streaming reply handle returned by `createReply` when the adapter's
+ * `streaming` capability is `'edit'` or `'native'`. It records every call
+ * (`append`/`replace`/`finish`/`fail`) so tests can assert on previews,
+ * finalization and failures without a platform. `text` tracks the current
+ * content: the last replaced text for `edit`, the accumulated concatenation
+ * for `native`.
+ */
+export class FakeReplyHandle implements ReplyHandle {
+  /** Every call made on this handle, in order. */
+  readonly calls: FakeReplyCall[] = [];
+  /** Current content: replaced text for `edit`, concatenated for `native`. */
+  text = '';
+  finished = false;
+  failed = false;
+  appendCount = 0;
+  replaceCount = 0;
+  finishCount = 0;
+  failCount = 0;
+
+  private pendingFailure: unknown;
+
+  /** Make the next `append`/`replace`/`finish` throw (one-shot). */
+  failNextCall(error: unknown = new Error('fake reply failure')): void {
+    this.pendingFailure = error;
+  }
+
+  private throwIfPending(): void {
+    if (this.pendingFailure === undefined) return;
+    const error = this.pendingFailure;
+    this.pendingFailure = undefined;
+    throw error;
+  }
+
+  async append(delta: string): Promise<void> {
+    this.throwIfPending();
+    this.calls.push({ type: 'append', text: delta });
+    this.appendCount += 1;
+    this.text += delta;
+  }
+
+  async replace(message: OutboundMessage): Promise<void> {
+    this.throwIfPending();
+    const text = message.text ?? '';
+    this.calls.push({ type: 'replace', text });
+    this.replaceCount += 1;
+    this.text = text;
+  }
+
+  async finish(message?: OutboundMessage): Promise<void> {
+    this.throwIfPending();
+    const text = message?.text ?? this.text;
+    this.calls.push({ type: 'finish', text });
+    this.finishCount += 1;
+    this.text = text;
+    this.finished = true;
+  }
+
+  async fail(error: unknown): Promise<void> {
+    this.calls.push({ type: 'fail', error });
+    this.failCount += 1;
+    this.failed = true;
+  }
 }
 
 /**
@@ -58,6 +140,8 @@ export class FakeChannelAdapter implements ChannelAdapter {
   readonly received: ChannelEvent[] = [];
   /** Every outbound message passed to `send()`. */
   readonly sentMessages: { target: ChannelTarget; message: OutboundMessage }[] = [];
+  /** Every streaming reply handle created via `createReply`. */
+  readonly replies: FakeReplyHandle[] = [];
 
   /** Mutable auth state, simulating platform credential state. */
   authState: AuthState = 'unknown';
@@ -91,7 +175,7 @@ export class FakeChannelAdapter implements ChannelAdapter {
       cards: false,
       reactions: false,
       threads: false,
-      streaming: 'buffered',
+      streaming: options.streaming ?? 'buffered',
       ...options.capabilities,
     };
   }
@@ -144,6 +228,11 @@ export class FakeChannelAdapter implements ChannelAdapter {
   }
 
   async createReply(target: ChannelTarget, _options?: CreateReplyOptions): Promise<ReplyHandle> {
+    if (this.capabilities.streaming !== 'buffered') {
+      const handle = new FakeReplyHandle();
+      this.replies.push(handle);
+      return handle;
+    }
     return new BufferedReply({
       deliver: async (text) => this.send(target, { text }),
     });

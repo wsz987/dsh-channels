@@ -1,0 +1,33 @@
+{
+  "name": "duplicate message (webhook retry)",
+  "channel": "dingtalk",
+  "upstreamVersion": "m2",
+  "payload": {
+    "type": "text",
+    "msgId": "msg_dup_1",
+    "senderId": "user_123",
+    "conversationId": "conv_456",
+    "content": "hello harness"
+  },
+  "expected": {
+    "type": "message.received",
+    "channel": "dingtalk",
+    "accountId": "main",
+    "conversation": {
+      "id": "conv_456",
+      "type": "dm"
+    },
+    "sender": {
+      "id": "user_123"
+    },
+    "message": {
+      "id": "msg_dup_1",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello harness"
+        }
+      ]
+    }
+  }
+}

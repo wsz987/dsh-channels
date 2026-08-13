@@ -1,0 +1,32 @@
+{
+  "name": "inbound unknown type",
+  "channel": "dingtalk",
+  "upstreamVersion": "m2",
+  "payload": {
+    "type": "sticker",
+    "msgId": "msg_unk_1",
+    "senderId": "user_123",
+    "conversationId": "conv_456"
+  },
+  "expected": {
+    "type": "message.received",
+    "channel": "dingtalk",
+    "accountId": "main",
+    "conversation": {
+      "id": "conv_456",
+      "type": "dm"
+    },
+    "sender": {
+      "id": "user_123"
+    },
+    "message": {
+      "id": "msg_unk_1",
+      "content": [
+        {
+          "type": "unsupported",
+          "reason": "unknown dingtalk type 'sticker'"
+        }
+      ]
+    }
+  }
+}

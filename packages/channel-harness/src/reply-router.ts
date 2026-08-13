@@ -43,6 +43,12 @@ interface ActiveReply {
   lastSentLength: number;
   turn: number;
   finished: boolean;
+  /**
+   * In-flight preview chain. Flushes are serialized: a delta arriving while a
+   * flush is pending joins the running chain instead of starting a second
+   * concurrent one (which would double-`createReply` on the same reply).
+   */
+  flushing: Promise<void> | null;
 }
 
 export interface ReplyRouterOptions {
@@ -133,6 +139,7 @@ export class ReplyRouter {
       lastSentLength: 0,
       turn,
       finished: false,
+      flushing: null,
     };
     this.active.set(sessionId, active);
     return active;
@@ -159,10 +166,34 @@ export class ReplyRouter {
     }
   }
 
-  private async flush(active: ActiveReply): Promise<void> {
+  /**
+   * Enqueue a preview flush. Deltas are drained through a single in-flight
+   * chain so concurrent deltas can never double-`createReply` on the same
+   * reply; the chain reads the current buffer at execution time, so a flush
+   * that started before the newest delta still covers it.
+   */
+  private flush(active: ActiveReply): void {
+    if (active.finished) return;
+    if (!active.flushing) {
+      active.flushing = this.drain(active).finally(() => {
+        active.flushing = null;
+      });
+    }
+  }
+
+  /** Drain all pending deltas, flushing until the buffer is fully sent. */
+  private async drain(active: ActiveReply): Promise<void> {
+    while (!active.finished) {
+      if (active.strategy === 'buffered') return; // send-once: deliver at turn/end
+      const sentBefore = active.lastSentLength;
+      await this.doFlush(active);
+      if (active.lastSentLength === sentBefore) return; // no progress — stop
+    }
+  }
+
+  private async doFlush(active: ActiveReply): Promise<void> {
     if (active.finished) return;
     active.lastFlush = Date.now();
-    if (active.strategy === 'buffered') return; // send-once: deliver at turn/end
     if (active.buffer.length === active.lastSentLength) return;
     const adapter = this.options.getAdapter(active.binding.channelId);
     if (!adapter?.createReply) return;
@@ -171,6 +202,8 @@ export class ReplyRouter {
         active.handle = await adapter.createReply(targetFor(active.binding), {
           markdown: true,
         });
+        // The owning scope may have finished while the card was created.
+        if (active.finished) return;
       }
       if (active.strategy === 'edit') {
         await active.handle.replace({ text: active.buffer });
@@ -199,6 +232,11 @@ export class ReplyRouter {
     }
     this.active.delete(sessionId);
     if (active.finished) return;
+    // Let any in-flight preview chain drain first; otherwise the flush could
+    // land an update on a card that is about to be finalized (orphan card).
+    if (active.flushing) {
+      await active.flushing.catch(() => {});
+    }
     active.finished = true;
 
     const text = active.buffer.length > 0 ? active.buffer : active.finalText;
@@ -212,9 +250,11 @@ export class ReplyRouter {
     const target = targetFor(active.binding);
     try {
       if (active.handle) {
-        // Native/edit handles already hold the streamed content.
-        await active.handle.finish();
-      } else if (active.strategy !== 'buffered' && adapter.createReply) {
+        // Pass the authoritative accumulated text: for `edit`, deltas pending
+        // in the throttle window may not have been flushed to the handle yet,
+        // so finalizing without them would drop content (M2 regression).
+        await active.handle.finish(text ? { text } : undefined);
+      } else if (active.strategy !== 'buffered' && adapter.createReply && text) {
         const handle = await adapter.createReply(target, { markdown: true });
         await handle.finish({ text });
       } else if (text) {
