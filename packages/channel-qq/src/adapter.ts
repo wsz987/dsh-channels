@@ -30,6 +30,7 @@ import { HttpQQUpstream, type QQUpstream } from './upstream.js';
 import { InboundProcessor } from './inbound.js';
 import { OutboundSender } from './outbound.js';
 import { QQAuthManager } from './auth.js';
+import { manifest as qqManifest, type QQManifest } from './manifest.js';
 
 export interface QQAdapterDeps {
   transport?: HttpTransport;
@@ -39,6 +40,9 @@ export interface QQAdapterDeps {
 
 export class QQAdapter implements ChannelAdapter {
   readonly id = 'qq';
+
+  /** Upstream compatibility manifest (read structurally by `channels doctor`). */
+  readonly manifest: QQManifest = qqManifest;
 
   readonly capabilities: ChannelCapabilities = {
     text: true,

@@ -30,6 +30,7 @@ import { HttpLarkUpstream, type LarkUpstream } from './upstream.js';
 import { InboundProcessor } from './inbound.js';
 import { OutboundSender } from './outbound.js';
 import { LarkCardReply } from './card.js';
+import { manifest as larkManifest, type LarkManifest } from './manifest.js';
 
 export interface LarkAdapterDeps {
   transport?: HttpTransport;
@@ -39,6 +40,9 @@ export interface LarkAdapterDeps {
 
 export class LarkAdapter implements ChannelAdapter {
   readonly id = 'lark';
+
+  /** Upstream compatibility manifest (read structurally by `channels doctor`). */
+  readonly manifest: LarkManifest = larkManifest;
 
   readonly capabilities: ChannelCapabilities = {
     text: true,

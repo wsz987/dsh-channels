@@ -6,11 +6,8 @@
  * `tested` with an `ok` verdict, then prints the formatted doctor output —
  * exactly the surface CI prints via `pnpm doctor`.
  *
- * NOTE: the QQ and Lark adapters (M3) export their upstream manifest const
- * but do not yet expose it as a class field the way Weixin/DingTalk do
- * (`readonly manifest`). The real manifest const is attached below so the
- * doctor covers all four channels; drop the `Object.assign` lines once the
- * adapters expose the field themselves.
+ * All four adapters expose a `readonly manifest` class field that the
+ * doctor reads structurally.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -26,8 +23,6 @@ import { QQAdapter } from '../../channel-qq/src/adapter.ts';
 import { Config as QQConfig } from '../../channel-qq/src/config.ts';
 import { LarkAdapter } from '../../channel-lark/src/adapter.ts';
 import { Config as LarkConfig } from '../../channel-lark/src/config.ts';
-import { manifest as qqManifest } from '../../channel-qq/src/manifest.ts';
-import { manifest as larkManifest } from '../../channel-lark/src/manifest.ts';
 
 const weixin = new WeixinAdapter(
   WeixinConfig({
@@ -80,11 +75,6 @@ const lark = new LarkAdapter(
     card: { createOnFirstDelta: true },
   }),
 );
-
-// See the NOTE above: attach the real manifest consts until QQ/Lark expose
-// the field themselves (weixin/dingtalk already do).
-Object.assign(qq, { manifest: qqManifest });
-Object.assign(lark, { manifest: larkManifest });
 
 describe('doctor — all four official channels (M4 surface)', () => {
   it('produces a tested diagnostic for every channel and renders the doctor output', async () => {
