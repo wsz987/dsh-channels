@@ -19,6 +19,9 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "check:fixtures": "vitest run test/fixtures-sweep.test.ts",
+    "check:manifests": "vitest run test/manifest-governance.test.ts",
+    "doctor": "vitest run test/doctor-all.test.ts",
     "clean": "rimraf lib"
   },
   "dependencies": {
