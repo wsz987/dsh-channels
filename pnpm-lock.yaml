@@ -52,6 +52,9 @@ importers:
         specifier: workspace:*
         version: link:../channel-core
     devDependencies:
+      '@dsh/channel-testkit':
+        specifier: workspace:*
+        version: link:../channel-testkit
       rimraf:
         specifier: ^6.0.0
         version: 6.1.3
@@ -143,6 +146,9 @@ importers:
         specifier: workspace:*
         version: link:../channel-core
     devDependencies:
+      '@dsh/channel-testkit':
+        specifier: workspace:*
+        version: link:../channel-testkit
       rimraf:
         specifier: ^6.0.0
         version: 6.1.3
@@ -159,6 +165,9 @@ importers:
         specifier: workspace:*
         version: link:../channel-core
     devDependencies:
+      '@dsh/channel-testkit':
+        specifier: workspace:*
+        version: link:../channel-testkit
       rimraf:
         specifier: ^6.0.0
         version: 6.1.3

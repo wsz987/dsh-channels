@@ -1,7 +1,7 @@
 {
   "name": "@dsh/channel-lark",
   "version": "0.6.3",
-  "description": "Lark / Feishu channel adapter for DeepSeek Harness (upstream driver skeleton in M0)",
+  "description": "Lark / Feishu channel adapter for DeepSeek Harness (threads, editable card streaming, edit strategy)",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -27,6 +27,7 @@
     "@deepseek-ai/schemastery": "^3.18.1"
   },
   "devDependencies": {
+    "@dsh/channel-testkit": "workspace:*",
     "rimraf": "^6.0.0"
   },
   "license": "MIT"

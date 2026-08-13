@@ -1,7 +1,7 @@
 {
   "name": "@dsh/channel-qq",
   "version": "0.5.4",
-  "description": "QQ channel adapter for DeepSeek Harness (upstream driver skeleton in M0)",
+  "description": "QQ channel adapter for DeepSeek Harness (buffered streaming, dm/group, QR auth)",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -27,6 +27,7 @@
     "@deepseek-ai/schemastery": "^3.18.1"
   },
   "devDependencies": {
+    "@dsh/channel-testkit": "workspace:*",
     "rimraf": "^6.0.0"
   },
   "license": "MIT"

@@ -1,7 +1,7 @@
 {
   "name": "@dsh/channel-compat",
   "version": "0.2.0",
-  "description": "Upstream compatibility manifests, version policy and channel doctor",
+  "description": "Upstream compatibility manifests, version policy and channels doctor",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -18,7 +18,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "clean": "rimraf lib"
   },
   "dependencies": {
@@ -27,6 +27,7 @@
     "@deepseek-ai/schemastery": "^3.18.1"
   },
   "devDependencies": {
+    "@dsh/channel-testkit": "workspace:*",
     "rimraf": "^6.0.0"
   },
   "license": "MIT"

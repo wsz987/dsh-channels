@@ -1,10 +1,16 @@
 /**
- * Weixin channel adapter.
+ * QQ channel adapter.
  *
- * Maps the weixin platform (through the upstream driver) to the Channel
- * Contract. All network/lifecycle resources live behind the upstream driver
- * and are aborted via the adapter context signal. The adapter never touches
- * Harness Agent APIs.
+ * Maps the QQ platform (through the upstream driver) to the Channel Contract.
+ * All network/lifecycle resources live behind the upstream driver and are
+ * aborted via the adapter context signal. The adapter never touches Harness
+ * Agent APIs.
+ *
+ * Auth follows the Weixin pattern: the gateway owns the platform session and
+ * the adapter relays an opaque QR `AuthChallenge` / `AuthStatePoll` between
+ * the operator and the upstream (`beginAuth` / `pollAuth`). QR/token values
+ * are never cached long-term and never logged. The receive loop only starts
+ * once auth is authenticated.
  */
 import type {
   AuthChallenge,
@@ -18,42 +24,40 @@ import type {
   SendResult,
 } from '@dsh/channel-core';
 import { ChannelError } from '@dsh/channel-core';
-import type { WeixinConfig } from './config.js';
+import type { QQConfig } from './config.js';
 import { FetchTransport, type HttpTransport } from './transport.js';
-import { HttpWeixinUpstream, type WeixinUpstream } from './upstream.js';
+import { HttpQQUpstream, type QQUpstream } from './upstream.js';
 import { InboundProcessor } from './inbound.js';
 import { OutboundSender } from './outbound.js';
-import { WeixinAuthManager } from './auth.js';
-import { manifest as weixinManifest, type WeixinManifest } from './manifest.js';
+import { QQAuthManager } from './auth.js';
 
-export interface WeixinAdapterDeps {
+export interface QQAdapterDeps {
   transport?: HttpTransport;
   /** Injectable clock (tests). */
   now?: () => number;
 }
 
-export class WeixinAdapter implements ChannelAdapter {
-  readonly id = 'weixin';
-
-  /** Upstream compatibility manifest (read structurally by `channels doctor`). */
-  readonly manifest: WeixinManifest = weixinManifest;
+export class QQAdapter implements ChannelAdapter {
+  readonly id = 'qq';
 
   readonly capabilities: ChannelCapabilities = {
     text: true,
     image: true,
-    file: false,
+    file: true,
     audio: true,
     video: false,
     markdown: false,
     cards: false,
     reactions: false,
     threads: false,
+    // QQ has no native streaming and no editable cards: accumulate chunks and
+    // deliver once via `adapter.send` at turn/end.
     streaming: 'buffered',
   };
 
   private ctx?: ChannelAdapterContext;
-  private upstream: WeixinUpstream;
-  private auth!: WeixinAuthManager;
+  private upstream: QQUpstream;
+  private auth!: QQAuthManager;
   private inbound!: InboundProcessor;
   private outbound!: OutboundSender;
   private started = false;
@@ -62,17 +66,17 @@ export class WeixinAdapter implements ChannelAdapter {
   private connected = false;
   private readonly now: () => number;
 
-  constructor(private readonly config: WeixinConfig, deps: WeixinAdapterDeps = {}) {
+  constructor(private readonly config: QQConfig, deps: QQAdapterDeps = {}) {
     this.now = deps.now ?? Date.now;
     const transport = deps.transport ?? new FetchTransport(config.baseUrl, { timeoutMs: config.timeoutMs });
-    this.upstream = new HttpWeixinUpstream({ transport, longPollTimeoutMs: config.longPollTimeoutMs });
+    this.upstream = new HttpQQUpstream({ transport, longPollTimeoutMs: config.longPollTimeoutMs });
   }
 
   async start(ctx: ChannelAdapterContext): Promise<void> {
     if (this.started) return;
     this.ctx = ctx;
     this.stopped = false;
-    this.auth = new WeixinAuthManager({
+    this.auth = new QQAuthManager({
       upstream: this.upstream,
       statePath: this.config.auth.statePath,
       now: this.now,
@@ -96,6 +100,7 @@ export class WeixinAdapter implements ChannelAdapter {
     await this.auth.load();
     this.emitAuth(this.auth.getState().status);
     if (this.auth.isAuthenticated) {
+      // Restored auth: connect immediately without a fresh QR scan.
       this.connected = true;
       this.emitConnection('connected');
       this.startReceiveLoop();
@@ -117,21 +122,23 @@ export class WeixinAdapter implements ChannelAdapter {
 
   async send(target: ChannelTarget, message: OutboundMessage): Promise<SendResult> {
     if (!this.started || !this.outbound) {
-      throw new ChannelError('CHANNEL_NOT_STARTED', 'weixin adapter is not started');
+      throw new ChannelError('CHANNEL_NOT_STARTED', 'qq adapter is not started');
     }
     return this.outbound.send(target, message);
   }
 
+  /** Begin QR auth: relay the upstream challenge to the operator. */
   async beginAuth(): Promise<AuthChallenge> {
     if (!this.auth) {
-      throw new ChannelError('CHANNEL_NOT_STARTED', 'weixin adapter is not started');
+      throw new ChannelError('CHANNEL_NOT_STARTED', 'qq adapter is not started');
     }
     return this.auth.beginAuth();
   }
 
+  /** Poll the QR auth state; on success starts the receive loop. */
   async pollAuth(challenge: AuthChallenge): Promise<AuthStatePoll> {
     if (!this.auth) {
-      throw new ChannelError('CHANNEL_NOT_STARTED', 'weixin adapter is not started');
+      throw new ChannelError('CHANNEL_NOT_STARTED', 'qq adapter is not started');
     }
     const result = await this.auth.pollAuth(challenge);
     if (result.state === 'authenticated') {
@@ -147,7 +154,7 @@ export class WeixinAdapter implements ChannelAdapter {
 
   async getHealth(): Promise<ChannelHealth> {
     if (!this.started) {
-      return { status: 'down', detail: 'weixin adapter is not started', authenticated: false };
+      return { status: 'down', detail: 'qq adapter is not started', authenticated: false };
     }
     if (this.auth.isAuthenticated && this.connected) {
       return { status: 'ok', detail: 'connected', connection: 'connected', authenticated: true };
@@ -175,7 +182,7 @@ export class WeixinAdapter implements ChannelAdapter {
       try {
         await this.upstream.receive(this.ctx!.signal, (raw) => {
           void this.inbound.handle(raw).catch((error) => {
-            this.ctx!.logger.error('[channel-weixin] inbound handling failed', error);
+            this.ctx!.logger.error('[channel-qq] inbound handling failed', error);
           });
         });
         attempt = 0;
@@ -185,7 +192,7 @@ export class WeixinAdapter implements ChannelAdapter {
         this.connected = false;
         this.emitConnection('reconnecting');
         if (this.config.reconnect.enabled && attempt > this.config.reconnect.maxRetries) {
-          this.ctx!.logger.warn('[channel-weixin] reconnect budget exhausted');
+          this.ctx!.logger.warn('[channel-qq] reconnect budget exhausted');
           this.emitConnection('disconnected');
           break;
         }
@@ -193,7 +200,7 @@ export class WeixinAdapter implements ChannelAdapter {
           this.config.reconnect.baseDelayMs * 2 ** Math.min(attempt - 1, 8),
           this.config.reconnect.maxDelayMs,
         );
-        this.ctx!.logger.warn(`[channel-weixin] receive loop error; retry in ${delay}ms`, error);
+        this.ctx!.logger.warn(`[channel-qq] receive loop error; retry in ${delay}ms`, error);
         await sleep(delay, this.ctx!.signal);
       }
     }

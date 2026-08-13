@@ -1,0 +1,36 @@
+{
+  "name": "inbound audio",
+  "channel": "qq",
+  "upstreamVersion": "m3",
+  "payload": {
+    "type": "audio",
+    "msgId": "msg_aud_1",
+    "senderId": "user_123",
+    "conversationId": "conv_456",
+    "conversationType": "dm",
+    "mediaUrl": "https://example.com/a.silk",
+    "durationMs": 5200
+  },
+  "expected": {
+    "type": "message.received",
+    "channel": "qq",
+    "accountId": "main",
+    "conversation": {
+      "id": "conv_456",
+      "type": "dm"
+    },
+    "sender": {
+      "id": "user_123"
+    },
+    "message": {
+      "id": "msg_aud_1",
+      "content": [
+        {
+          "type": "audio",
+          "url": "https://example.com/a.silk",
+          "durationMs": 5200
+        }
+      ]
+    }
+  }
+}

@@ -30,6 +30,7 @@ import { HttpDingTalkUpstream, type DingTalkUpstream } from './upstream.js';
 import { InboundProcessor } from './inbound.js';
 import { OutboundSender } from './outbound.js';
 import { DingTalkCardReply } from './ai-card.js';
+import { manifest as dingTalkManifest, type DingTalkManifest } from './manifest.js';
 
 export interface DingTalkAdapterDeps {
   transport?: HttpTransport;
@@ -39,6 +40,9 @@ export interface DingTalkAdapterDeps {
 
 export class DingTalkAdapter implements ChannelAdapter {
   readonly id = 'dingtalk';
+
+  /** Upstream compatibility manifest (read structurally by `channels doctor`). */
+  readonly manifest: DingTalkManifest = dingTalkManifest;
 
   readonly capabilities: ChannelCapabilities = {
     text: true,

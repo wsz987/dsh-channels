@@ -1,89 +1,80 @@
 /**
- * Weixin channel adapter.
+ * Lark channel adapter.
  *
- * Maps the weixin platform (through the upstream driver) to the Channel
+ * Maps the Lark/Feishu platform (through the upstream driver) to the Channel
  * Contract. All network/lifecycle resources live behind the upstream driver
  * and are aborted via the adapter context signal. The adapter never touches
  * Harness Agent APIs.
+ *
+ * Auth is connection-state driven: the self-hosted gateway owns the platform
+ * credentials, so the adapter derives its auth state from the receive loop
+ * (connected → authenticated). `beginAuth`/`pollAuth` are intentionally not
+ * implemented in M3 — a real OAuth/code flow can slot in behind the same
+ * optional contract methods later.
  */
 import type {
-  AuthChallenge,
-  AuthStatePoll,
   ChannelAdapter,
   ChannelAdapterContext,
   ChannelCapabilities,
   ChannelHealth,
   ChannelTarget,
+  CreateReplyOptions,
   OutboundMessage,
+  ReplyHandle,
   SendResult,
 } from '@dsh/channel-core';
 import { ChannelError } from '@dsh/channel-core';
-import type { WeixinConfig } from './config.js';
+import type { LarkConfig } from './config.js';
 import { FetchTransport, type HttpTransport } from './transport.js';
-import { HttpWeixinUpstream, type WeixinUpstream } from './upstream.js';
+import { HttpLarkUpstream, type LarkUpstream } from './upstream.js';
 import { InboundProcessor } from './inbound.js';
 import { OutboundSender } from './outbound.js';
-import { WeixinAuthManager } from './auth.js';
-import { manifest as weixinManifest, type WeixinManifest } from './manifest.js';
+import { LarkCardReply } from './card.js';
 
-export interface WeixinAdapterDeps {
+export interface LarkAdapterDeps {
   transport?: HttpTransport;
   /** Injectable clock (tests). */
   now?: () => number;
 }
 
-export class WeixinAdapter implements ChannelAdapter {
-  readonly id = 'weixin';
-
-  /** Upstream compatibility manifest (read structurally by `channels doctor`). */
-  readonly manifest: WeixinManifest = weixinManifest;
+export class LarkAdapter implements ChannelAdapter {
+  readonly id = 'lark';
 
   readonly capabilities: ChannelCapabilities = {
     text: true,
     image: true,
-    file: false,
+    file: true,
     audio: true,
     video: false,
-    markdown: false,
-    cards: false,
+    markdown: true,
+    cards: true,
     reactions: false,
-    threads: false,
-    streaming: 'buffered',
+    threads: true,
+    streaming: 'edit',
   };
 
   private ctx?: ChannelAdapterContext;
-  private upstream: WeixinUpstream;
-  private auth!: WeixinAuthManager;
+  private upstream: LarkUpstream;
   private inbound!: InboundProcessor;
   private outbound!: OutboundSender;
   private started = false;
   private stopped = false;
   private receiveLoop?: Promise<void>;
   private connected = false;
+  /** Connection-state-driven auth; the gateway owns platform credentials. */
+  private authState: 'unknown' | 'authenticated' | 'failed' = 'unknown';
   private readonly now: () => number;
 
-  constructor(private readonly config: WeixinConfig, deps: WeixinAdapterDeps = {}) {
+  constructor(private readonly config: LarkConfig, deps: LarkAdapterDeps = {}) {
     this.now = deps.now ?? Date.now;
     const transport = deps.transport ?? new FetchTransport(config.baseUrl, { timeoutMs: config.timeoutMs });
-    this.upstream = new HttpWeixinUpstream({ transport, longPollTimeoutMs: config.longPollTimeoutMs });
+    this.upstream = new HttpLarkUpstream({ transport, longPollTimeoutMs: config.longPollTimeoutMs });
   }
 
   async start(ctx: ChannelAdapterContext): Promise<void> {
     if (this.started) return;
     this.ctx = ctx;
     this.stopped = false;
-    this.auth = new WeixinAuthManager({
-      upstream: this.upstream,
-      statePath: this.config.auth.statePath,
-      now: this.now,
-      onAuthChange: (state) => {
-        if (state.status === 'authenticated') {
-          this.emitAuth('authenticated');
-        } else if (state.status === 'expired') {
-          this.emitAuth('expired');
-        }
-      },
-    });
     this.inbound = new InboundProcessor({
       ctx,
       meta: { channel: this.id as never, accountId: this.config.accountId as never },
@@ -93,13 +84,11 @@ export class WeixinAdapter implements ChannelAdapter {
     });
     this.outbound = new OutboundSender(this.upstream, ctx.logger);
 
-    await this.auth.load();
-    this.emitAuth(this.auth.getState().status);
-    if (this.auth.isAuthenticated) {
-      this.connected = true;
-      this.emitConnection('connected');
-      this.startReceiveLoop();
-    }
+    this.connected = false;
+    this.authState = 'unknown';
+    this.emitAuth(this.authState);
+    this.emitConnection('connecting');
+    this.startReceiveLoop();
     this.started = true;
   }
 
@@ -117,50 +106,37 @@ export class WeixinAdapter implements ChannelAdapter {
 
   async send(target: ChannelTarget, message: OutboundMessage): Promise<SendResult> {
     if (!this.started || !this.outbound) {
-      throw new ChannelError('CHANNEL_NOT_STARTED', 'weixin adapter is not started');
+      throw new ChannelError('CHANNEL_NOT_STARTED', 'lark adapter is not started');
     }
     return this.outbound.send(target, message);
   }
 
-  async beginAuth(): Promise<AuthChallenge> {
-    if (!this.auth) {
-      throw new ChannelError('CHANNEL_NOT_STARTED', 'weixin adapter is not started');
+  async createReply(target: ChannelTarget, _options?: CreateReplyOptions): Promise<ReplyHandle> {
+    if (!this.started || !this.ctx) {
+      throw new ChannelError('CHANNEL_NOT_STARTED', 'lark adapter is not started');
     }
-    return this.auth.beginAuth();
-  }
-
-  async pollAuth(challenge: AuthChallenge): Promise<AuthStatePoll> {
-    if (!this.auth) {
-      throw new ChannelError('CHANNEL_NOT_STARTED', 'weixin adapter is not started');
-    }
-    const result = await this.auth.pollAuth(challenge);
-    if (result.state === 'authenticated') {
-      this.connected = true;
-      this.emitConnection('connected');
-      this.startReceiveLoop();
-    } else if (result.state === 'expired' || result.state === 'failed') {
-      this.connected = false;
-      this.emitConnection('disconnected');
-    }
-    return result;
+    return new LarkCardReply({
+      upstream: this.upstream,
+      target,
+      logger: this.ctx.logger,
+      createOnFirstDelta: this.config.card.createOnFirstDelta,
+      now: this.now,
+    });
   }
 
   async getHealth(): Promise<ChannelHealth> {
     if (!this.started) {
-      return { status: 'down', detail: 'weixin adapter is not started', authenticated: false };
+      return { status: 'down', detail: 'lark adapter is not started', authenticated: false };
     }
-    if (this.auth.isAuthenticated && this.connected) {
+    if (this.connected) {
       return { status: 'ok', detail: 'connected', connection: 'connected', authenticated: true };
     }
-    if (this.auth.isAuthenticated) {
-      return {
-        status: 'degraded',
-        detail: 'authenticated but receive loop down',
-        connection: 'disconnected',
-        authenticated: true,
-      };
-    }
-    return { status: 'down', detail: 'not authenticated', authenticated: false };
+    return {
+      status: 'degraded',
+      detail: 'receive loop down',
+      connection: 'disconnected',
+      authenticated: false,
+    };
   }
 
   /** Long-poll receive loop with exponential backoff on failure. */
@@ -175,17 +151,25 @@ export class WeixinAdapter implements ChannelAdapter {
       try {
         await this.upstream.receive(this.ctx!.signal, (raw) => {
           void this.inbound.handle(raw).catch((error) => {
-            this.ctx!.logger.error('[channel-weixin] inbound handling failed', error);
+            this.ctx!.logger.error('[channel-lark] inbound handling failed', error);
           });
         });
         attempt = 0;
+        if (!this.connected) {
+          // A successful long-poll proves the gateway is reachable; auth
+          // follows the connection state (the gateway owns credentials).
+          this.connected = true;
+          this.setAuth('authenticated');
+          this.emitConnection('connected');
+        }
       } catch (error) {
         if (this.stopped || this.aborted()) break;
         attempt += 1;
         this.connected = false;
         this.emitConnection('reconnecting');
         if (this.config.reconnect.enabled && attempt > this.config.reconnect.maxRetries) {
-          this.ctx!.logger.warn('[channel-weixin] reconnect budget exhausted');
+          this.ctx!.logger.warn('[channel-lark] reconnect budget exhausted');
+          this.setAuth('failed');
           this.emitConnection('disconnected');
           break;
         }
@@ -193,7 +177,7 @@ export class WeixinAdapter implements ChannelAdapter {
           this.config.reconnect.baseDelayMs * 2 ** Math.min(attempt - 1, 8),
           this.config.reconnect.maxDelayMs,
         );
-        this.ctx!.logger.warn(`[channel-weixin] receive loop error; retry in ${delay}ms`, error);
+        this.ctx!.logger.warn(`[channel-lark] receive loop error; retry in ${delay}ms`, error);
         await sleep(delay, this.ctx!.signal);
       }
     }
@@ -207,7 +191,13 @@ export class WeixinAdapter implements ChannelAdapter {
     return this.ctx?.signal.aborted ?? false;
   }
 
-  private emitAuth(state: 'unknown' | 'pending' | 'authenticated' | 'expired' | 'failed'): void {
+  private setAuth(state: 'unknown' | 'authenticated' | 'failed'): void {
+    if (this.authState === state) return;
+    this.authState = state;
+    this.emitAuth(state);
+  }
+
+  private emitAuth(state: 'unknown' | 'authenticated' | 'failed'): void {
     if (!this.ctx) return;
     void this.ctx
       .emit({

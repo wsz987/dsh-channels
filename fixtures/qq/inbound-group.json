@@ -1,0 +1,34 @@
+{
+  "name": "inbound group message",
+  "channel": "qq",
+  "upstreamVersion": "m3",
+  "payload": {
+    "type": "text",
+    "msgId": "msg_grp_1",
+    "senderId": "user_321",
+    "conversationId": "group_789",
+    "conversationType": "group",
+    "content": "hello group"
+  },
+  "expected": {
+    "type": "message.received",
+    "channel": "qq",
+    "accountId": "main",
+    "conversation": {
+      "id": "group_789",
+      "type": "group"
+    },
+    "sender": {
+      "id": "user_321"
+    },
+    "message": {
+      "id": "msg_grp_1",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello group"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "interaction callback (card button press)",
+  "channel": "lark",
+  "upstreamVersion": "m3",
+  "payload": {
+    "type": "interaction",
+    "eventId": "evt_int_1",
+    "senderId": "ou_123",
+    "conversationId": "oc_456",
+    "threadId": "om_789",
+    "interactionId": "card_btn_1",
+    "action": "button_click",
+    "value": "approve"
+  },
+  "expected": {
+    "type": "interaction.received",
+    "channel": "lark",
+    "accountId": "main",
+    "conversation": {
+      "id": "oc_456",
+      "type": "group",
+      "threadId": "om_789"
+    },
+    "sender": {
+      "id": "ou_123"
+    },
+    "interactionId": "card_btn_1",
+    "action": "button_click",
+    "value": "approve"
+  }
+}

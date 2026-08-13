@@ -1,0 +1,35 @@
+{
+  "name": "inbound text inside a thread",
+  "channel": "lark",
+  "upstreamVersion": "m3",
+  "payload": {
+    "type": "text",
+    "msgId": "msg_thread_1",
+    "senderId": "ou_123",
+    "conversationId": "oc_456",
+    "threadId": "om_789",
+    "content": "threaded hello"
+  },
+  "expected": {
+    "type": "message.received",
+    "channel": "lark",
+    "accountId": "main",
+    "conversation": {
+      "id": "oc_456",
+      "type": "group",
+      "threadId": "om_789"
+    },
+    "sender": {
+      "id": "ou_123"
+    },
+    "message": {
+      "id": "msg_thread_1",
+      "content": [
+        {
+          "type": "text",
+          "text": "threaded hello"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "name": "duplicate message (webhook retry)",
+  "channel": "lark",
+  "upstreamVersion": "m3",
+  "payload": {
+    "type": "text",
+    "msgId": "msg_dup_1",
+    "senderId": "ou_123",
+    "conversationId": "oc_456",
+    "content": "hello harness"
+  },
+  "expected": {
+    "type": "message.received",
+    "channel": "lark",
+    "accountId": "main",
+    "conversation": {
+      "id": "oc_456",
+      "type": "group"
+    },
+    "sender": {
+      "id": "ou_123"
+    },
+    "message": {
+      "id": "msg_dup_1",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello harness"
+        }
+      ]
+    }
+  }
+}
