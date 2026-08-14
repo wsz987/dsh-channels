@@ -2,10 +2,10 @@
  * Weixin LIVE real-account E2E gate (R3 / WX4 "Text E2E").
  *
  * This suite drives the REAL Tencent Weixin iLink protocol through the public
- * exports of @dsh/channel-weixin (src/index.ts) — a genuine QR login, the
+ * exports of @wsz987/channel-weixin (src/index.ts) — a genuine QR login, the
  * getUpdates long-poll, a real inbound text message, a real sendmessage reply
  * and durable restart/unload reconciliation. It is NOT a unit test and it is
- * NEVER executed by ordinary CI or by `pnpm --filter @dsh/channel-weixin test`.
+ * NEVER executed by ordinary CI or by `pnpm --filter @wsz987/channel-weixin test`.
  *
  * HOW TO RUN (manual, requires a real Weixin account + a phone with WeChat):
  *
@@ -16,7 +16,7 @@
  *   export DSH_WEIXIN_LIVE=1
  *
  *   # 3. run ONLY this file:
- *   pnpm --filter @dsh/channel-weixin vitest run test/live/weixin-live.test.ts
+ *   pnpm --filter @wsz987/channel-weixin vitest run test/live/weixin-live.test.ts
  *
  * What you must do by hand while the suite runs:
  *   - E2E-1: the test prints the QR (a data URI in challenge.qrUrl or the
@@ -47,7 +47,7 @@ import {
   type ChannelEvent,
   type ChannelTarget,
   type MessageReceived,
-} from '@dsh/channel-core';
+} from '@wsz987/channel-core';
 import {
   AccountCredentialStore,
   ContextTokenStore,

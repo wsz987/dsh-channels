@@ -27,8 +27,8 @@ import type {
   OutboundMessage,
   SenderId,
   ThreadId,
-} from '@dsh/channel-core';
-import { textParts } from '@dsh/channel-core';
+} from '@wsz987/channel-core';
+import { textParts } from '@wsz987/channel-core';
 
 export interface LarkInboundMeta {
   channel: ChannelId;

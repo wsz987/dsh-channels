@@ -19,7 +19,7 @@ import type {
   ChannelTarget,
   OutboundMessage,
   ReplyHandle,
-} from '@dsh/channel-core';
+} from '@wsz987/channel-core';
 import type { LarkUpstream } from './upstream.js';
 
 export type LarkCardStatus = 'idle' | 'active' | 'finished' | 'failed';

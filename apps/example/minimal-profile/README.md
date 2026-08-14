@@ -2,12 +2,12 @@
 
 Example DSH profile using the official v1.1 **bundle / profile / patch** model
 (v1.1 §40–§41, §52). It shows a user profile that consumes the
-**@dsh/channels** bundle and then overrides it to run a QQ-only channel setup.
+**@wsz987/dsh-channels** bundle and then overrides it to run a QQ-only channel setup.
 
 ## Files
 
 - `package.json` — the profile manifest: declares the bundles to install via
-  the `dsh.profile.bundles` list (`@deepseek-ai/dsh-base`, `@dsh/channels`).
+  the `dsh.profile.bundles` list (`@deepseek-ai/dsh-base`, `@wsz987/dsh-channels`).
 - `cordis.patch.yml` — the **user profile patch** that overrides rows inserted
   by the bundle: disables weixin / dingtalk / lark and overrides `channels-qq`
   with its full QQ config.
@@ -17,7 +17,7 @@ Example DSH profile using the official v1.1 **bundle / profile / patch** model
 ```bash
 # 1. add the bundle to the profile (DSH installs the bundle into
 #    dsh.profile.bundles and applies the bundle's cordis.patch.yml)
-dsh plugin --profile minimal add @dsh/channels
+dsh plugin --profile minimal add @wsz987/dsh-channels
 
 # 2. inspect the merged config
 dsh --profile minimal --dump-config

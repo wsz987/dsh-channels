@@ -2,8 +2,8 @@
  * Outbound tests (fully offline): DSH ChannelTarget/message → SDK ReplyTarget.
  */
 import { describe, expect, it } from 'vitest';
-import { ChannelSendError } from '@dsh/channel-core';
-import type { ChannelTarget } from '@dsh/channel-core';
+import { ChannelSendError } from '@wsz987/channel-core';
+import type { ChannelTarget } from '@wsz987/channel-core';
 import { MediaFileType } from '@tencent-connect/qqbot-nodejs';
 import { FakeQQSdkClient, decodeDataUri, mediaOpts } from '../src/sdk-client.ts';
 import { OutboundSender, toReplyTarget } from '../src/outbound.ts';

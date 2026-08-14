@@ -7,8 +7,8 @@
  * structurally readable manifest without being started.
  */
 import { describe, expect, it } from 'vitest';
-import { FakeChannelAdapter } from '@dsh/channel-testkit';
-import type { ChannelHealth } from '@dsh/channel-core';
+import { FakeChannelAdapter } from '@wsz987/channel-testkit';
+import type { ChannelHealth } from '@wsz987/channel-core';
 import {
   diagnose,
   formatDoctor,

@@ -1,11 +1,11 @@
 /**
- * @dsh/channel-weixin — direct Tencent Weixin iLink channel adapter.
+ * @wsz987/channel-weixin — direct Tencent Weixin iLink channel adapter.
  *
  * Replaces the old self-hosted HTTP gateway client with a direct iLink client
  * (QR login, getUpdates long-poll, sendmessage). Streaming is `buffered`.
  */
 import { type Context } from '@deepseek-ai/cordis';
-import { mountChannelAdapter } from '@dsh/channel-core';
+import { mountChannelAdapter } from '@wsz987/channel-core';
 import type { WeixinConfig } from './config.js';
 import { Config } from './config.js';
 import { WeixinAdapter, type WeixinAdapterDeps } from './adapter.js';
@@ -14,7 +14,7 @@ export const name = 'channel-weixin';
 export const inject: string[] = ['channels'];
 
 // Adapter mounting uses the shared transactional `mountChannelAdapter`
-// from @dsh/channel-core (doc section 5): register -> start; on start error
+// from @wsz987/channel-core (doc section 5): register -> start; on start error
 // abort + best-effort stop + unregister + rethrow; on unload abort + stop + unregister.
 
 export { Config };

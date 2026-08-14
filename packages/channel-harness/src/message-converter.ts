@@ -22,7 +22,7 @@ import {
   type UserMessage,
 } from '@deepseek-ai/dsh-llm';
 import type { ImageAttachmentRef, ImageMediaType, SaveImageAttachment } from '@deepseek-ai/dsh-attachment';
-import type { ImagePart, MessagePart, MessageReceived } from '@dsh/channel-core';
+import type { ImagePart, MessagePart, MessageReceived } from '@wsz987/channel-core';
 
 /** Type-level alias: the bridge always produces Harness user messages. */
 export type UserMessageLike = UserMessage;

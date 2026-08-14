@@ -1,4 +1,4 @@
-# DSH Bundle patch — @dsh/channel-<channel>
+# DSH Bundle patch — @wsz987/channel-<channel>
 #
 # Inserts the <ChannelName> adapter into a DeepSeek Harness profile.
 # The adapter can be disabled through its own plugin config
@@ -9,6 +9,6 @@
 
 - insert:
     - id: channels-<channel>
-      name: '@dsh/channel-<channel>'
+      name: '@wsz987/channel-<channel>'
       inject:
         - channels

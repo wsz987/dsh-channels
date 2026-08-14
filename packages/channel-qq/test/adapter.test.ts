@@ -8,12 +8,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import { Context } from '@deepseek-ai/cordis';
-import { ChannelService, ChannelError } from '@dsh/channel-core';
-import type { ChannelTarget } from '@dsh/channel-core';
+import { ChannelService, ChannelError } from '@wsz987/channel-core';
+import type { ChannelTarget } from '@wsz987/channel-core';
 import {
   runChannelAdapterContract,
   createTestContext,
-} from '@dsh/channel-testkit';
+} from '@wsz987/channel-testkit';
 import { Config, QQAdapter, apply, inject } from '../src/index.ts';
 import { FakeQQSdkClient } from '../src/sdk-client.ts';
 import type { QQConfig } from '../src/config.ts';

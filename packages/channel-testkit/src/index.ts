@@ -1,8 +1,8 @@
 /**
- * @dsh/channel-testkit — contract tests, fake adapter/upstream/harness,
+ * @wsz987/channel-testkit — contract tests, fake adapter/upstream/harness,
  * fixture loader and E2E helpers for channel adapters.
  *
- * Depends only on `@dsh/channel-core` and cordis. Never imports
+ * Depends only on `@wsz987/channel-core` and cordis. Never imports
  * channel-harness or any Harness internals; the Harness side is only
  * exercised through the minimal `HarnessPort` defined here.
  */

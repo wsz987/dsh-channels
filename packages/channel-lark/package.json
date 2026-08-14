@@ -1,5 +1,5 @@
 {
-  "name": "@dsh/channel-lark",
+  "name": "@wsz987/channel-lark",
   "version": "0.6.3",
   "repository": {
     "type": "git",
@@ -31,11 +31,11 @@
   "dependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",
-    "@dsh/channel-core": "workspace:*",
+    "@wsz987/channel-core": "workspace:*",
     "@larksuiteoapi/node-sdk": "1.73.0"
   },
   "devDependencies": {
-    "@dsh/channel-testkit": "workspace:*",
+    "@wsz987/channel-testkit": "workspace:*",
     "rimraf": "^6.0.0"
   },
   "license": "MIT"

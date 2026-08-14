@@ -5,7 +5,7 @@
     "profile": {
       "bundles": [
         "@deepseek-ai/dsh-base",
-        "@dsh/channels"
+        "@wsz987/dsh-channels"
       ]
     }
   }

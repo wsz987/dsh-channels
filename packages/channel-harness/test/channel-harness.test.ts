@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Context } from '@deepseek-ai/cordis';
 import { AgentRegistry } from '@deepseek-ai/dsh-agent';
-import { ChannelService, type ChannelEvent, type MessageReceived } from '@dsh/channel-core';
+import { ChannelService, type ChannelEvent, type MessageReceived } from '@wsz987/channel-core';
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
 import {
   AgentManager,

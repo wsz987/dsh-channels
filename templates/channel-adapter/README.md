@@ -3,7 +3,7 @@
 A minimal, working scaffold for a third-party DeepSeek Harness channel adapter.
 It mirrors the structure of the official adapters (`packages/channel-qq` is a
 good reference) and builds on the stable Channel Contract in
-`@dsh/channel-core`.
+`@wsz987/channel-core`.
 
 See **[docs/adapter-authoring.md](../../docs/adapter-authoring.md)** for the full
 authoring guide (contract, fixtures, compatibility manifest, verification,
@@ -36,12 +36,12 @@ maturity levels).
 
    ```json
    "dependencies": {
-     "@dsh/channel-core": "^0.3.0",
+     "@wsz987/channel-core": "^0.3.0",
      "@deepseek-ai/cordis": "^4.0.1",
      "@deepseek-ai/schemastery": "^3.18.1"
    },
    "devDependencies": {
-     "@dsh/channel-testkit": "^0.2.0",
+     "@wsz987/channel-testkit": "^0.2.0",
      "rimraf": "^6.0.0"
    }
    ```
@@ -67,7 +67,7 @@ maturity levels).
    pnpm test
    ```
 
-6. Verify the adapter (requires `@dsh/channel-verify`):
+6. Verify the adapter (requires `@wsz987/channel-verify`):
 
    ```bash
    pnpm verify ./packages/channel-telegram --test

@@ -8,7 +8,7 @@
  * dispatches inbound payloads to registered handlers and can be told to fail
  * its next call.
  */
-import { toChannelError } from '@dsh/channel-core';
+import { toChannelError } from '@wsz987/channel-core';
 
 /** Handler invoked when the "platform" delivers an inbound payload. */
 export type FakeUpstreamHandler = (payload: unknown) => void | Promise<void>;

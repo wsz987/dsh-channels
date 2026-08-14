@@ -1,109 +1,187 @@
-**M1 — Weixin Adapter ✅（直接 Tencent iLink 客户端）**
+# DeepSeek Harness Channels（dsh-channels）
+
+[![CI](https://github.com/wsz987/dsh-channels/actions/workflows/ci.yml/badge.svg)](https://github.com/wsz987/dsh-channels/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](package.json)
+[![pnpm](https://img.shields.io/badge/pnpm-9.15.3-orange.svg)](package.json)
+
+> 面向 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的渠道插件实现
+> （社区项目，非 DeepSeek 官方出品）：接入微信 / QQ / 钉钉 / 飞书四个即时通讯平台，
+> 并提供一套面向第三方渠道的公共接入规范（Channel Contract）。
+>
+> 一句话：**DSH Bundle + Channel Core + Adapters** —— 在 Harness 的 Cordis 插件体系里，
+> 用统一的 `ctx.channels` API 收发消息，按渠道接入各平台官方 SDK / 协议。
+
+## 简介
+
+`dsh-channels` 是基于 DeepSeek Harness 插件体系（Cordis）实现的渠道插件集。它把四个主流
+即时通讯平台接入 Harness 的 Agent 运行时，同时把「渠道适配器」抽象成一个可发布的公共契约，
+让任何第三方渠道（如 Telegram、Slack、Discord……）都能在**不改动 core / harness 一行代码**
+的前提下接入。
+
+- **四个内置渠道**：微信（Weixin）、QQ、钉钉（DingTalk）、飞书（Lark）——聚合为 `@wsz987/dsh-channels` DSH Bundle，一个 profile 配置即用。
+- **公共 Channel SDK**：`defineChannelAdapter` + 契约测试套件 + 适配器脚手架 + 验证 CLI，第三方接入有章可循。
+- **兼容性治理**：每个适配器携带上游 manifest（测试版本 / 版本范围 / 接入策略），配合 Renovate 与 CI 闸门，把「上游升级 → 回归验证 → 版本声明」做成闭环。
+
+## 特性
+
+- **统一消息模型**：所有渠道收敛到一套跨渠道 Contract（inbound 纯函数 mapper、outbound sender、reply 只消费 Harness 定义的 `session/event`），Session 按 `channel:account:conversation[:thread]` 隔离。
+- **流式回复**：QQ C2C 原生流式、钉钉 AI Card 流式（chunk updates + throttle）、飞书可编辑卡片流式、群聊 buffered 策略。
+- **平台官方 SDK 直连**：QQ / 钉钉 / 飞书走各平台官方 SDK，微信直连腾讯 iLink 客户端（QR 登录状态机 + getUpdates 长轮询），无自托管中间层。
+- **纯插件架构**：`channel-core` 不依赖任何具体平台，`channel-harness` 不 import 任何平台 SDK；网络/长生命周期资源统一走 `ctx.effect()`，配置全部走 Schemastery。
+- **开箱即用的发布产物**：所有包预构建 `lib/` + exports 子路径，消费者安装后无需编译 TypeScript。
+- **契约测试 + 治理工具链**：`runChannelAdapterContract`、fixtures 全量 sweep、`channels doctor` 上游兼容性诊断、`pnpm verify` 第三方适配器验证。
+
+## 支持的渠道
+
+| 渠道 | 适配器包 | 接入方式 | 上游 SDK / 协议 | 上游 GitHub | npm | 状态 |
+| --- | --- | --- | --- | --- | --- | --- |
+| **微信** | `@wsz987/channel-weixin` | 直连腾讯 iLink 客户端（`ilinkai.weixin.qq.com`）：QR 登录状态机 + getUpdates 长轮询 + sendmessage，无自托管中间层 | [Tencent/openclaw-weixin](https://github.com/Tencent/openclaw-weixin)（iLink 协议参考） | [GitHub](https://github.com/Tencent/openclaw-weixin) | — | ⚠️ Experimental · Text-only |
+| **QQ** | `@wsz987/channel-qq` | 腾讯官方 SDK：C2C 原生流式 + 群聊 buffered + 私聊/群聊 | `@tencent-connect/qqbot-nodejs@1.0.4` | [tencent-connect/bot-node-sdk](https://github.com/tencent-connect/bot-node-sdk) | [npm](https://www.npmjs.com/package/@tencent-connect/qqbot-nodejs) | ✅ Tested（离线） |
+| **钉钉** | `@wsz987/channel-dingtalk` | 官方 stream 模式 SDK 接入，AI Card 流式（chunk updates / throttle） | `dingtalk-stream@2.1.5` | [open-dingtalk/dingtalk-stream-sdk-nodejs](https://github.com/open-dingtalk/dingtalk-stream-sdk-nodejs) | [npm](https://www.npmjs.com/package/dingtalk-stream) | ✅ Tested（离线） |
+| **飞书 / Lark** | `@wsz987/channel-lark` | 官方 Node SDK：WebSocket 长连接事件 + HTTP 出站，threads → SessionBinding、可编辑卡片流式 | `@larksuiteoapi/node-sdk@1.73.0` | [larksuite/node-sdk](https://github.com/larksuite/node-sdk) | [npm](https://www.npmjs.com/package/@larksuiteoapi/node-sdk) | ✅ Tested（离线） |
+
+> **说明**
+>
+> - **微信**：直接调用官方 iLink 端点；协议字段（`message_id` / `context_token` / QR 登录状态机等）对齐
+>   [Tencent/openclaw-weixin](https://github.com/Tencent/openclaw-weixin)（MIT），见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+>   目前为 **Text-only**（WX5 图片/语音/文件/视频 CDN 路径为类型化脚手架，未接入 active 路径），live 平台验证尚未执行。
+> - **QQ**：AppSecret 通过 `ctx.credentials` 接入，config 仅存 `appSecretRef` 引用（不落盘明文）；`channel-harness` 仅注入
+>   `channels` + `agents`，`sessionPersistence` 为 use-site 可选服务。
+> - **状态含义**：`Tested（离线）` = 契约测试 + fixtures + 离线 SDK 测试全绿；live 平台 E2E 需真实应用凭据（AppKey/AppSecret/ClientSecret），见「已知限制」。
+
+## 规划中的渠道（Roadmap）
+
+目前**正式支持**的渠道为上面四个；以下渠道在规划 / 孵化中：
+
+- **Telegram**：`@wsz987/channel-telegram` 已作为**扩展性证明**存在——仅依赖公开 Channel Contract，
+  零修改 core / harness / 内置四渠道，离线 `pnpm verify --test` 通过；**尚未作为正式支持渠道接入**
+  （不进入 `@wsz987/dsh-channels` bundle）。
+- **Slack / Discord 等**：欢迎按「第三方渠道接入」规范贡献（见 `docs/adapter-authoring.md`）。
+
+## 架构与包结构
 
 ```text
-直接 Tencent Weixin iLink 客户端（https://ilinkai.weixin.qq.com）
-ILinkClient（getupdates long-poll / sendmessage / getconfig / sendtyping / notify）
-QR 登录状态机（wait/scaned/confirmed/redirect/verify code/binded）
-Credential 持久化（SecretStore token + ChannelStorage meta）
-SyncCursor + ContextToken + Dedup（message_id 优先）
-纯函数 Inbound Mapper（TEXT + IMAGE/VOICE/FILE/VIDEO CDN 脚手架）
-OutboundSender（真实 sendmessage payload：client_id/context_token/run_id）
-TypingController（best effort）+ Notify 生命周期
-Media/CDN 脚手架（WX5，未接入 active 路径）
-Contract Tests 通过（runChannelAdapterContract）
-fixtures/weixin/（qr-* / getupdates-* / sendmessage / typing / stale-token / protocol-error / inbound-text / duplicate）
+apps/example/minimal-profile       ← 用户 DSH profile（bundle 安装 + 配置覆盖）
+        │  dsh.profile.bundles + cordis.patch.yml
+        ▼
+@wsz987/dsh-channels                      ← DSH Bundle（cordis.patch.yml 注入 6 个插件）
+        │
+        ├── channel-weixin ────────┐
+        ├── channel-qq ────────────┤
+        ├── channel-dingtalk ──────┼──→ channel-core（Contract + ctx.channels）
+        ├── channel-lark ──────────┘
+        └── channel-harness（SessionBinding / AgentManager / ReplyRouter）
 ```
-
-> 通过直连 Tencent Weixin iLink 客户端接入（无自托管中间层：QR 登录、getUpdates 长轮询、sendmessage 均直接调用官方 iLink 端点）。
-> 协议字段对齐 Tencent/openclaw-weixin iLink 实现（见 THIRD_PARTY_NOTICES.md）。
-
-**M2 — DingTalk Adapter ✅**
-
-```text
-DingTalk Driver / Adapter
-AI Card 流式（chunk updates / throttle，ReplyRouter 泛型化）
-Reconnect 指数退避 + Inbound dedup
-配置（Schemastery）+ 上游兼容性 manifest
-fixtures/dingtalk/
-```
-
-**M3 — 四官方渠道统一 ✅**
-
-```text
-QQ（Tencent 官方 SDK @tencent-connect/qqbot-nodejs：C2C native 流式 + 群 buffered + dm/group）与 Lark（threads → SessionBinding、可编辑卡片）
-统一 health / doctor / routing / auth
-channels doctor（Task 13.2，上游兼容性诊断）
-fixtures/qq/ + fixtures/lark/
-```
-
-> QQ Runtime: Tencent SDK → Channel Adapter → Harness。No OpenClaw runtime dependency. No custom QQ gateway required. QQ AppSecret 通过 `ctx.credentials` 接入（config 仅存 `appSecretRef` 引用，v1.1 QQ-R5）；`channel-harness` 仅 inject `channels` + `agents`，`sessionPersistence` 为 use-site 可选服务（不存在时不调用 resume）。
-
-**M4 — 兼容性治理 ✅**
-
-```text
-checkAdapterCompatibility 聚合检查（Task 13.1–13.3）
-manifest 同步校验：adapterVersion ↔ package.json、upstream 字段（check:manifests）
-fixtures 全量 sweep（check:fixtures）
-四渠道 doctor 表面（pnpm doctor）
-Renovate + CI 升级闸门（check:upstream）
-```
-
-**M5 — 公共 Channel SDK ✅**
-
-```text
-defineChannelAdapter（channel-core 公开辅助函数，Task 17.1）
-templates/channel-adapter/ 第三方适配器脚手架（Task 17.2）
-channel-verify CLI（Task 17.3：package/manifest/capabilities/fixtures/credentials/contract 检查）
-docs/adapter-authoring.md 第三方开发指南
-Telegram 扩展性证明（Task 18：零修改 core/harness/官方四渠道接入）
-```
-
-**Phase 16 — Release Pipeline ✅**（当前，本变更）
-
-```text
-Changesets 独立版本 + 发布流程（release.yml，配置 NPM_TOKEN 后自动 version + publish）
-预构建产物（lib/ + exports，发布无需消费者编译 TS）
-DSH Bundle 校验（check:bundle：cordis.patch.yml → 插件 shape / exports 子路径 / 渠道 enabled 配置）
-apps/example/minimal-profile 示例 profile
-发布元数据（repository / publishConfig.access: public）
-docs/release.md 发布指南
-```
-
-## 结构
 
 | 包 | 职责 |
 | --- | --- |
-| `@dsh/channel-core` | 稳定跨渠道 Contract + `ChannelService`（`ctx.channels`，Cordis Service） |
-| `@dsh/channel-harness` | **唯一** Harness API boundary：SessionBinding、AgentManager（AgentHandle ownership）、`session/event` → ReplyRouter |
-| `@dsh/channel-testkit` | `runChannelAdapterContract`、FakeAdapter/FakeUpstream/FakeHarness、fixture loader、E2E |
-| `@dsh/channel-compat` | 上游兼容性治理（manifest 同步校验 / fixture sweep / doctor / checkAdapterCompatibility） |
-| `@dsh/channel-verify` | 第三方适配器验证 CLI（`pnpm verify <dir> [--test]`，Task 17.3） |
-| `@dsh/channel-weixin/qq/dingtalk/lark` | 四个官方渠道 adapter（M1–M3 实现，M4 纳入治理） |
-| `@dsh/channel-telegram` | Telegram 扩展性证明（Task 18，仅依赖公开 Contract，不入 bundle） |
-| `@dsh/channels` | DSH Bundle（`cordis.patch.yml`） |
-| `apps/fake-channel` | M0 E2E 演示 |
-| `apps/example/minimal-profile` | 示例 DSH profile（Phase 16，clean-profile 安装演示） |
+| `@wsz987/channel-core` | 稳定跨渠道 Contract + `ChannelService`（`ctx.channels`，Cordis Service），零平台依赖 |
+| `@wsz987/channel-harness` | **唯一** Harness API 边界：SessionBinding、AgentManager（AgentHandle ownership）、`session/event` → ReplyRouter |
+| `@wsz987/channel-testkit` | `runChannelAdapterContract`、FakeAdapter / FakeUpstream / FakeHarness、fixture 加载、E2E |
+| `@wsz987/channel-compat` | 上游兼容性治理：manifest 同步校验 / fixture sweep / `channels doctor` / checkAdapterCompatibility |
+| `@wsz987/channel-verify` | 第三方适配器验证 CLI（`pnpm verify <dir> [--test]`） |
+| `@wsz987/channel-weixin` · `channel-qq` · `channel-dingtalk` · `channel-lark` | 四个内置渠道适配器（见上表） |
+| `@wsz987/channel-telegram` | Telegram 扩展性证明 / Roadmap 候选：仅依赖公开 Contract 的第三方适配器范式（未入 bundle，未正式支持） |
+| `@wsz987/dsh-channels` | DSH Bundle（`cordis.patch.yml`），聚合内置四渠道 |
+| `apps/fake-channel` | E2E 演示应用 |
+| `apps/example/minimal-profile` | 示例 DSH profile（bundle 安装 + QQ-only 覆盖） |
 
 ## 快速开始
 
+环境要求：**Node.js ≥ 22**、**pnpm 9.15.3**（仓库使用 pnpm workspace + turbo）。
+
 ```bash
 pnpm install
-pnpm build
+pnpm build       # turbo 构建所有包（lib/）
 pnpm typecheck
-pnpm test
+pnpm test        # 契约测试 + 各渠道离线测试 + E2E
 ```
 
-## 架构红线（已实现部分）
+## 在 DSH profile 中使用
 
-- `channel-core` 不依赖任何具体平台、不 import Harness Agent API
-- `channel-harness` 不 import 任何平台 SDK（dingtalk-stream 等）
-- `ctx.agents.create/resume` 返回的 `AgentHandle` 由 `AgentManager` 持有，卸载时 dispose（红线 8）
-- Session 按 `channel:account:conversation[:thread]` 隔离（红线 7）
-- 回复只消费官方 `session/event`（assistant/chunk、assistant/message、turn/end）
-- 网络/长生命周期资源统一走 `ctx.effect()`
-- 配置使用 Schemastery，部署参数全部可配置
+本仓库发布的是 **DSH bundle**（不是 dsh CLI）。安装 `@wsz987/dsh-channels` 后，六个插件
+（`channels-service`、`channels-harness`、`channels-weixin`、`channels-qq`、
+`channels-dingtalk`、`channels-lark`）会通过 `cordis.patch.yml` 自动注入 profile：
 
-## 上游版本快照（M0 已核验）
+```bash
+# 1. 创建干净 profile 并安装 bundle
+dsh profile create my-profile
+dsh plugin --profile my-profile add @wsz987/dsh-channels
+
+# 2. 查看合并后的配置
+dsh --profile my-profile --dump-config
+
+# 3. 启动 profile
+dsh --profile my-profile
+```
+
+- 参考 profile：`apps/example/minimal-profile/`（含 `cordis.patch.yml` 的 QQ-only 覆盖示例）。
+- profile patch **整体替换**目标插件的 config（非深合并）。
+- 完整发布验证流程见 `docs/release.md`「DSH Bundle Validation」。
+
+## 第三方渠道接入（Channel SDK）
+
+第三方渠道只依赖 `@wsz987/channel-core` 公开 API，无需修改 core / harness / 内置渠道：
+
+```ts
+import { defineChannelAdapter } from '@wsz987/channel-core';
+
+export default defineChannelAdapter({
+  id: 'my-channel',
+  capabilities: { text: true, streaming: 'buffered' /* ... */ },
+  async start(ctx) { /* ... */ },
+  async stop() { /* ... */ },
+  async send(target, message) { /* ... */ },
+});
+```
+
+- **脚手架**：`templates/channel-adapter/`（package.json / cordis.patch.yml / src / test / fixtures）。
+- **验证**：`pnpm verify <dir> [--test]` —— package / adapter surface / manifest / capabilities / fixtures / credentials / contract 七项检查，离线可用。
+- **指南**：`docs/adapter-authoring.md`（含 Experimental → Verified 成熟度标准）。
+- **范式**：`@wsz987/channel-telegram` 即第三方接入的完整示例——仅依赖公开 Contract，零修改核心代码。
+
+## 兼容性治理
+
+四个内置渠道的 upstream manifest（`packages/channel-*/src/manifest.ts`）与 fixtures 由 `@wsz987/channel-compat` 统一治理：
+
+```bash
+pnpm check:fixtures     # fixtures 全量 sweep：解析 + validateFixture + channel/upstreamVersion 校验
+pnpm check:manifests    # manifest 同步校验：adapterVersion ↔ package.json、upstream 字段
+pnpm doctor             # 四渠道 doctor 表面（diagnose + formatDoctor，CI 直接打印）
+pnpm check:upstream     # Renovate 升级闸门：对比上游最新版本与 manifest.testedVersion
+pnpm check:bundle       # DSH Bundle 校验：cordis.patch.yml → 插件 shape / exports 子路径 / enabled 配置
+```
+
+升级流程：Renovate 检测到上游新版本 → 开 PR → CI（build + typecheck + contract tests +
+governance 全绿）→ 人工核验后 bump `manifest.upstream.testedVersion`（必要时收窄 `versionRange`）。
+`checkAdapterCompatibility(adapter, { targetVersion, allowUnsupported })` 是治理层单一入口。
+
+## 开发与 CI
+
+```bash
+pnpm build && pnpm typecheck && pnpm test   # 本地全量校验
+pnpm verify ./packages/channel-telegram --test   # 验证第三方适配器
+pnpm changeset            # 记录变更（发布用）
+```
+
+GitHub Actions 工作流（`.github/workflows/`）：
+
+| 工作流 | 触发 | 作用 |
+| --- | --- | --- |
+| `ci.yml` | PR / push main / `v*` tag / manual | 离线全量闸门：build + typecheck + test + governance + verify |
+| `upgrade.yml` | 每周一 + manual | 上游漂移检查（`check:upstream`）+ governance |
+| `live-weixin.yml` | manual only | 微信 live 平台 E2E；配置 `WEIXIN_LIVE_ENABLED` 前保持 inert |
+| `release.yml` | `v*` tag / manual | Changesets 发布到 npm（需配置 `NPM_TOKEN`） |
+
+## 发布
+
+- **版本策略**：Changesets 独立版本（无 fixed / linked 组），`apps/*` 私有不发布。
+- **发布流程**：`pnpm changeset` → `pnpm changeset version` → `git tag vX.Y.Z && git push origin vX.Y.Z` → `release.yml` 执行 `changeset publish`。
+- **发布产物**：预构建 `lib/` + `exports` 子路径，消费者无需编译 TS；`files` 字段限制 tarball 内容。
+- 详见 `docs/release.md`。
+
+## 上游依赖与版本策略
 
 ```text
 @deepseek-ai/cordis       ^4.0.1
@@ -111,73 +189,53 @@ pnpm test
 @deepseek-ai/dsh-agent    ^0.1.0-rc.6
 @deepseek-ai/dsh-session  ^0.1.0-rc.6
 @deepseek-ai/dsh-llm      ^0.1.0-rc.6
+@deepseek-ai/dsh-credentials ^0.1.0-rc.6
 ```
 
-> 注意：`@deepseek-ai/dsh-session` / `dsh-brand` / `dsh-llm` 等需固定 `0.1.0-rc.6`（npm `latest` 标签是 `0.0.1-rc.1`，会破坏 rc.6 族 peer 一致性）。
+> ⚠️ **注意**：`@deepseek-ai/dsh-session` / `dsh-brand` / `dsh-llm` / `dsh-credentials` 需固定
+> `0.1.0-rc.6` 族（npm `latest` 标签是 `0.0.1-rc.1`，会破坏 rc.6 peer 一致性）；`renovate.json` 通过
+> `allowedVersions` 收窄。上游源码仓库：https://github.com/deepseek-ai/deepseek-harness
 
-## M4 兼容性治理
+## 已知限制（Known gaps）
 
-四个官方渠道的 upstream manifest（`packages/channel-*/src/manifest.ts`）与 fixtures 由 `channel-compat` 统一治理，四个入口：
+- 框架与离线实现基本完成，但**尚未在真实 Harness runtime 上做过端到端回归**（仅有 pinned-rc.6 契约回归）。
+- 四个内置渠道的 **live-platform E2E 需真实凭据**（AppKey / AppSecret / ClientSecret / 微信扫码），尚未执行。
+- 微信渠道为 **Text-only**：WX5 媒体路径（图片/语音/文件/视频 CDN）为类型化脚手架，未接入 active 路径。
+- **Telegram 等渠道尚未正式支持**：`@wsz987/channel-telegram` 仅为扩展性证明（离线 verify 通过，未入 bundle），见「规划中的渠道」。
+- Release Pipeline 已实现，但 GitHub Actions **尚无成功运行记录**（当前仅 `v*` tag 触发，且需配置 `NPM_TOKEN`）。
 
-```bash
-pnpm check:fixtures     # fixtures 全量 sweep：解析 + validateFixture + channel/upstreamVersion 校验
-pnpm check:manifests    # manifest 同步校验：validateManifest / status=tested / adapterVersion ↔ package.json
-pnpm doctor             # 四渠道 doctor 表面（diagnose + formatDoctor，CI 直接打印）
-pnpm check:upstream     # Renovate 升级闸门：对比上游最新版本与 manifest.testedVersion / versionRange
-```
+## 文档
 
-> 以上根命令委托给 `@dsh/channel-compat` 的对应脚本；依赖升级 PR 的 CI 会执行全部四道检查。
+| 文档 | 内容 |
+| --- | --- |
+| [docs/deepseek-harness-channels-architecture.md](docs/deepseek-harness-channels-architecture.md) | 架构设计（Contract / 红线 / Session 模型） |
+| [docs/adapter-authoring.md](docs/adapter-authoring.md) | 第三方渠道接入指南 |
+| [docs/release.md](docs/release.md) | 发布流程 / Changesets / Bundle 验证 / Release DoD |
+| [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | 第三方版权与协议来源声明 |
 
-升级流程（Renovate PR → CI 闸门 → bump testedVersion）：
+## 贡献
 
-```text
-Renovate 检测到上游新版本并开 PR
-   ↓
-CI：build + typecheck + contract tests + check:fixtures + check:manifests + doctor 全绿
-   ↓
-人工核验通过后 bump 对应渠道 manifest.upstream.testedVersion（必要时收窄 versionRange）
-```
+欢迎 PR 与 Issue！建议流程：
 
-`checkAdapterCompatibility(adapter, { targetVersion, allowUnsupported })` 是治理层的单一入口：读取结构性 manifest → `validateManifest` → `versionState`/`manifestVerdict`，返回 `{ manifest, validationErrors, state, verdict, reason }`。
+1. Fork 本仓库，从 `main` 开分支；
+2. 修改代码并保证 `pnpm build && pnpm typecheck && pnpm test` 全绿；
+3. 第三方适配器请附带 `pnpm verify <dir> --test` 通过记录；
+4. 运行 `pnpm changeset` 记录变更（发布走 Changesets 独立版本）；
+5. 提交 PR，CI（build / typecheck / test / governance）通过后合入。
 
-## M5 公共 Channel SDK
+上游依赖升级请遵循「兼容性治理」流程：升级 PR 需 CI 全绿，并同步 bump 对应渠道 manifest 的
+`testedVersion`，不得长期保留 `versionRange: '*'`。
 
-第三方渠道接入只依赖公开 Contract，无需修改 core / harness：
+## 致谢
 
-```ts
-import { defineChannelAdapter } from '@dsh/channel-core';
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) —— 底层插件运行时（Cordis / Schemastery / dsh-* 家族）。
+- [Tencent/openclaw-weixin](https://github.com/Tencent/openclaw-weixin)（MIT）—— 微信 iLink 协议参考实现。
+- [tencent-connect/bot-node-sdk](https://github.com/tencent-connect/bot-node-sdk) —— 腾讯 QQ 官方 Node SDK。
+- [open-dingtalk/dingtalk-stream-sdk-nodejs](https://github.com/open-dingtalk/dingtalk-stream-sdk-nodejs) —— 钉钉官方 stream 模式 SDK。
+- [larksuite/node-sdk](https://github.com/larksuite/node-sdk) —— 飞书官方 Node SDK。
 
-export default defineChannelAdapter({
-  id: 'my-channel',
-  capabilities: { text: true, /* ... */ streaming: 'buffered' },
-  async start(ctx) { /* ... */ },
-  async stop() { /* ... */ },
-  async send(target, message) { /* ... */ },
-});
-```
+本项目为社区实现，与 DeepSeek、腾讯、阿里（钉钉）、字节跳动（飞书）均无隶属关系，非任何官方 SDK / 官方项目。
 
-- 脚手架：`templates/channel-adapter/`（package.json / cordis.patch.yml / src/{config,transport,upstream,adapter,mapper,index}.ts / test / fixtures/example/）
-- 验证：`pnpm verify <dir> [--test]` —— package / adapter surface / manifest / capabilities / fixtures / credentials / contract 七项检查，离线可用
-- 指南：`docs/adapter-authoring.md`（含成熟度 Experimental → Verified 标准）
+## License
 
-**Telegram 扩展性证明（Task 18）**：`@dsh/channel-telegram` 仅依赖 `@dsh/channel-core` + `@dsh/channel-testkit` 公开 API，零修改 `channel-core` / `channel-harness` / 官方四渠道 / `@dsh/channels` bundle——证明 Channel Contract 无平台泄漏。Telegram 刻意不加入官方 bundle，作为第三方接入范式。
-
-## 发布（Phase 16）
-
-- Bundle 校验：`pnpm check:bundle` —— 解析 `cordis.patch.yml`，校验插件 shape / exports 子路径 / 各渠道 `enabled` 配置（Task 16.3）
-- 示例 profile：`apps/example/minimal-profile/`（`dsh plugin --profile minimal add ./packages/channels` → `--dump-config` → start）
-- 发布指南：`docs/release.md`（Changesets 流程 / 独立版本策略 / clean-profile 验证 / Release DoD 清单）
-- 发布 CI：`.github/workflows/release.yml`（仅 `v*` tag 触发，`changeset publish` 到 npm；配置 `NPM_TOKEN` 后生效）
-
-## 后续
-
-- 执行计划 Phase 0–13、15–18 的框架与离线实现基本完成；Phase 14 Harness compatibility 已补 pinned-rc.6 契约回归，但尚无真实 Harness runtime 回归；四官方渠道的官方上游 Driver 已完成（DingTalk/Lark/QQ 接官方 SDK、Weixin 直连 Tencent iLink 客户端）；Release Pipeline 已实现，但尚无 GitHub Actions 成功运行记录（当前仅打 `v*` tag 触发）。
-
-**已知缺口 (Known gaps)**
-
-- 框架与离线实现（Phase 0–13、15–18）基本完成，但尚未在真实 dsh runtime 上做过端到端验证。
-- Phase 14 Harness compatibility 仅有 pinned-rc.6 契约回归（`packages/channel-harness/test/harness-compat.test.ts`），尚无真实 Harness runtime 回归。
-- 四官方渠道已接官方上游：DingTalk `dingtalk-stream@2.1.5`、Lark `@larksuiteoapi/node-sdk@1.73.0`、QQ 官方 SDK `@tencent-connect/qqbot-nodejs@1.0.4`、Weixin 直连 Tencent iLink 客户端（`https://ilinkai.weixin.qq.com`）。live-platform E2E 需真实凭据（AppKey/AppSecret/ClientSecret / 微信扫码），尚未执行。
-- Release Pipeline 已实现，但尚无 GitHub Actions 成功运行记录（当前仅 `v*` tag 触发 release.yml）。
-
-详见 `docs/deepseek-harness-channels-architecture.md` 与 `docs/deepseek-harness-channels-execution-plan.md`。
+[MIT](LICENSE) © 2026 [wsz987](https://github.com/wsz987)

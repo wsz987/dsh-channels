@@ -1,5 +1,5 @@
 /**
- * @dsh/channel-<channel> — <ChannelName> channel adapter for DeepSeek Harness.
+ * @wsz987/channel-<channel> — <ChannelName> channel adapter for DeepSeek Harness.
  *
  * Maps the platform (via a self-hosted HTTP upstream driver) to the stable
  * Channel Contract. Streaming is `buffered`: chunks accumulate and are
@@ -15,7 +15,7 @@ import {
   MemorySecretStore,
   MemoryStorage,
   type ChannelAdapterContext,
-} from '@dsh/channel-core';
+} from '@wsz987/channel-core';
 import type { ChannelConfig } from './config.js';
 import { Config } from './config.js';
 import { ChannelNameAdapter, type ChannelAdapterDeps } from './adapter.js';

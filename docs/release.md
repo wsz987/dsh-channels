@@ -1,9 +1,8 @@
 # Release Pipeline
 
-Phase 16 of the execution plan
-(`docs/deepseek-harness-channels-execution-plan.md`): Changesets-based
+The channel release pipeline: Changesets-based
 independent versioning, prebuilt publish artifacts, the automated release
-workflow and the manual DSH bundle release validation (Task 16.3).
+workflow and the manual DSH bundle release validation.
 
 ## Versioning policy
 
@@ -13,17 +12,17 @@ configured with no `fixed` / `linked` groups
 
 | Package                | Version |
 | ---------------------- | ------- |
-| @dsh/channel-core      | 0.3.0   |
-| @dsh/channel-harness   | 0.4.2   |
-| @dsh/channel-testkit   | 0.2.0   |
-| @dsh/channel-compat    | 0.2.0   |
-| @dsh/channel-weixin    | 0.8.1   |
-| @dsh/channel-qq        | 0.5.4   |
-| @dsh/channel-dingtalk  | 0.7.0   |
-| @dsh/channel-lark      | 0.6.3   |
-| @dsh/channels          | 0.9.0   |
-| @dsh/channel-verify    | 0.1.0   |
-| @dsh/channel-telegram  | 0.1.0   |
+| @wsz987/channel-core      | 0.3.0   |
+| @wsz987/channel-harness   | 0.4.2   |
+| @wsz987/channel-testkit   | 0.2.0   |
+| @wsz987/channel-compat    | 0.2.0   |
+| @wsz987/channel-weixin    | 0.8.1   |
+| @wsz987/channel-qq        | 0.5.4   |
+| @wsz987/channel-dingtalk  | 0.7.0   |
+| @wsz987/channel-lark      | 0.6.3   |
+| @wsz987/dsh-channels          | 0.9.0   |
+| @wsz987/channel-verify    | 0.1.0   |
+| @wsz987/channel-telegram  | 0.1.0   |
 
 `apps/*` are private (`"private": true`) and never published.
 
@@ -56,14 +55,14 @@ the consumer side requires TypeScript compilation**:
 - **`lib/`** — emitted by `tsc` via `pnpm build` (turbo; `test` and
   `typecheck` depend on `^build` so dependencies are always built first).
 - **`exports` map** — every subpath points into `lib/` (`lib/index.js` +
-  `lib/index.d.ts`, e.g. `@dsh/channel-core/plugin` →
+  `lib/index.d.ts`, e.g. `@wsz987/channel-core/plugin` →
   `./lib/plugin.js` / `./lib/plugin.d.ts`).
 - **`files` field** — restricts the npm tarball to `lib` (+ `README.md`,
   and `cordis.patch.yml` for the bundle).
 
 `lib/` is gitignored; the release workflow builds before publishing.
 
-## DSH Bundle Validation (Task 16.3, v1.1 profile/patch model)
+## DSH Bundle Validation (v1.1 profile/patch model)
 
 ### Automated (offline) gate — `pnpm check:bundle`
 
@@ -77,7 +76,7 @@ the consumer side requires TypeScript compilation**:
    `inject` lists (`channels-harness` → `[channels, agents, sessionPersistence]`,
    `channels-qq` → `[channels, credentials]`, the rest → `[channels]`);
 2. dynamically `import()`s every plugin specifier — this enforces Node ESM
-   **exports-map resolution** (`@dsh/channel-core/plugin` fails the test if
+   **exports-map resolution** (`@wsz987/channel-core/plugin` fails the test if
    the subpath export is missing) — and asserts the Cordis plugin shape
    (`name`, `apply`, optional `inject`);
 3. asserts each referenced package exists in the workspace and its
@@ -86,8 +85,8 @@ the consumer side requires TypeScript compilation**:
    (Schemastery object-schema introspection) so all channels can be disabled
    via config.
 
-The bundle package (`@dsh/channels`) is marked as a DSH bundle with the
-`dsh.bundle.patch` key pointing at `cordis.patch.yml` (v1.1 §38). A profile
+The bundle package (`@wsz987/dsh-channels`) is marked as a DSH bundle with the
+`dsh.bundle.patch` key pointing at `cordis.patch.yml`. A profile
 consumes it via the `dsh.profile.bundles` list, not a hand-written
 `plugins:` map (see `apps/example/minimal-profile/`).
 
@@ -104,7 +103,7 @@ dsh profile create release-validation
 
 # 2. add the bundle (installs it into dsh.profile.bundles and applies
 #    cordis.patch.yml to the clean profile)
-dsh plugin --profile release-validation add @dsh/channels
+dsh plugin --profile release-validation add @wsz987/dsh-channels
 
 # 3. dump the merged config — verify the six plugins were inserted
 dsh --profile release-validation --dump-config
@@ -138,18 +137,18 @@ Every publishable package carries:
 }
 ```
 
-`access: public` lets the `@dsh/*` scope publish to the public npm registry
+`access: public` lets the `@wsz987/*` scope publish to the public npm registry
 without an org token; the repository field links npm back to the source.
 
-## Release checklist (plan §25 Release DoD)
+## Release checklist (Release DoD)
 
 | DoD item                     | Status | Where |
 | ---------------------------- | ------ | ----- |
 | independent versions         | ✅     | Changesets config (no fixed/linked) |
 | Changesets                   | ✅     | `.changeset/`, `pnpm changeset` / `version` / `release` |
-| dependency update PR         | ✅     | Renovate + `.github/workflows/upgrade.yml` (Phase 15) |
+| dependency update PR         | ✅     | Renovate + `.github/workflows/upgrade.yml` |
 | clean-profile DSH install    | ⏳     | manual step above — requires the dsh CLI |
-| all-in-one bundle            | ✅     | `@dsh/channels` + `cordis.patch.yml` |
+| all-in-one bundle            | ✅     | `@wsz987/dsh-channels` + `cordis.patch.yml` |
 | example profile              | ✅     | `apps/example/minimal-profile/` |
 | architecture docs            | ✅     | `docs/deepseek-harness-channels-architecture.md` |
 | adapter authoring docs       | ✅     | `docs/adapter-authoring.md` |
@@ -237,4 +236,4 @@ Tag-driven publish — it runs **only when a `v*` release tag is pushed** (or vi
 The workflow **stays inert until the `NPM_TOKEN` repository secret is
 configured**: without registry credentials the publish step cannot run (it only
 ever publishes packages whose version is not yet on npm). Set `NPM_TOKEN` to an
-npm automation token with publish rights for the `@dsh` scope to activate it.
+npm automation token with publish rights for the `@wsz987` scope to activate it.

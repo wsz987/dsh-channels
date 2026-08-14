@@ -18,7 +18,7 @@
  * reconnect config. On AbortSignal it exits cleanly. Notify lifecycle
  * (notifystart/notifystop) is best-effort.
  */
-import type { ChannelAdapterContext } from '@dsh/channel-core';
+import type { ChannelAdapterContext } from '@wsz987/channel-core';
 import type { ILinkClient } from '../ilink/client.js';
 import type { ILinkMessage, WeixinInboundMeta } from '../ilink/types.js';
 import type { SyncCursorStore } from '../storage/sync-cursor.js';

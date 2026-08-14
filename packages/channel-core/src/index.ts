@@ -1,5 +1,5 @@
 /**
- * @dsh/channel-core — stable cross-channel contract and Cordis ChannelService.
+ * @wsz987/channel-core — stable cross-channel contract and Cordis ChannelService.
  *
  * Exports identity types, structured messages, channel events, capabilities,
  * the `ChannelAdapter` contract, `ReplyHandle`, the `ChannelService` (Cordis

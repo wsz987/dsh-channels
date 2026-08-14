@@ -5,8 +5,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { Context } from '@deepseek-ai/cordis';
-import { ChannelService, type ChannelEvent } from '@dsh/channel-core';
-import { createTestContext } from '@dsh/channel-testkit';
+import { ChannelService, type ChannelEvent } from '@wsz987/channel-core';
+import { createTestContext } from '@wsz987/channel-testkit';
 import { Config, QQAdapter } from '../src/index.ts';
 import { FakeQQSdkClient } from '../src/sdk-client.ts';
 import type { QQConfig } from '../src/config.ts';

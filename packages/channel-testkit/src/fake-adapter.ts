@@ -9,7 +9,7 @@
  * The testkit never depends on channel-harness or any Harness internals; this
  * adapter only talks to the channel-core contract.
  */
-import { BufferedReply, toChannelError } from '@dsh/channel-core';
+import { BufferedReply, toChannelError } from '@wsz987/channel-core';
 import type {
   AuthState,
   ChannelAdapter,
@@ -25,7 +25,7 @@ import type {
   ReplyHandle,
   SendResult,
   StreamingMode,
-} from '@dsh/channel-core';
+} from '@wsz987/channel-core';
 
 export interface FakeChannelAdapterOptions {
   /** Adapter id; defaults to `'fake'`. */

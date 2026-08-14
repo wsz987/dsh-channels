@@ -6,7 +6,7 @@
  * `kind === 'c2c'` and `kind === 'group'` are accepted in V1 — anything else
  * (guild/dm) is logged and dropped.
  */
-import type { ChannelAdapterContext, MessageReceived } from '@dsh/channel-core';
+import type { ChannelAdapterContext, MessageReceived } from '@wsz987/channel-core';
 import type { QQBotInboundMessage } from '@tencent-connect/qqbot-nodejs';
 import { mapInbound, type QQInboundMeta } from './mapper.js';
 

@@ -1,10 +1,10 @@
 /**
- * @dsh/channel-telegram — Telegram Bot API channel adapter for DeepSeek
+ * @wsz987/channel-telegram — Telegram Bot API channel adapter for DeepSeek
  * Harness: the M5 extensibility proof.
  *
  * A fifth channel built against the PUBLIC Channel Contract
- * (@dsh/channel-core + @dsh/channel-testkit) with zero changes to
- * channel-core, channel-harness, the @dsh/channels bundle or the four
+ * (@wsz987/channel-core + @wsz987/channel-testkit) with zero changes to
+ * channel-core, channel-harness, the @wsz987/dsh-channels bundle or the four
  * official adapters. Deliberately NOT part of the bundle — it is the
  * third-party proof that the contract is extensible from the outside.
  *
@@ -15,7 +15,7 @@
  * with offset ack; no beginAuth/pollAuth in V1.
  */
 import { type Context } from '@deepseek-ai/cordis';
-import { mountChannelAdapter } from '@dsh/channel-core';
+import { mountChannelAdapter } from '@wsz987/channel-core';
 import type { TelegramConfig } from './config.js';
 import { Config } from './config.js';
 import { TelegramAdapter, type TelegramAdapterDeps } from './adapter.js';

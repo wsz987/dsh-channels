@@ -1,5 +1,5 @@
 {
-  "name": "@dsh/channel-weixin",
+  "name": "@wsz987/channel-weixin",
   "version": "0.8.1",
   "repository": {
     "type": "git",
@@ -31,10 +31,10 @@
   "dependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",
-    "@dsh/channel-core": "workspace:*"
+    "@wsz987/channel-core": "workspace:*"
   },
   "devDependencies": {
-    "@dsh/channel-testkit": "workspace:*",
+    "@wsz987/channel-testkit": "workspace:*",
     "rimraf": "^6.0.0"
   },
   "license": "MIT"

@@ -6,7 +6,7 @@
  * commit, the same messages may be re-fetched — that is accepted and handled
  * by the dedup layer.
  */
-import type { ChannelStorage } from '@dsh/channel-core';
+import type { ChannelStorage } from '@wsz987/channel-core';
 
 export interface SyncCursorStoreOptions {
   storage: ChannelStorage;

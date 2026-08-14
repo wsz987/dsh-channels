@@ -11,7 +11,7 @@
  * protocol-level dedup mechanism). The InboundProcessor dedup window is the
  * adapter-level second layer for webhook-style redelivery inside one cycle.
  */
-import { ChannelAuthError, ChannelError } from '@dsh/channel-core';
+import { ChannelAuthError, ChannelError } from '@wsz987/channel-core';
 import type { HttpTransport } from './transport.js';
 
 /** Bot user returned by getMe. */

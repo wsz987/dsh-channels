@@ -20,7 +20,7 @@ import type {
   ChannelLogger,
   ChannelEvent,
   MessageReceived,
-} from '@dsh/channel-core';
+} from '@wsz987/channel-core';
 import type { Config } from './config.js';
 import type { SessionBindingStore } from './binding-store.js';
 import type { AgentManager } from './agent-manager.js';

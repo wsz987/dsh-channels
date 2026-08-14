@@ -9,7 +9,7 @@ maturity model.
 ## 1. Overview: the no-modification guarantee
 
 A channel adapter is an independent package that implements the stable
-`ChannelAdapter` contract from `@dsh/channel-core`. Adding a new channel
+`ChannelAdapter` contract from `@wsz987/channel-core`. Adding a new channel
 never requires changes to:
 
 ```text
@@ -55,7 +55,7 @@ Three red lines (architecture §37) apply to every adapter:
 
 ## 2. `defineChannelAdapter`
 
-`defineChannelAdapter` (Task 17.1) is the entry point for object-form
+`defineChannelAdapter` is the entry point for object-form
 adapters. It is an identity function at runtime — the object you pass in is
 returned unchanged — and it runs a structural dev-time validation outside
 production that throws a descriptive `TypeError` when the object does not
@@ -67,7 +67,7 @@ import {
   defineChannelAdapter,
   type ChannelAdapter,
   type ChannelCapabilities,
-} from '@dsh/channel-core';
+} from '@wsz987/channel-core';
 
 export default defineChannelAdapter({
   id: 'telegram',
@@ -168,7 +168,7 @@ exponential reconnect backoff.
 
 ## 5. Contract tests
 
-`@dsh/channel-testkit` ships `runChannelAdapterContract(adapter, options)`,
+`@wsz987/channel-testkit` ships `runChannelAdapterContract(adapter, options)`,
 which registers a vitest suite verifying the stable contract:
 
 - register/unregister through `ChannelService`
@@ -184,7 +184,7 @@ which registers a vitest suite verifying the stable contract:
 Call it once per adapter in your test file:
 
 ```ts
-import { runChannelAdapterContract } from '@dsh/channel-testkit';
+import { runChannelAdapterContract } from '@wsz987/channel-testkit';
 
 runChannelAdapterContract(new TelegramAdapter(makeConfig(), { transport }));
 ```
@@ -225,7 +225,7 @@ are caught without a live platform:
 
 Fixture format: `name`, `channel` (matching the directory name),
 `upstreamVersion`, `payload` and `expected`. Load them in tests with
-`loadFixture(channel, name)` from `@dsh/channel-testkit`; the verifier
+`loadFixture(channel, name)` from `@wsz987/channel-testkit`; the verifier
 validates them with `validateFixture`.
 
 ## 7. The compatibility manifest
@@ -263,7 +263,7 @@ suite and fixtures pass against a real upstream version.
 
 ## 8. Verification with `pnpm verify`
 
-The `@dsh/channel-verify` package (Task 17.3) is the in-repo form of
+The `@wsz987/channel-verify` package is the in-repo form of
 `dsh channels verify ./my-adapter`. It runs offline, so it works in CI:
 
 ```bash
@@ -332,7 +332,7 @@ inserts the adapter into a DeepSeek Harness profile (mirror the official
 ```yaml
 - insert:
     - id: channels-telegram
-      name: '@dsh/channel-telegram'
+      name: '@wsz987/channel-telegram'
       inject:
         - channels
 ```

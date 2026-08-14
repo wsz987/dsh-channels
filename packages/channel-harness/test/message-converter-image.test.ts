@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { AttachmentId, type ImageAttachmentRef } from '@deepseek-ai/dsh-attachment';
 import { toHarnessUserMessage, partsToText } from '../src/message-converter.ts';
-import type { MessageReceived } from '@dsh/channel-core';
+import type { MessageReceived } from '@wsz987/channel-core';
 
 function makeRef(id: string): ImageAttachmentRef {
   return { attachmentId: AttachmentId(id), mediaType: 'image/jpeg', bytes: 4, width: 1, height: 1 };

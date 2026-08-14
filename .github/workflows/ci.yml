@@ -1,11 +1,11 @@
-# M4 — Compatibility Governance: CI gate for every pull request, every push to
+# Compatibility governance: CI gate for every pull request, every push to
 # `main`, every release tag (`v*`), and manual dispatch.
 #
 # `pull_request` (and `push` to `main`) ensures dependency PRs (e.g. from
 # Renovate) are gated by build / typecheck / tests before merge, closing the
-# loop described in Task 14.3 / plan §32.
+# loop on dependency upgrades.
 #
-# Task 14.3 CI matrix design (docs/deepseek-harness-channels-execution-plan.md):
+# CI matrix design:
 #
 #   "harness pinned-current"    This workflow against the COMMITTED pnpm-lock.yaml
 #                               (`pnpm install --frozen-lockfile`). Proves the pinned
@@ -17,9 +17,9 @@
 #                               merged, or before a release) — the frozen install
 #                               exercises the proposed versions. All jobs must be green
 #                               before maintainers bump the manifest `testedVersion`
-#                               (plan §32 gate below).
+#                               (governance gate below).
 #
-# Upgrade gate (plan §32 / Phase 15): new dependency -> PR -> build / typecheck /
+# Upgrade gate: new dependency -> PR -> build / typecheck /
 # contract tests / fixtures / adapter tests / Harness compat / E2E all pass ->
 # update `manifest.testedVersion`. The scheduled upgrade.yml drift check raises the
 # signal, Renovate (renovate.json) proposes the PRs, this workflow is the gate.
@@ -86,12 +86,12 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Test
         run: pnpm test
-      # M5 (Task 17.3 / Task 18): verify the Telegram extensibility proof and an
+      # Verify the Telegram extensibility proof and an
       # official adapter with the channel-verify CLI (lib/ exists after pnpm test
       # because turbo builds each package's dependencies first).
-      - name: Verify Telegram adapter (M5 extensibility proof)
+      - name: Verify Telegram adapter (extensibility proof)
         run: pnpm verify ./packages/channel-telegram --test
-      - name: Verify Weixin adapter (M5 verify CLI on an official adapter)
+      - name: Verify Weixin adapter (verify CLI on an official adapter)
         run: pnpm verify ./packages/channel-weixin --test
 
   governance:
@@ -111,9 +111,9 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      # Phase 16 (Task 16.3): bundle validation needs the built packages
+      # Bundle validation needs the built packages
       # (lib/ is gitignored), so build the bundle's dependency graph first.
       - name: Build (for bundle validation)
-        run: pnpm build --filter=@dsh/channels...
+        run: pnpm build --filter=@wsz987/dsh-channels...
       - name: Compatibility governance
         run: pnpm check:fixtures && pnpm check:manifests && pnpm doctor && pnpm check:bundle

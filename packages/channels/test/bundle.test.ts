@@ -65,7 +65,7 @@ function parsePatch(source: string): PatchItem[] {
   return items;
 }
 
-/** Split '@dsh/pkg/sub' into the package name and the exports subpath. */
+/** Split '@wsz987/pkg/sub' into the package name and the exports subpath. */
 function splitSpecifier(specifier: string): { packageName: string; subpath: string } {
   const parts = specifier.split('/');
   const packageName = parts.slice(0, 2).join('/');
@@ -86,12 +86,12 @@ const PATCH_URL = new URL('../cordis.patch.yml', import.meta.url);
 
 // Expected bundle result — the exact plugins cordis.patch.yml inserts.
 const EXPECTED_ITEMS: PatchItem[] = [
-  { id: 'channels-service', name: '@dsh/channel-core/plugin' },
-  { id: 'channels-harness', name: '@dsh/channel-harness', inject: ['channels', 'agents'] },
-  { id: 'channels-weixin', name: '@dsh/channel-weixin', inject: ['channels'] },
-  { id: 'channels-qq', name: '@dsh/channel-qq', inject: ['channels', 'credentials'] },
-  { id: 'channels-dingtalk', name: '@dsh/channel-dingtalk', inject: ['channels'] },
-  { id: 'channels-lark', name: '@dsh/channel-lark', inject: ['channels'] },
+  { id: 'channels-service', name: '@wsz987/channel-core/plugin' },
+  { id: 'channels-harness', name: '@wsz987/channel-harness', inject: ['channels', 'agents'] },
+  { id: 'channels-weixin', name: '@wsz987/channel-weixin', inject: ['channels'] },
+  { id: 'channels-qq', name: '@wsz987/channel-qq', inject: ['channels', 'credentials'] },
+  { id: 'channels-dingtalk', name: '@wsz987/channel-dingtalk', inject: ['channels'] },
+  { id: 'channels-lark', name: '@wsz987/channel-lark', inject: ['channels'] },
 ];
 
 describe('DSH bundle patch (cordis.patch.yml)', () => {
@@ -108,7 +108,7 @@ describe('DSH bundle patch (cordis.patch.yml)', () => {
     'resolves plugin %s through the exports map and exports a Cordis plugin shape',
     async (_id, specifier) => {
       // Dynamic import() enforces Node ESM exports resolution: a specifier not
-      // covered by the package.json exports map (e.g. @dsh/channel-core/plugin
+      // covered by the package.json exports map (e.g. @wsz987/channel-core/plugin
       // before the subpath export was added) fails here.
       const mod: Record<string, unknown> = await import(specifier);
 
@@ -123,9 +123,9 @@ describe('DSH bundle patch (cordis.patch.yml)', () => {
         }
       }
 
-      // The module name matches the package short name (@dsh/channel-core ->
-      // channel-core; @dsh/channel-core/plugin -> channel-core).
-      const shortName = splitSpecifier(specifier).packageName.replace('@dsh/', '');
+      // The module name matches the package short name (@wsz987/channel-core ->
+      // channel-core; @wsz987/channel-core/plugin -> channel-core).
+      const shortName = splitSpecifier(specifier).packageName.replace('@wsz987/', '');
       expect(mod.name).toBe(shortName);
     },
   );
@@ -135,7 +135,7 @@ describe('DSH bundle patch (cordis.patch.yml)', () => {
       const { packageName, subpath } = splitSpecifier(item.name);
       // Workspace package dir mirrors the package name without the scope.
       const pkgJson = JSON.parse(
-        readFileSync(packageJsonPath(packageName.replace('@dsh/', '')), 'utf8'),
+        readFileSync(packageJsonPath(packageName.replace('@wsz987/', '')), 'utf8'),
       ) as { name?: string; exports?: Record<string, unknown> };
       expect(pkgJson.name, `${packageName} exists in the workspace`).toBe(packageName);
       expect(
@@ -148,9 +148,9 @@ describe('DSH bundle patch (cordis.patch.yml)', () => {
 
 describe('every channel adapter can be disabled through its config', () => {
   it.each(['weixin', 'qq', 'dingtalk', 'lark'] as const)(
-    '@dsh/channel-%s Config exposes an `enabled` boolean',
+    '@wsz987/channel-%s Config exposes an `enabled` boolean',
     async (channel) => {
-      const mod: Record<string, unknown> = await import(`@dsh/channel-${channel}`);
+      const mod: Record<string, unknown> = await import(`@wsz987/channel-${channel}`);
       const config = mod.Config as {
         type?: string;
         dict?: Record<string, { type?: string } | undefined>;

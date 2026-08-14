@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadFixture, resolveFixturesDir } from '@dsh/channel-testkit';
+import { loadFixture, resolveFixturesDir } from '@wsz987/channel-testkit';
 import type { QQBotInboundMessage } from '@tencent-connect/qqbot-nodejs';
 import { mapInbound } from '../src/mapper.ts';
 

@@ -11,7 +11,7 @@
  * logged, never embedded in emitted events or exception messages, and never
  * rounded-trip through config dumps.
  */
-import type { SecretStore } from '@dsh/channel-core';
+import type { SecretStore } from '@wsz987/channel-core';
 
 export interface WeixinAccountCredential {
   /** Bot token — the secret. Never logged. */
@@ -28,7 +28,7 @@ export interface WeixinAccountCredential {
 
 export interface AccountCredentialStoreOptions {
   secrets: SecretStore;
-  storage: import('@dsh/channel-core').ChannelStorage;
+  storage: import('@wsz987/channel-core').ChannelStorage;
   /** Local DSH account alias; defaults to `main`. */
   accountId?: string;
   /** Injectable clock (tests). */
@@ -41,7 +41,7 @@ const META_KEY_PREFIX = 'weixin:credential:';
 /** Helper: one JSON field of the credential metadata. */
 export class AccountCredentialStore {
   private readonly secrets: SecretStore;
-  private readonly storage: import('@dsh/channel-core').ChannelStorage;
+  private readonly storage: import('@wsz987/channel-core').ChannelStorage;
   private readonly accountId: string;
   private readonly now: () => number;
 

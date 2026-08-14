@@ -29,11 +29,11 @@ importers:
       '@deepseek-ai/cordis':
         specifier: ^4.0.1
         version: 4.0.1
-      '@dsh/channel-core':
+      '@wsz987/channel-core':
         specifier: workspace:*
         version: link:../../packages/channel-core
     devDependencies:
-      '@dsh/channel-testkit':
+      '@wsz987/channel-testkit':
         specifier: workspace:*
         version: link:../../packages/channel-testkit
       rimraf:
@@ -48,11 +48,11 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: ^3.18.1
         version: 3.18.1
-      '@dsh/channel-core':
+      '@wsz987/channel-core':
         specifier: workspace:*
         version: link:../channel-core
     devDependencies:
-      '@dsh/channel-testkit':
+      '@wsz987/channel-testkit':
         specifier: workspace:*
         version: link:../channel-testkit
       rimraf:
@@ -80,14 +80,14 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: ^3.18.1
         version: 3.18.1
-      '@dsh/channel-core':
+      '@wsz987/channel-core':
         specifier: workspace:*
         version: link:../channel-core
       dingtalk-stream:
         specifier: 2.1.5
         version: 2.1.5
     devDependencies:
-      '@dsh/channel-testkit':
+      '@wsz987/channel-testkit':
         specifier: workspace:*
         version: link:../channel-testkit
       rimraf:
@@ -132,7 +132,7 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: ^3.18.1
         version: 3.18.1
-      '@dsh/channel-core':
+      '@wsz987/channel-core':
         specifier: workspace:*
         version: link:../channel-core
     devDependencies:
@@ -148,14 +148,14 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: ^3.18.1
         version: 3.18.1
-      '@dsh/channel-core':
+      '@wsz987/channel-core':
         specifier: workspace:*
         version: link:../channel-core
       '@larksuiteoapi/node-sdk':
         specifier: 1.73.0
         version: 1.73.0
     devDependencies:
-      '@dsh/channel-testkit':
+      '@wsz987/channel-testkit':
         specifier: workspace:*
         version: link:../channel-testkit
       rimraf:
@@ -173,14 +173,14 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: ^3.18.1
         version: 3.18.1
-      '@dsh/channel-core':
+      '@wsz987/channel-core':
         specifier: workspace:*
         version: link:../channel-core
       '@tencent-connect/qqbot-nodejs':
         specifier: 1.0.4
         version: 1.0.4
     devDependencies:
-      '@dsh/channel-testkit':
+      '@wsz987/channel-testkit':
         specifier: workspace:*
         version: link:../channel-testkit
       rimraf:
@@ -195,11 +195,11 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: ^3.18.1
         version: 3.18.1
-      '@dsh/channel-core':
+      '@wsz987/channel-core':
         specifier: workspace:*
         version: link:../channel-core
     devDependencies:
-      '@dsh/channel-testkit':
+      '@wsz987/channel-testkit':
         specifier: workspace:*
         version: link:../channel-testkit
       rimraf:
@@ -211,7 +211,7 @@ importers:
       '@deepseek-ai/cordis':
         specifier: ^4.0.1
         version: 4.0.1
-      '@dsh/channel-core':
+      '@wsz987/channel-core':
         specifier: workspace:*
         version: link:../channel-core
     devDependencies:
@@ -221,13 +221,13 @@ importers:
 
   packages/channel-verify:
     dependencies:
-      '@dsh/channel-compat':
+      '@wsz987/channel-compat':
         specifier: workspace:*
         version: link:../channel-compat
-      '@dsh/channel-core':
+      '@wsz987/channel-core':
         specifier: workspace:*
         version: link:../channel-core
-      '@dsh/channel-testkit':
+      '@wsz987/channel-testkit':
         specifier: workspace:*
         version: link:../channel-testkit
     devDependencies:
@@ -243,11 +243,11 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: ^3.18.1
         version: 3.18.1
-      '@dsh/channel-core':
+      '@wsz987/channel-core':
         specifier: workspace:*
         version: link:../channel-core
     devDependencies:
-      '@dsh/channel-testkit':
+      '@wsz987/channel-testkit':
         specifier: workspace:*
         version: link:../channel-testkit
       rimraf:
@@ -259,22 +259,22 @@ importers:
       '@deepseek-ai/cordis':
         specifier: ^4.0.1
         version: 4.0.1
-      '@dsh/channel-core':
+      '@wsz987/channel-core':
         specifier: workspace:*
         version: link:../channel-core
-      '@dsh/channel-dingtalk':
+      '@wsz987/channel-dingtalk':
         specifier: workspace:*
         version: link:../channel-dingtalk
-      '@dsh/channel-harness':
+      '@wsz987/channel-harness':
         specifier: workspace:*
         version: link:../channel-harness
-      '@dsh/channel-lark':
+      '@wsz987/channel-lark':
         specifier: workspace:*
         version: link:../channel-lark
-      '@dsh/channel-qq':
+      '@wsz987/channel-qq':
         specifier: workspace:*
         version: link:../channel-qq
-      '@dsh/channel-weixin':
+      '@wsz987/channel-weixin':
         specifier: workspace:*
         version: link:../channel-weixin
     devDependencies:

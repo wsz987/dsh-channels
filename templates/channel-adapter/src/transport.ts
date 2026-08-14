@@ -6,7 +6,7 @@
  * touching driver logic. Timeouts abort the underlying fetch; an external
  * `signal` is combined with the request timeout.
  */
-import { ChannelError } from '@dsh/channel-core';
+import { ChannelError } from '@wsz987/channel-core';
 
 export interface HttpRequestInit {
   method?: string;

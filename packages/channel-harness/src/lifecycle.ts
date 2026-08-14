@@ -25,7 +25,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence';
 import { SessionId, type Session, type SessionStore } from '@deepseek-ai/dsh-session';
-import type { ChannelAdapter, ChannelEvent, ChannelLogger } from '@dsh/channel-core';
+import type { ChannelAdapter, ChannelEvent, ChannelLogger } from '@wsz987/channel-core';
 import type { Config } from './config.js';
 import { createBindingStore } from './binding-store.js';
 import { AgentManager, HarnessAgentGateway } from './agent-manager.js';

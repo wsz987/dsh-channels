@@ -21,8 +21,8 @@ import type {
   ChannelTarget,
   OutboundMessage,
   SendResult,
-} from '@dsh/channel-core';
-import { ChannelError } from '@dsh/channel-core';
+} from '@wsz987/channel-core';
+import { ChannelError } from '@wsz987/channel-core';
 import type { WeixinConfig } from './config.js';
 import { ILinkClient } from './ilink/client.js';
 import type { HttpTransport } from './transport.js';
@@ -37,7 +37,7 @@ import { TypingController } from './messaging/typing.js';
 import { downloadMedia } from './media/download.js';
 import { manifest as weixinManifest, type WeixinManifest } from './manifest.js';
 import type { ILinkCDNMedia, ILinkMessageItem } from './ilink/types.js';
-import type { ImagePart, MessagePart } from '@dsh/channel-core';
+import type { ImagePart, MessagePart } from '@wsz987/channel-core';
 
 export interface WeixinAdapterDeps {
   /** Injectable transport (tests); defaults to FetchTransport. */

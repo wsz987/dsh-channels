@@ -5,7 +5,7 @@
  * button presses) route to `interaction.received` (Task 12.3). Both paths
  * share the same dedup window so webhook retries cannot double-deliver.
  */
-import type { ChannelAdapterContext, MessageReceived, InteractionReceived } from '@dsh/channel-core';
+import type { ChannelAdapterContext, MessageReceived, InteractionReceived } from '@wsz987/channel-core';
 import { dedupKey, mapInbound, mapInteraction, type LarkInboundMeta } from './mapper.js';
 
 export interface InboundProcessorOptions {

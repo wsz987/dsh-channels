@@ -7,7 +7,7 @@
  * in the Task 13.2 layout. The doctor reads `id` and manifest data as data —
  * there is no platform special-casing and no credentials anywhere.
  */
-import type { AuthState, ChannelHealth } from '@dsh/channel-core';
+import type { AuthState, ChannelHealth } from '@wsz987/channel-core';
 import type { AdapterManifest, ManifestStatus } from './manifest.js';
 import { getAdapterManifest } from './manifest.js';
 import type { VersionPolicyOptions } from './version-policy.js';

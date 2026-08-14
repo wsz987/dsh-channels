@@ -10,8 +10,8 @@
  * - runId is stable within one turn (target.runId reused across sends).
  */
 import { describe, expect, it } from 'vitest';
-import { MemoryStorage } from '@dsh/channel-core';
-import type { ChannelTarget } from '@dsh/channel-core';
+import { MemoryStorage } from '@wsz987/channel-core';
+import type { ChannelTarget } from '@wsz987/channel-core';
 import {
   aes128Decrypt,
   aes128Encrypt,

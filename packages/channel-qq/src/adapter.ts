@@ -25,8 +25,8 @@ import type {
   ReplyHandle,
   SendResult,
   StreamingMode,
-} from '@dsh/channel-core';
-import { ChannelError } from '@dsh/channel-core';
+} from '@wsz987/channel-core';
+import { ChannelError } from '@wsz987/channel-core';
 import type { QQBotInboundMessage } from '@tencent-connect/qqbot-nodejs';
 import type { QQConfig } from './config.js';
 import { InboundProcessor } from './inbound.js';

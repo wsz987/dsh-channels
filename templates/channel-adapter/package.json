@@ -1,5 +1,5 @@
 {
-  "name": "@dsh/channel-<channel>",
+  "name": "@wsz987/channel-<channel>",
   "version": "0.1.0",
   "description": "<ChannelName> channel adapter for DeepSeek Harness",
   "type": "module",
@@ -29,12 +29,12 @@
     "clean": "rimraf lib"
   },
   "dependencies": {
-    "@dsh/channel-core": "workspace:*",
+    "@wsz987/channel-core": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1"
   },
   "devDependencies": {
-    "@dsh/channel-testkit": "workspace:*",
+    "@wsz987/channel-testkit": "workspace:*",
     "rimraf": "^6.0.0"
   },
   "license": "MIT"

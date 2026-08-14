@@ -8,13 +8,13 @@
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Context } from '@deepseek-ai/cordis';
-import { ChannelService, MemoryStorage, ChannelError } from '@dsh/channel-core';
-import type { ChannelAdapterContext, ChannelTarget } from '@dsh/channel-core';
+import { ChannelService, MemoryStorage, ChannelError } from '@wsz987/channel-core';
+import type { ChannelAdapterContext, ChannelTarget } from '@wsz987/channel-core';
 import {
   runChannelAdapterContract,
   createTestContext,
   makeOutboundMessage,
-} from '@dsh/channel-testkit';
+} from '@wsz987/channel-testkit';
 import {
   Config,
   WeixinAdapter,
@@ -38,7 +38,7 @@ import {
   type HttpTransport,
 } from '../src/index.js';
 import type { WeixinConfig } from '../src/config.js';
-import { loadFixture } from '@dsh/channel-testkit';
+import { loadFixture } from '@wsz987/channel-testkit';
 
 /* ------------------------------------------------------------------ */
 /* Fake transport routed by URL path                                   */
@@ -235,7 +235,7 @@ describe('WeixinQrAuth', () => {
 
 describe('AccountCredentialStore', () => {
   it('saves and loads a credential; token in secrets, meta in storage', async () => {
-    const secrets = new (await import('@dsh/channel-core')).MemorySecretStore();
+    const secrets = new (await import('@wsz987/channel-core')).MemorySecretStore();
     const storage = new MemoryStorage();
     const store = new AccountCredentialStore({ secrets, storage, accountId: 'main', now: () => 1700000000000 });
     await store.save({ token: 'tok', ilinkBotId: 'bot-1', userId: 'u1', baseUrl: 'https://x' });
@@ -247,7 +247,7 @@ describe('AccountCredentialStore', () => {
   });
 
   it('returns undefined when corrupt meta', async () => {
-    const secrets = new (await import('@dsh/channel-core')).MemorySecretStore();
+    const secrets = new (await import('@wsz987/channel-core')).MemorySecretStore();
     const storage = new MemoryStorage();
     const store = new AccountCredentialStore({ secrets, storage, accountId: 'main', now: () => 1700000000000 });
     await store.save({ token: 't', ilinkBotId: 'b', baseUrl: 'u' });

@@ -9,7 +9,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
-import type { ChannelAdapter } from '@dsh/channel-core';
+import type { ChannelAdapter } from '@wsz987/channel-core';
 import { ReplyRouter } from '../src/reply-router.ts';
 import { SESSION_BINDING_SCHEMA_VERSION, type SessionBinding } from '../src/session-router.ts';
 import { ReplyContextStore } from '../src/reply-context-store.ts';

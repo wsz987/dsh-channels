@@ -1,5 +1,5 @@
 ---
-'@dsh/channel-harness': minor
+'@wsz987/channel-harness': minor
 ---
 
 ReplyContext becomes the required outbound gate. A turn is only delivered back

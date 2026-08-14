@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { resolveFixturesDir, validateFixture, type FixtureCase } from '@dsh/channel-testkit';
+import { resolveFixturesDir, validateFixture, type FixtureCase } from '@wsz987/channel-testkit';
 
 const FIXTURES_DIR = resolveFixturesDir();
 

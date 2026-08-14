@@ -15,7 +15,7 @@ import type {
   MessageReceived,
   SenderId,
   ConversationId,
-} from '@dsh/channel-core';
+} from '@wsz987/channel-core';
 import type { ILinkMessage, ILinkMessageItem, WeixinInboundMeta } from '../ilink/types.js';
 import { stableHash } from './dedup.js';
 

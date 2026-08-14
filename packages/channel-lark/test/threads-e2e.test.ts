@@ -16,8 +16,8 @@
  * `'lark'` appears only as event/binding data — no special-casing anywhere.
  */
 import { describe, expect, it } from 'vitest';
-import { loadFixture } from '@dsh/channel-testkit';
-import type { MessageReceived } from '@dsh/channel-core';
+import { loadFixture } from '@wsz987/channel-testkit';
+import type { MessageReceived } from '@wsz987/channel-core';
 import {
   AgentManager,
   type AgentGateway,

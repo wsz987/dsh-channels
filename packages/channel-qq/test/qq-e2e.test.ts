@@ -9,8 +9,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { Context } from '@deepseek-ai/cordis';
-import { ChannelService } from '@dsh/channel-core';
-import { createTestContext } from '@dsh/channel-testkit';
+import { ChannelService } from '@wsz987/channel-core';
+import { createTestContext } from '@wsz987/channel-testkit';
 import { ReplyRouter } from '../../channel-harness/src/reply-router.ts';
 import { ReplyContextStore } from '../../channel-harness/src/reply-context-store.ts';
 import type { SessionBinding } from '../../channel-harness/src/session-router.ts';

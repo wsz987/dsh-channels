@@ -29,8 +29,8 @@ import type {
   OutboundMessage,
   ReplyHandle,
   SendResult,
-} from '@dsh/channel-core';
-import { ChannelError } from '@dsh/channel-core';
+} from '@wsz987/channel-core';
+import { ChannelError } from '@wsz987/channel-core';
 import { DWClient } from 'dingtalk-stream';
 import type { DingTalkConfig } from './config.js';
 import { FetchTransport, type HttpTransport } from './transport.js';

@@ -25,9 +25,9 @@ import {
   manifestVerdict,
   validateManifest,
   versionState,
-} from '@dsh/channel-compat';
-import { resolveFixturesDir, validateFixture } from '@dsh/channel-testkit/fixture-loader';
-import type { ChannelAdapter } from '@dsh/channel-core';
+} from '@wsz987/channel-compat';
+import { resolveFixturesDir, validateFixture } from '@wsz987/channel-testkit/fixture-loader';
+import type { ChannelAdapter } from '@wsz987/channel-core';
 
 export type VerifySeverity = 'ok' | 'warning' | 'fail';
 

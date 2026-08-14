@@ -1,5 +1,5 @@
 /**
- * @dsh/channel-dingtalk — DingTalk channel adapter for DeepSeek Harness.
+ * @wsz987/channel-dingtalk — DingTalk channel adapter for DeepSeek Harness.
  *
  * Maps the DingTalk platform to the stable Channel Contract. Two upstream
  * drivers implement `DingTalkUpstream` behind `config.upstream.mode`:
@@ -12,7 +12,7 @@
  * platform credentials (never logged).
  */
 import { type Context } from '@deepseek-ai/cordis';
-import { mountChannelAdapter } from '@dsh/channel-core';
+import { mountChannelAdapter } from '@wsz987/channel-core';
 import type { DingTalkConfig } from './config.js';
 import { Config } from './config.js';
 import { DingTalkAdapter, type DingTalkAdapterDeps } from './adapter.js';

@@ -12,5 +12,5 @@ coverage/
 *.tsbuildinfo
 
 # Runtime state (session bindings, weixin credentials/cursor when a file
-# provider is configured — see docs/…-最终执行方案.md §15). Never commit.
+# provider is configured). Never commit.
 data/

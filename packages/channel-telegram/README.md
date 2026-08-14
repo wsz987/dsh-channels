@@ -1,16 +1,16 @@
-# @dsh/channel-telegram
+# @wsz987/channel-telegram
 
 Telegram Bot API channel adapter for DeepSeek Harness — the **M5 extensibility proof**.
 
 ## Extensibility proof
 
-This package was built against the **public Channel Contract** (`@dsh/channel-core` +
-`@dsh/channel-testkit`) with **zero changes** to `channel-core`, `channel-harness`,
-the `@dsh/channels` bundle, or the four official adapters (weixin / qq / dingtalk /
+This package was built against the **public Channel Contract** (`@wsz987/channel-core` +
+`@wsz987/channel-testkit`) with **zero changes** to `channel-core`, `channel-harness`,
+the `@wsz987/dsh-channels` bundle, or the four official adapters (weixin / qq / dingtalk /
 lark). It is a fifth channel that joins the ecosystem exactly the way a third-party
 adapter would.
 
-> **Deliberately NOT part of the `@dsh/channels` bundle.** The bundle ships the four
+> **Deliberately NOT part of the `@wsz987/dsh-channels` bundle.** The bundle ships the four
 > official channels; this adapter is the standalone proof that the contract is
 > extensible from the outside, without any core or harness changes.
 

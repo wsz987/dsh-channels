@@ -1,5 +1,5 @@
 /**
- * @dsh/channel-lark — Lark / Feishu channel adapter for DeepSeek Harness.
+ * @wsz987/channel-lark — Lark / Feishu channel adapter for DeepSeek Harness.
  *
  * Maps the Lark platform to the stable Channel Contract. Two upstream
  * drivers implement `LarkUpstream` behind `config.upstream.mode`:
@@ -14,7 +14,7 @@
  * the driver owns platform credentials (never logged).
  */
 import { type Context } from '@deepseek-ai/cordis';
-import { mountChannelAdapter } from '@dsh/channel-core';
+import { mountChannelAdapter } from '@wsz987/channel-core';
 import type { LarkConfig } from './config.js';
 import { Config } from './config.js';
 import { LarkAdapter, type LarkAdapterDeps } from './adapter.js';

@@ -30,7 +30,7 @@ import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence';
 import type { Context } from '@deepseek-ai/cordis';
 import type { AgentHandle, AgentOptions } from '@deepseek-ai/dsh-agent';
 import type { UserMessage } from '@deepseek-ai/dsh-llm';
-import type { ChannelLogger } from '@dsh/channel-core';
+import type { ChannelLogger } from '@wsz987/channel-core';
 import type { AgentRouteSpec } from './agent-router.js';
 import type { SessionBinding } from './session-router.js';
 

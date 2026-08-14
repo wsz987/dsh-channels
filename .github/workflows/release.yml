@@ -1,4 +1,4 @@
-# Phase 16 release automation (docs/release.md).
+# Release automation (docs/release.md).
 #
 # Tag-driven publish: this workflow runs ONLY when a `v*` release tag is pushed
 # (or manually via workflow_dispatch). Normal commits and pull requests do NOT
@@ -12,7 +12,7 @@
 # version is not yet on npm (`pnpm release` = `changeset publish`).
 #
 # The publish stays INERT until the `NPM_TOKEN` repository secret is configured
-# (an npm automation token with publish rights for the @dsh scope). Without it the
+# (an npm automation token with publish rights for the @wsz987 scope). Without it the
 # publish step fails — configure the secret to activate releases.
 
 name: Release

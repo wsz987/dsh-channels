@@ -1,5 +1,5 @@
 {
-  "name": "@dsh/app-fake-channel",
+  "name": "@wsz987/app-fake-channel",
   "version": "0.0.0",
   "private": true,
   "description": "Fake channel app: M0 end-to-end proof (ChannelEvent → Harness bridge port → ReplyRouter → adapter)",
@@ -11,11 +11,11 @@
     "clean": "rimraf lib"
   },
   "dependencies": {
-    "@dsh/channel-core": "workspace:*",
+    "@wsz987/channel-core": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1"
   },
   "devDependencies": {
-    "@dsh/channel-testkit": "workspace:*",
+    "@wsz987/channel-testkit": "workspace:*",
     "rimraf": "^6.0.0"
   },
   "license": "MIT"

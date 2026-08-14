@@ -5,7 +5,7 @@
  * receives the full accumulated text (never a delta). This class accumulates
  * deltas locally and forwards the monotonic full text on every change.
  */
-import type { ReplyHandle, OutboundMessage } from '@dsh/channel-core';
+import type { ReplyHandle, OutboundMessage } from '@wsz987/channel-core';
 import type { QQStreamSession } from './sdk-client.js';
 
 export class QQStreamingReply implements ReplyHandle {

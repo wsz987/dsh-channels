@@ -1,5 +1,5 @@
 /**
- * @dsh/channel-qq — QQ channel adapter for DeepSeek Harness.
+ * @wsz987/channel-qq — QQ channel adapter for DeepSeek Harness.
  *
  * Maps the QQ platform (via the official Tencent SDK
  * `@tencent-connect/qqbot-nodejs`) to the stable Channel Contract. The SDK
@@ -21,7 +21,7 @@ import {
   MemorySecretStore,
   MemoryStorage,
   mountChannelAdapter,
-} from '@dsh/channel-core';
+} from '@wsz987/channel-core';
 import type { QQConfig } from './config.js';
 import { Config } from './config.js';
 import { QQAdapter, type QQAdapterDeps } from './adapter.js';

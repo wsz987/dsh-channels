@@ -4,7 +4,7 @@
  * Ported from the upstream Tencent/openclaw-weixin proto mirror. Bytes fields
  * (context buffer, media AES keys) are base64 strings in JSON.
  */
-import type { ChannelId } from '@dsh/channel-core';
+import type { ChannelId } from '@wsz987/channel-core';
 
 /** Common request metadata attached to every iLink CGI request. */
 export interface ILinkBaseInfo {

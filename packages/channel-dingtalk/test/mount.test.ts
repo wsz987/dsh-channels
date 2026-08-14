@@ -8,7 +8,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { Context } from '@deepseek-ai/cordis';
-import { ChannelService, type ChannelAdapterContext } from '@dsh/channel-core';
+import { ChannelService, type ChannelAdapterContext } from '@wsz987/channel-core';
 import { Config, DingTalkAdapter, apply } from '../src/index.ts';
 import type { DingTalkConfig } from '../src/config.ts';
 

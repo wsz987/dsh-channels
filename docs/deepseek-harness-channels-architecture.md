@@ -24,7 +24,7 @@ Monorepo
 基础上，按 DeepSeek Harness 官方开发者文档修正为真正 Harness-native 的实现方式：
 
 1. `ChannelService` 明确定义为 **Cordis Service**。
-2. `@dsh/channels` 不再只是 npm meta package，而是正式的 **DSH Bundle**。
+2. `@wsz987/dsh-channels` 不再只是 npm meta package，而是正式的 **DSH Bundle**。
 3. Adapter 的网络连接与长生命周期资源统一交给 `ctx.effect()` 管理。
 4. Harness Bridge 必须正确持有 `AgentHandle`，不能创建后丢弃 ownership handle。
 5. 模型输出、turn/step/tool 事实统一通过 `session/event` 消费。
@@ -145,7 +145,7 @@ Harness breaking change
 最终用户：
 
 ```bash
-dsh plugin --profile default add @dsh/channels
+dsh plugin --profile default add @wsz987/dsh-channels
 ```
 
 一次安装首批官方渠道。
@@ -153,23 +153,23 @@ dsh plugin --profile default add @dsh/channels
 内部仍拆分：
 
 ```text
-@dsh/channel-core
-@dsh/channel-harness
-@dsh/channel-testkit
-@dsh/channel-compat
+@wsz987/channel-core
+@wsz987/channel-harness
+@wsz987/channel-testkit
+@wsz987/channel-compat
 
-@dsh/channel-weixin
-@dsh/channel-qq
-@dsh/channel-dingtalk
-@dsh/channel-lark
+@wsz987/channel-weixin
+@wsz987/channel-qq
+@wsz987/channel-dingtalk
+@wsz987/channel-lark
 
-@dsh/channels
+@wsz987/dsh-channels
 ```
 
 其中：
 
 ```text
-@dsh/channels = DSH Bundle
+@wsz987/dsh-channels = DSH Bundle
 ```
 
 不是业务实现集合。
@@ -1202,13 +1202,13 @@ Harness latest-compatible
 
 ---
 
-# 28. DSH Bundle：`@dsh/channels`
+# 28. DSH Bundle：`@wsz987/dsh-channels`
 
 `packages/channels` 是 Harness 正式 Bundle：
 
 ```json
 {
-  "name": "@dsh/channels",
+  "name": "@wsz987/dsh-channels",
   "version": "0.1.0",
   "type": "module",
   "dsh": {
@@ -1224,31 +1224,31 @@ Harness latest-compatible
 ```yaml
 - insert:
     - id: channels-service
-      name: '@dsh/channel-core/plugin'
+      name: '@wsz987/channel-core/plugin'
 
     - id: channels-harness
-      name: '@dsh/channel-harness'
+      name: '@wsz987/channel-harness'
       inject:
         - channels
         - agents
 
     - id: channels-weixin
-      name: '@dsh/channel-weixin'
+      name: '@wsz987/channel-weixin'
       inject:
         - channels
 
     - id: channels-qq
-      name: '@dsh/channel-qq'
+      name: '@wsz987/channel-qq'
       inject:
         - channels
 
     - id: channels-dingtalk
-      name: '@dsh/channel-dingtalk'
+      name: '@wsz987/channel-dingtalk'
       inject:
         - channels
 
     - id: channels-lark
-      name: '@dsh/channel-lark'
+      name: '@wsz987/channel-lark'
       inject:
         - channels
 ```
@@ -1262,7 +1262,7 @@ Harness latest-compatible
 正式：
 
 ```bash
-dsh plugin --profile default add @dsh/channels
+dsh plugin --profile default add @wsz987/dsh-channels
 ```
 
 也允许第三方：
@@ -1282,7 +1282,7 @@ dsh plugin --profile default add @foo/dsh-channel-telegram
 高级用户可以：
 
 ```bash
-dsh plugin --profile minimal add @dsh/channel-weixin
+dsh plugin --profile minimal add @wsz987/channel-weixin
 ```
 
 前提：
@@ -1294,7 +1294,7 @@ adapter package 自己提供 dsh.bundle
 或者安装一个轻量 bundle：
 
 ```text
-@dsh/channel-weixin-bundle
+@wsz987/channel-weixin-bundle
 ```
 
 是否把“library + bundle”放同一 package，可在实现时按 package DX 决定。
@@ -1306,17 +1306,17 @@ adapter package 自己提供 dsh.bundle
 Monorepo + independent versions：
 
 ```text
-@dsh/channel-core       0.3.0
-@dsh/channel-harness    0.4.2
-@dsh/channel-testkit    0.2.0
-@dsh/channel-compat     0.2.0
+@wsz987/channel-core       0.3.0
+@wsz987/channel-harness    0.4.2
+@wsz987/channel-testkit    0.2.0
+@wsz987/channel-compat     0.2.0
 
-@dsh/channel-weixin     0.8.1
-@dsh/channel-qq         0.5.4
-@dsh/channel-dingtalk   0.7.0
-@dsh/channel-lark       0.6.3
+@wsz987/channel-weixin     0.8.1
+@wsz987/channel-qq         0.5.4
+@wsz987/channel-dingtalk   0.7.0
+@wsz987/channel-lark       0.6.3
 
-@dsh/channels           0.9.0
+@wsz987/dsh-channels           0.9.0
 ```
 
 工具：
@@ -1371,11 +1371,11 @@ import {
   type ChannelAdapter,
   type ChannelEvent,
   type ChannelCapabilities,
-} from '@dsh/channel-core';
+} from '@wsz987/channel-core';
 
 import {
   runChannelAdapterContract,
-} from '@dsh/channel-testkit';
+} from '@wsz987/channel-testkit';
 ```
 
 第三方：

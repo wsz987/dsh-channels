@@ -1,4 +1,4 @@
-# DSH Bundle patch — @dsh/channels
+# DSH Bundle patch — @wsz987/dsh-channels
 #
 # Inserts the ChannelService, the Harness bridge and the four official
 # adapters into a DeepSeek Harness profile.
@@ -11,31 +11,31 @@
 
 - insert:
     - id: channels-service
-      name: '@dsh/channel-core/plugin'
+      name: '@wsz987/channel-core/plugin'
 
     - id: channels-harness
-      name: '@dsh/channel-harness'
+      name: '@wsz987/channel-harness'
       inject:
         - channels
         - agents
 
     - id: channels-weixin
-      name: '@dsh/channel-weixin'
+      name: '@wsz987/channel-weixin'
       inject:
         - channels
 
     - id: channels-qq
-      name: '@dsh/channel-qq'
+      name: '@wsz987/channel-qq'
       inject:
         - channels
         - credentials
 
     - id: channels-dingtalk
-      name: '@dsh/channel-dingtalk'
+      name: '@wsz987/channel-dingtalk'
       inject:
         - channels
 
     - id: channels-lark
-      name: '@dsh/channel-lark'
+      name: '@wsz987/channel-lark'
       inject:
         - channels

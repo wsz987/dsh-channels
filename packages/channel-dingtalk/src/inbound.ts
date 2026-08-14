@@ -1,7 +1,7 @@
 /**
  * Inbound processing: dedup window + structured mapping + emit.
  */
-import type { ChannelAdapterContext, MessageReceived } from '@dsh/channel-core';
+import type { ChannelAdapterContext, MessageReceived } from '@wsz987/channel-core';
 import { dedupKey, mapInbound, type DingTalkInboundMeta } from './mapper.js';
 
 export interface InboundProcessorOptions {

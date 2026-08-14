@@ -15,9 +15,9 @@ import type {
   OutboundMessage,
   SendResult,
   ImagePart,
-} from '@dsh/channel-core';
-import { collectText } from '@dsh/channel-core';
-import { ChannelError } from '@dsh/channel-core';
+} from '@wsz987/channel-core';
+import { collectText } from '@wsz987/channel-core';
+import { ChannelError } from '@wsz987/channel-core';
 import type { ILinkClient } from '../ilink/client.js';
 import type { ContextTokenStore } from '../storage/context-token.js';
 import {

@@ -13,7 +13,7 @@ import {
   type QQBotInboundMessage,
   type ReplyTarget,
 } from '@tencent-connect/qqbot-nodejs';
-import { ChannelSendError, type ChannelLogger, type OutboundMessage } from '@dsh/channel-core';
+import { ChannelSendError, type ChannelLogger, type OutboundMessage } from '@wsz987/channel-core';
 import type { QQConfig } from './config.js';
 
 /** Reply target for outbound text/media send (port-local structural type). */

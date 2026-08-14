@@ -7,7 +7,7 @@
  * The iLink client (`src/ilink/client.ts`) owns endpoint knowledge and builds
  * the protocol headers on top of this transport.
  */
-import { ChannelError } from '@dsh/channel-core';
+import { ChannelError } from '@wsz987/channel-core';
 
 export interface HttpRequestInit {
   method?: string;

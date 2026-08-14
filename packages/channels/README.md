@@ -1,4 +1,4 @@
-# @dsh/channels
+# @wsz987/dsh-channels
 
 DeepSeek Harness **DSH Bundle** — official messaging channels:
 
@@ -10,11 +10,11 @@ DeepSeek Harness **DSH Bundle** — official messaging channels:
 ## Install
 
 ```bash
-dsh plugin --profile default add @dsh/channels
+dsh plugin --profile default add @wsz987/dsh-channels
 ```
 
 The bundle patch (`cordis.patch.yml`) inserts the `ChannelService`
-(`@dsh/channel-core`), the Harness bridge (`@dsh/channel-harness`) and the
+(`@wsz987/channel-core`), the Harness bridge (`@wsz987/channel-harness`) and the
 four channel adapters. Every channel can be disabled through its plugin
 config.
 
@@ -23,7 +23,7 @@ config.
 Advanced users may install a single adapter:
 
 ```bash
-dsh plugin --profile minimal add @dsh/channel-weixin
+dsh plugin --profile minimal add @wsz987/channel-weixin
 ```
 
 ## Architecture

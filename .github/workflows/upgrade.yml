@@ -1,6 +1,6 @@
-# M4 — Weekly upstream drift check (scheduled + manual trigger).
+# Weekly upstream drift check (scheduled + manual trigger).
 #
-# Flow (plan §32 / Phase 15):
+# Flow:
 #   1. `pnpm check:upstream` compares the versions pinned by the committed lockfile
 #      against the npm registry `latest` tag and exits 1 when a newer in-range
 #      @deepseek-ai/* version exists. A red run of THIS workflow is the drift signal.

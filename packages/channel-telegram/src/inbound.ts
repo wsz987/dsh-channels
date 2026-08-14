@@ -5,7 +5,7 @@
  * dedup window is the adapter-level second layer for redelivery inside one
  * cycle (e.g. a webhook-style retry with the same update_id).
  */
-import type { ChannelAdapterContext, MessageReceived } from '@dsh/channel-core';
+import type { ChannelAdapterContext, MessageReceived } from '@wsz987/channel-core';
 import { dedupKey, mapInbound, type TelegramInboundMeta } from './mapper.js';
 
 export interface InboundProcessorOptions {

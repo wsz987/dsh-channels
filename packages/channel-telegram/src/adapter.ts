@@ -21,8 +21,8 @@ import type {
   ChannelTarget,
   OutboundMessage,
   SendResult,
-} from '@dsh/channel-core';
-import { ChannelError } from '@dsh/channel-core';
+} from '@wsz987/channel-core';
+import { ChannelError } from '@wsz987/channel-core';
 import type { TelegramConfig } from './config.js';
 import { FetchTransport, type HttpTransport } from './transport.js';
 import { HttpTelegramUpstream, type TelegramUpstream } from './upstream.js';

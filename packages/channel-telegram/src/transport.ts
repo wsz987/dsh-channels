@@ -10,7 +10,7 @@
  * embeds the token in the request path (`/bot<token>/...`) — are redacted
  * from error messages so a token can never reach logs.
  */
-import { ChannelError } from '@dsh/channel-core';
+import { ChannelError } from '@wsz987/channel-core';
 
 export interface HttpRequestInit {
   method?: string;

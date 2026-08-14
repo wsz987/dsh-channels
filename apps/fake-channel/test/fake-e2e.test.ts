@@ -6,7 +6,7 @@
  * Reuses the testkit's assembled pipeline as the demo carrier.
  */
 import { describe, expect, it } from 'vitest';
-import { runFakeChannelE2E } from '@dsh/channel-testkit';
+import { runFakeChannelE2E } from '@wsz987/channel-testkit';
 
 describe('M0 fake channel E2E', () => {
   it('routes inbound → agent followup → session event → reply', async () => {

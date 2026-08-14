@@ -9,8 +9,8 @@ import type {
   ChannelTarget,
   OutboundMessage,
   SendResult,
-} from '@dsh/channel-core';
-import { ChannelSendError } from '@dsh/channel-core';
+} from '@wsz987/channel-core';
+import { ChannelSendError } from '@wsz987/channel-core';
 import { toTextPayload } from './mapper.js';
 import type { DingTalkUpstream } from './upstream.js';
 

@@ -17,8 +17,8 @@ import type {
   ChannelTarget,
   OutboundMessage,
   SendResult,
-} from '@dsh/channel-core';
-import { ChannelError, ChannelSendError } from '@dsh/channel-core';
+} from '@wsz987/channel-core';
+import { ChannelError, ChannelSendError } from '@wsz987/channel-core';
 import type { ChannelConfig } from './config.js';
 import { FetchTransport, type HttpTransport } from './transport.js';
 import { HttpChannelUpstream, type ChannelUpstream } from './upstream.js';

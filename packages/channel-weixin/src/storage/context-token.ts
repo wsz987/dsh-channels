@@ -5,7 +5,7 @@
  * read on send so the reply carries the correct context. `channel-harness`
  * never sees the context token — it is entirely internal to this adapter.
  */
-import type { ChannelStorage } from '@dsh/channel-core';
+import type { ChannelStorage } from '@wsz987/channel-core';
 
 export interface ContextTokenStoreOptions {
   storage: ChannelStorage;

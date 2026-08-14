@@ -11,7 +11,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Context } from '@deepseek-ai/cordis';
-import { ChannelService, type MessageReceived } from '@dsh/channel-core';
+import { ChannelService, type MessageReceived } from '@wsz987/channel-core';
 import type { SessionEvent } from '@deepseek-ai/dsh-session';
 import {
   AgentManager,

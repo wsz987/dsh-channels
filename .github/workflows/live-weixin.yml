@@ -1,9 +1,9 @@
-# R6 — Weixin Live Platform Gate.
+# Weixin Live Platform Gate.
 #
 # Split from Offline CI (ci.yml): the live gate exercises the REAL Weixin iLink
 # platform, so it must NEVER run on ordinary PRs / pushes. It is
 # workflow_dispatch-ONLY (or a protected release environment) — see the R6
-# "Live 测试不要放普通 PR" section of the correction plan.
+# live-test separation rule (live tests never run on ordinary PRs).
 #
 # The live E2E lives in packages/channel-weixin/test/live/ and only runs when
 # DSH_WEIXIN_LIVE=1. Until a maintainer configures the live environment, this

@@ -1,5 +1,5 @@
 {
-  "name": "@dsh/channel-verify",
+  "name": "@wsz987/channel-verify",
   "version": "0.1.0",
   "repository": {
     "type": "git",
@@ -33,9 +33,9 @@
     "clean": "rimraf lib"
   },
   "dependencies": {
-    "@dsh/channel-core": "workspace:*",
-    "@dsh/channel-testkit": "workspace:*",
-    "@dsh/channel-compat": "workspace:*"
+    "@wsz987/channel-core": "workspace:*",
+    "@wsz987/channel-testkit": "workspace:*",
+    "@wsz987/channel-compat": "workspace:*"
   },
   "devDependencies": {
     "rimraf": "^6.0.0"

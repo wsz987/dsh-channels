@@ -10,8 +10,8 @@ import type {
   ChannelTarget,
   OutboundMessage,
   SendResult,
-} from '@dsh/channel-core';
-import { ChannelSendError } from '@dsh/channel-core';
+} from '@wsz987/channel-core';
+import { ChannelSendError } from '@wsz987/channel-core';
 import type { QQReplyTarget, QQSdkClient } from './sdk-client.js';
 
 export class OutboundSender {

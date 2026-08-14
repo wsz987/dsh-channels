@@ -1,14 +1,14 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Context } from '@deepseek-ai/cordis';
 import { TOPIC_ROBOT } from 'dingtalk-stream';
-import { ChannelService, ChannelError, type MessageReceived } from '@dsh/channel-core';
+import { ChannelService, ChannelError, type MessageReceived } from '@wsz987/channel-core';
 import {
   runChannelAdapterContract,
   createTestContext,
   loadFixture,
   makeChannelTarget,
   makeOutboundMessage,
-} from '@dsh/channel-testkit';
+} from '@wsz987/channel-testkit';
 import {
   Config,
   DingTalkAdapter,

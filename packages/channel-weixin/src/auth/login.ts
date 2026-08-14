@@ -12,8 +12,8 @@
  * all later calls. Verify codes are submitted through {@link WeixinQrAuth.submitVerifyCode}
  * — never through stdin — so the CLI/ChannelService owns that UX.
  */
-import type { AuthChallenge, AuthStatePoll } from '@dsh/channel-core';
-import { ChannelError } from '@dsh/channel-core';
+import type { AuthChallenge, AuthStatePoll } from '@wsz987/channel-core';
+import { ChannelError } from '@wsz987/channel-core';
 import type { ILinkClient } from '../ilink/client.js';
 import type { ILinkQrStatus, ILinkQrStatusResponse } from '../ilink/types.js';
 
