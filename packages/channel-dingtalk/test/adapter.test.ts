@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Context } from '@deepseek-ai/cordis';
+import { TOPIC_ROBOT } from 'dingtalk-stream';
 import { ChannelService, ChannelError, type MessageReceived } from '@dsh/channel-core';
 import {
   runChannelAdapterContract,
@@ -21,6 +22,7 @@ import {
 } from '../src/index.ts';
 import type { HttpTransport, HttpRequestInit } from '../src/index.ts';
 import type { DingTalkUpstream } from '../src/index.ts';
+import type { DingTalkStreamClient, DingTalkStreamMessage } from '../src/index.ts';
 import type { DingTalkConfig } from '../src/config.ts';
 
 /** Deterministic fake transport: routes keyed by path, records calls. */
@@ -68,8 +70,60 @@ function makeConfig(overrides: Partial<DingTalkConfig> = {}): DingTalkConfig {
     card: {
       createOnFirstDelta: true,
     },
+    // These tests exercise the legacy HTTP gateway driver over the fake
+    // transport; SDK-mode tests override this to 'sdk' with a fake client.
+    upstream: {
+      mode: 'gateway',
+    },
     ...overrides,
   });
+}
+
+/** Fake stream client: records lifecycle, dispatches inbound robot messages. */
+class FakeStreamClient implements DingTalkStreamClient {
+  connects = 0;
+  disconnects = 0;
+  readonly registered: string[] = [];
+  readonly calls: unknown[] = [];
+  private readonly listeners = new Map<string, (message: DingTalkStreamMessage) => void>();
+
+  connect(): Promise<void> {
+    this.calls.push(['connect']);
+    this.connects += 1;
+    return Promise.resolve();
+  }
+
+  disconnect(): void {
+    this.calls.push(['disconnect']);
+    this.disconnects += 1;
+  }
+
+  registerCallbackListener(topic: string, callback: (message: DingTalkStreamMessage) => void): this {
+    this.calls.push(['registerCallbackListener', topic]);
+    this.registered.push(topic);
+    this.listeners.set(topic, callback);
+    return this;
+  }
+
+  /** Simulate the stream server delivering a CALLBACK message on a topic. */
+  emit(topic: string, message: DingTalkStreamMessage): void {
+    this.listeners.get(topic)?.(message);
+  }
+}
+
+/** Build a downstream message carrying a text robot message payload. */
+function robotDownstream(overrides: Record<string, unknown> = {}): DingTalkStreamMessage {
+  return {
+    headers: { topic: TOPIC_ROBOT, eventId: 'evt-1', messageId: 'mid-1' },
+    data: JSON.stringify({
+      msgId: 'msg-sdk-1',
+      senderStaffId: 'user_sdk',
+      conversationId: 'conv_sdk',
+      msgtype: 'text',
+      text: { content: 'hello from sdk' },
+      ...overrides,
+    }),
+  };
 }
 
 describe('mapper (fixture-driven)', () => {
@@ -521,6 +575,108 @@ describe('DingTalkAdapter lifecycle', () => {
     await expect(a.send(makeChannelTarget(), makeOutboundMessage())).rejects.toMatchObject({
       code: 'CHANNEL_NOT_STARTED',
     });
+  });
+});
+
+describe('DingTalkAdapter SDK mode (fake stream client)', () => {
+  let transport: FakeTransport;
+
+  beforeEach(() => {
+    transport = new FakeTransport();
+  });
+
+  function sdkAdapter(client: FakeStreamClient): DingTalkAdapter {
+    return new DingTalkAdapter(
+      makeConfig({ upstream: { mode: 'sdk', clientId: 'app-key', clientSecret: 'app-secret' } }),
+      { transport, sdkClient: client, now: () => 1000 },
+    );
+  }
+
+  it('connects the stream client on start and disconnects on stop', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    const client = new FakeStreamClient();
+    const a = sdkAdapter(client);
+    await a.start(ctx);
+    await vi.waitFor(() => expect(client.connects).toBe(1), { timeout: 2000 });
+    expect(client.registered).toEqual([TOPIC_ROBOT]);
+    await a.stop();
+    expect(client.disconnects).toBe(1);
+    expect(client.registered).toEqual([TOPIC_ROBOT]);
+  });
+
+  it('delivers SDK inbound robot messages to MessageReceived', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    const client = new FakeStreamClient();
+    const a = sdkAdapter(client);
+    const received: MessageReceived[] = [];
+    service.on((event) => {
+      if (event.type === 'message.received') received.push(event);
+    });
+    await a.start(ctx);
+    await vi.waitFor(() => expect(client.connects).toBe(1), { timeout: 2000 });
+    client.emit(TOPIC_ROBOT, robotDownstream());
+    await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: 2000 });
+    expect(received[0]?.message.id).toBe('msg-sdk-1');
+    expect(received[0]?.message.content).toEqual([{ type: 'text', text: 'hello from sdk' }]);
+    expect(received[0]?.conversation.id).toBe('conv_sdk');
+    expect(received[0]?.sender.id).toBe('user_sdk');
+    await a.stop();
+  });
+
+  it('flips health to ok once the stream connects', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    const client = new FakeStreamClient();
+    const a = sdkAdapter(client);
+    // Not started: down.
+    expect((await a.getHealth()).status).toBe('down');
+    await a.start(ctx);
+    // The instant fake connect flips health to ok within the same tick, so
+    // assert the end state and that the connection event was reported.
+    await vi.waitFor(async () => {
+      expect((await a.getHealth()).status).toBe('ok');
+    }, { timeout: 2000 });
+    await a.stop();
+  });
+
+  it('fails start loudly when sdk credentials are missing', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    const a = new DingTalkAdapter(makeConfig({ upstream: { mode: 'sdk' } }), { transport, now: () => 1000 });
+    await expect(a.start(ctx)).rejects.toThrow(/clientId.*clientSecret/);
+  });
+
+  it('uses the injected client factory when no concrete client is given', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    const client = new FakeStreamClient();
+    const factory = vi.fn(() => client);
+    const a = new DingTalkAdapter(
+      makeConfig({ upstream: { mode: 'sdk', clientId: 'k', clientSecret: 's' } }),
+      { transport, sdkClientFactory: factory, now: () => 1000 },
+    );
+    await a.start(ctx);
+    expect(factory).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(client.connects).toBe(1), { timeout: 2000 });
+    await a.stop();
+  });
+
+  it('never leaks credentials into stream client calls', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    const client = new FakeStreamClient();
+    const secret = 'super-secret-app-secret';
+    const a = new DingTalkAdapter(
+      makeConfig({ upstream: { mode: 'sdk', clientId: 'app-key', clientSecret: secret } }),
+      { transport, sdkClient: client, now: () => 1000 },
+    );
+    await a.start(ctx);
+    await vi.waitFor(() => expect(client.connects).toBe(1), { timeout: 2000 });
+    await a.stop();
+    expect(JSON.stringify(client.calls)).not.toContain(secret);
+    expect(JSON.stringify(client.calls)).not.toContain('app-key');
   });
 });
 

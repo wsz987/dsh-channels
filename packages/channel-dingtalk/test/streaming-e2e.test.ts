@@ -69,6 +69,10 @@ function makeConfig(overrides: Partial<DingTalkConfig> = {}): DingTalkConfig {
     card: {
       createOnFirstDelta: true,
     },
+    // The e2e suite drives the HTTP gateway driver over the fake transport.
+    upstream: {
+      mode: 'gateway',
+    },
     ...overrides,
   });
 }

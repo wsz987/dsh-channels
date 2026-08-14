@@ -29,9 +29,10 @@
     "clean": "rimraf lib"
   },
   "dependencies": {
-    "@dsh/channel-core": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/schemastery": "^3.18.1"
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "@dsh/channel-core": "workspace:*",
+    "dingtalk-stream": "2.1.6-beta.1"
   },
   "devDependencies": {
     "@dsh/channel-testkit": "workspace:*",

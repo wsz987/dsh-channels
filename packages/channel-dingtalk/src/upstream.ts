@@ -1,9 +1,13 @@
 /**
- * DingTalk upstream driver — the only module that knows the HTTP endpoints.
+ * DingTalk HTTP upstream driver — the only module that knows the HTTP
+ * endpoints (self-hosted gateway protocol).
  *
- * The upstream is SDK-agnostic: the `dingtalk-stream` SDK can slot in later
- * behind this same interface. The gateway owns platform credentials; the
- * adapter never sees or logs them (architecture §21 / red line 3).
+ * Two drivers implement the shared `DingTalkUpstream` interface:
+ * - `HttpDingTalkUpstream` (this file) — long-poll inbound + HTTP outbound
+ *   against the self-hosted gateway. The gateway owns platform credentials;
+ *   the adapter never sees or logs them (architecture §21 / red line 3).
+ * - `DingTalkStreamUpstream` (stream-upstream.ts) — inbound via the official
+ *   `dingtalk-stream` SDK; outbound delegates back to this HTTP driver.
  *
  * Endpoints (protocol-level, self-hosted gateway):
  * - GET  /stream        — long-poll for inbound payloads

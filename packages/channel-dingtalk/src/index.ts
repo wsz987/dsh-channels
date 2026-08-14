@@ -1,10 +1,15 @@
 /**
  * @dsh/channel-dingtalk — DingTalk channel adapter for DeepSeek Harness.
  *
- * Maps the DingTalk platform (via a self-hosted HTTP upstream driver) to the
- * stable Channel Contract. Streaming is `edit` (AI Card): create card →
- * update with content → finalize → failure card. Auth is connection-state
- * driven — the gateway owns platform credentials.
+ * Maps the DingTalk platform to the stable Channel Contract. Two upstream
+ * drivers implement `DingTalkUpstream` behind `config.upstream.mode`:
+ * - 'sdk'     — inbound via the official `dingtalk-stream` SDK (WebSocket
+ *   stream mode); outbound delegated to the HTTP driver.
+ * - 'gateway' — self-hosted HTTP gateway long-poll driver (legacy).
+ *
+ * Streaming is `edit` (AI Card): create card → update with content →
+ * finalize → failure card. Auth is connection-state driven — the driver owns
+ * platform credentials (never logged).
  */
 import { type Context } from '@deepseek-ai/cordis';
 import {
@@ -20,11 +25,18 @@ export const name = 'channel-dingtalk';
 export const inject: string[] = ['channels'];
 
 export { Config };
-export { DingTalkAdapter } from './adapter.js';
+export { DingTalkAdapter, type DingTalkAdapterDeps } from './adapter.js';
 export { DingTalkCardReply, type DingTalkCardStatus, type DingTalkCardUpdate } from './ai-card.js';
 export { InboundProcessor } from './inbound.js';
 export { OutboundSender } from './outbound.js';
-export { HttpDingTalkUpstream, type DingTalkUpstream } from './upstream.js';
+export { HttpDingTalkUpstream, type CardCreateResult, type DingTalkUpstream } from './upstream.js';
+export {
+  DingTalkStreamUpstream,
+  toGatewayRaw,
+  type DingTalkStreamClient,
+  type DingTalkStreamMessage,
+  type DingTalkStreamUpstreamOptions,
+} from './stream-upstream.js';
 export { FetchTransport, type HttpTransport } from './transport.js';
 export {
   mapInbound,

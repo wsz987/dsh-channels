@@ -1,35 +1,55 @@
 /**
- * DingTalk upstream compatibility manifest (M2).
+ * DingTalk upstream compatibility manifest (M2 + SDK driver).
  *
  * Records the upstream reference and tested version so `channels doctor` and
  * the upgrade pipeline can govern compatibility without re-verifying by hand.
+ *
+ * Strategy: 'sdk' — inbound rides the official `dingtalk-stream` SDK
+ * (WebSocket stream mode). Outbound (message send / AI Card) is not part of
+ * the stream SDK; it uses the DingTalk OpenAPI HTTP surface via the
+ * transport (self-hosted gateway endpoints in this iteration).
+ *
+ * Status 'tested' is justified by the Channel Contract + fixture tests plus
+ * the SDK-mode offline tests (fake stream client) passing — fully offline.
+ * Live verification against a real DingTalk app (AppKey/AppSecret) is a
+ * manual step.
  */
-
 export interface DingTalkUpstreamManifest {
   reference: string;
   testedVersion: string;
   versionRange: string;
-  strategy: 'source';
+  strategy: 'sdk' | 'source';
+}
+
+/** Official SDK consumed by the upstream driver, when one is used. */
+export interface DingTalkSdkManifest {
+  /** npm package name of the official SDK. */
+  package: string;
+  /** Version the adapter was verified against. */
+  testedVersion: string;
 }
 
 export interface DingTalkManifest {
   id: 'dingtalk';
   adapterVersion: string;
   upstream: DingTalkUpstreamManifest;
-  sdk: undefined;
+  sdk: DingTalkSdkManifest | undefined;
   status: 'tested';
 }
 
-/** M2 manifest: self-hosted HTTP gateway, protocol-level strategy. */
+/** Current manifest: inbound via the official dingtalk-stream SDK. */
 export const manifest: DingTalkManifest = {
   id: 'dingtalk',
   adapterVersion: '0.7.0',
   upstream: {
-    reference: 'dingtalk http gateway (self-hosted, protocol-level)',
-    testedVersion: 'm2-http',
+    reference: 'open-dingtalk/dingtalk-stream-sdk-nodejs (https://github.com/open-dingtalk/dingtalk-stream-sdk-nodejs)',
+    testedVersion: '2.1.6-beta.1',
     versionRange: '*',
-    strategy: 'source',
+    strategy: 'sdk',
   },
-  sdk: undefined,
+  sdk: {
+    package: 'dingtalk-stream',
+    testedVersion: '2.1.6-beta.1',
+  },
   status: 'tested',
 };
