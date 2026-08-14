@@ -17,11 +17,7 @@
  */
 import { type Context } from '@deepseek-ai/cordis';
 import { credentialRef } from '@deepseek-ai/dsh-credentials';
-import {
-  MemorySecretStore,
-  MemoryStorage,
-  mountChannelAdapter,
-} from '@wsz987/channel-core';
+import { mountChannelAdapter } from '@wsz987/channel-core';
 import type { QQConfig } from './config.js';
 import { Config } from './config.js';
 import { QQAdapter, type QQAdapterDeps } from './adapter.js';
@@ -65,13 +61,14 @@ export function apply(ctx: Context, config: QQConfig, deps: QQAdapterDeps = {}):
 
     const adapter = new QQAdapter(config, { ...deps, appSecret: credential.value });
 
-    mountChannelAdapter(ctx, adapter, (signal) => ({
-      emit: (event) => ctx.channels.emit(event),
-      logger: ctx.logger('channel-qq'),
-      secrets: new MemorySecretStore(),
-      storage: new MemoryStorage(),
-      signal,
-    }));
+    // Share the ChannelService's durable runtime resources (logger / emit /
+    // secrets / storage / signal) instead of hand-rolling per-mount Memory
+    // stores — QQ must not bypass the unified persistence backend.
+    mountChannelAdapter(
+      ctx,
+      adapter,
+      (signal) => ctx.channels.createAdapterContext({ channelId: 'qq', signal }),
+    );
     // The mount owns the adapter lifecycle; this outer effect only scopes the
     // async credential resolution, so its disposer is a no-op.
     return () => {};
