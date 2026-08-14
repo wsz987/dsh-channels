@@ -24,10 +24,16 @@ import {
   mapInteraction,
   toTextPayload,
   dedupKey,
+  MESSAGE_EVENT_KEY,
   apply,
 } from '../src/index.ts';
 import type { HttpTransport, HttpRequestInit } from '../src/index.ts';
 import type { LarkUpstream } from '../src/index.ts';
+import type {
+  LarkSdkClient,
+  LarkSdkDispatcher,
+  LarkMessageEventData,
+} from '../src/index.ts';
 import type { LarkConfig } from '../src/config.ts';
 
 /** Deterministic fake transport: routes keyed by path, records calls. */
@@ -75,8 +81,81 @@ function makeConfig(overrides: Partial<LarkConfig> = {}): LarkConfig {
     card: {
       createOnFirstDelta: true,
     },
+    // These tests exercise the legacy HTTP gateway driver over the fake
+    // transport; SDK-mode tests override this to 'sdk' with a fake client.
+    upstream: {
+      mode: 'gateway',
+    },
     ...overrides,
   });
+}
+
+/**
+ * Fake WS long-connection client for SDK mode: records lifecycle, captures
+ * the dispatcher handed to start(), and can simulate the WS server delivering
+ * v1 event envelopes (through the real SDK EventDispatcher — pure logic).
+ */
+class FakeWsClient implements LarkSdkClient {
+  starts = 0;
+  closes = 0;
+  readonly calls: unknown[] = [];
+  failStart?: Error;
+  dispatcher?: LarkSdkDispatcher;
+
+  async start(params: { eventDispatcher: LarkSdkDispatcher }): Promise<void> {
+    this.calls.push(['start']);
+    this.dispatcher = params.eventDispatcher;
+    if (this.failStart) {
+      const error = this.failStart;
+      this.failStart = undefined;
+      return Promise.reject(error);
+    }
+    this.starts += 1;
+  }
+
+  close(params?: { force?: boolean }): void {
+    this.calls.push(['close', params ?? {}]);
+    this.closes += 1;
+  }
+
+  /** Simulate the WS server delivering one v1 event envelope. */
+  async emit(payload: unknown): Promise<unknown> {
+    if (!this.dispatcher) throw new Error('client not started');
+    return this.dispatcher.invoke(payload, { needCheck: false });
+  }
+}
+
+/** Build a flat parsed v1 payload (header + event merged, per the SDK). */
+function flatEvent(overrides: Record<string, unknown> = {}): LarkMessageEventData {
+  return {
+    event_id: 'evt-1',
+    event_type: MESSAGE_EVENT_KEY,
+    token: 'tok-1',
+    create_time: '1700000000000',
+    sender: {
+      sender_id: { open_id: 'ou_sdk_user', union_id: 'on_1', user_id: 'u_1' },
+      sender_type: 'user',
+    },
+    message: {
+      message_id: 'om_sdk_1',
+      chat_id: 'oc_sdk_conv',
+      chat_type: 'group',
+      message_type: 'text',
+      content: JSON.stringify({ text: 'hello from sdk' }),
+      create_time: '1700000000000',
+    },
+    ...overrides,
+  } as LarkMessageEventData;
+}
+
+/** Wrap a flat payload in the v1 envelope shape the WS delivers. */
+function v1Event(data: LarkMessageEventData = flatEvent()): Record<string, unknown> {
+  const { event_id, token, create_time, event_type, ...rest } = data;
+  return {
+    schema: '2.0',
+    header: { event_id, event_type: event_type ?? MESSAGE_EVENT_KEY, token, create_time },
+    event: rest,
+  };
 }
 
 const meta = { channel: 'lark' as never, accountId: 'main' as never };
@@ -603,6 +682,148 @@ describe('LarkAdapter lifecycle', () => {
     await expect(a.send(makeChannelTarget(), makeOutboundMessage())).rejects.toMatchObject({
       code: 'CHANNEL_NOT_STARTED',
     });
+  });
+});
+
+describe('LarkAdapter SDK mode (fake WS client)', () => {
+  let transport: FakeTransport;
+
+  beforeEach(() => {
+    transport = new FakeTransport();
+  });
+
+  function sdkAdapter(client: FakeWsClient): LarkAdapter {
+    return new LarkAdapter(
+      makeConfig({ upstream: { mode: 'sdk', appId: 'cli_appid', appSecret: 'cli_secret' } }),
+      { transport, sdkClient: client, now: () => 1000 },
+    );
+  }
+
+  it('connects the SDK client on start and disconnects on stop', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    const client = new FakeWsClient();
+    const a = sdkAdapter(client);
+    await a.start(ctx);
+    await vi.waitFor(() => expect(client.starts).toBe(1), { timeout: 2000 });
+    await a.stop();
+    expect(client.closes).toBe(1);
+    expect(JSON.stringify(client.calls)).toContain('start');
+  });
+
+  it('delivers SDK inbound message events to MessageReceived', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    const client = new FakeWsClient();
+    const a = sdkAdapter(client);
+    const received: MessageReceived[] = [];
+    service.on((event) => {
+      if (event.type === 'message.received') received.push(event as MessageReceived);
+    });
+    await a.start(ctx);
+    await vi.waitFor(() => expect(client.starts).toBe(1), { timeout: 2000 });
+    await client.emit(v1Event());
+    await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: 2000 });
+    expect(received[0]?.message.id).toBe('om_sdk_1');
+    expect(received[0]?.message.content).toEqual([{ type: 'text', text: 'hello from sdk' }]);
+    expect(received[0]?.conversation.id).toBe('oc_sdk_conv');
+    expect(received[0]?.conversation.type).toBe('group');
+    expect(received[0]?.sender.id).toBe('ou_sdk_user');
+    await a.stop();
+  });
+
+  it('preserves a thread reply (parent_id → conversation.threadId) end to end', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    const client = new FakeWsClient();
+    const a = sdkAdapter(client);
+    const received: MessageReceived[] = [];
+    service.on((event) => {
+      if (event.type === 'message.received') received.push(event as MessageReceived);
+    });
+    await a.start(ctx);
+    await vi.waitFor(() => expect(client.starts).toBe(1), { timeout: 2000 });
+    await client.emit(
+      v1Event(
+        flatEvent({
+          message: {
+            message_id: 'om_reply_sdk',
+            chat_id: 'oc_sdk_conv',
+            chat_type: 'group',
+            message_type: 'text',
+            content: JSON.stringify({ text: 'thread reply' }),
+            parent_id: 'om_thread_root',
+            create_time: '1700000000000',
+          },
+        }),
+      ),
+    );
+    await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: 2000 });
+    expect(received[0]?.conversation.id).toBe('oc_sdk_conv');
+    expect(received[0]?.conversation.threadId).toBe('om_thread_root');
+    await a.stop();
+  });
+
+  it('flips health to ok once the WS connects', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    const client = new FakeWsClient();
+    const a = sdkAdapter(client);
+    // Not started: down.
+    expect((await a.getHealth()).status).toBe('down');
+    await a.start(ctx);
+    // The instant fake connect flips health to ok within the same tick.
+    await vi.waitFor(async () => {
+      expect((await a.getHealth()).status).toBe('ok');
+    }, { timeout: 2000 });
+    expect((await a.getHealth()).authenticated).toBe(true);
+    await a.stop();
+  });
+
+  it('fails start loudly when sdk credentials are missing', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    const a = new LarkAdapter(makeConfig({ upstream: { mode: 'sdk' } }), { transport, now: () => 1000 });
+    await expect(a.start(ctx)).rejects.toThrow(/appId.*appSecret/);
+  });
+
+  it('uses the injected client factory when no concrete client is given', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    const client = new FakeWsClient();
+    const factory = vi.fn(() => client);
+    const a = new LarkAdapter(
+      makeConfig({ upstream: { mode: 'sdk', appId: 'k', appSecret: 's' } }),
+      { transport, sdkClientFactory: factory, now: () => 1000 },
+    );
+    await a.start(ctx);
+    expect(factory).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(client.starts).toBe(1), { timeout: 2000 });
+    await a.stop();
+  });
+
+  it('never leaks credentials into WS client calls or transport errors', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    const client = new FakeWsClient();
+    const secret = 'super-secret-app-secret';
+    const a = new LarkAdapter(
+      makeConfig({ upstream: { mode: 'sdk', appId: 'cli_appid', appSecret: secret } }),
+      { transport, sdkClient: client, now: () => 1000 },
+    );
+    await a.start(ctx);
+    await vi.waitFor(() => expect(client.starts).toBe(1), { timeout: 2000 });
+
+    // Outbound errors must not echo credentials either.
+    transport.route('/message/send', () => {
+      throw new Error('outbound exploded');
+    });
+    await expect(a.send(makeChannelTarget(), makeOutboundMessage())).rejects.toThrow('outbound exploded');
+
+    await a.stop();
+    expect(JSON.stringify(client.calls)).not.toContain(secret);
+    expect(JSON.stringify(client.calls)).not.toContain('cli_appid');
+    expect(JSON.stringify(transport.calls)).not.toContain(secret);
   });
 });
 

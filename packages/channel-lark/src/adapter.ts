@@ -6,11 +6,19 @@
  * and are aborted via the adapter context signal. The adapter never touches
  * Harness Agent APIs.
  *
- * Auth is connection-state driven: the self-hosted gateway owns the platform
- * credentials, so the adapter derives its auth state from the receive loop
+ * The upstream driver is selected by `config.upstream.mode`:
+ * - 'sdk'     → `LarkSdkUpstream`: inbound via the official
+ *   `@larksuiteoapi/node-sdk` WS long-connection, outbound delegated to the
+ *   HTTP driver. The WS client comes from `deps.sdkClient` /
+ *   `deps.sdkClientFactory`, defaulting to a real `WSClient` built from
+ *   `upstream.appId/appSecret` at start time (missing credentials fail start
+ *   loudly, not construction).
+ * - 'gateway' → `HttpLarkUpstream` over the transport (legacy).
+ *
+ * Auth is connection-state driven: the upstream driver owns the platform
+ * credentials, so the adapter derives its auth state from the connection
  * (connected → authenticated). `beginAuth`/`pollAuth` are intentionally not
- * implemented in M3 — a real OAuth/code flow can slot in behind the same
- * optional contract methods later.
+ * implemented in M3 — a real OAuth/code flow can slot in later.
  */
 import type {
   ChannelAdapter,
@@ -24,9 +32,15 @@ import type {
   SendResult,
 } from '@dsh/channel-core';
 import { ChannelError } from '@dsh/channel-core';
+import { Domain, WSClient } from '@larksuiteoapi/node-sdk';
 import type { LarkConfig } from './config.js';
 import { FetchTransport, type HttpTransport } from './transport.js';
 import { HttpLarkUpstream, type LarkUpstream } from './upstream.js';
+import {
+  LarkSdkUpstream,
+  type LarkSdkClient,
+  type LarkSdkUpstreamOptions,
+} from './lark-sdk-upstream.js';
 import { InboundProcessor } from './inbound.js';
 import { OutboundSender } from './outbound.js';
 import { LarkCardReply } from './card.js';
@@ -34,6 +48,14 @@ import { manifest as larkManifest, type LarkManifest } from './manifest.js';
 
 export interface LarkAdapterDeps {
   transport?: HttpTransport;
+  /**
+   * Pre-built WS long-connection client for SDK mode (offline tests).
+   * Overrides `sdkClientFactory`; when neither is given a real `WSClient`
+   * is built from `config.upstream.appId/appSecret` at start time.
+   */
+  sdkClient?: LarkSdkClient;
+  /** Lazy WS client factory for SDK mode; overrides the default WSClient. */
+  sdkClientFactory?: (config: LarkConfig) => LarkSdkClient;
   /** Injectable clock (tests). */
   now?: () => number;
 }
@@ -58,27 +80,36 @@ export class LarkAdapter implements ChannelAdapter {
   };
 
   private ctx?: ChannelAdapterContext;
-  private upstream: LarkUpstream;
+  /** Built in `start()` (driver selection needs the resolved deps/credentials). */
+  private upstream!: LarkUpstream;
+  private readonly transport: HttpTransport;
+  private readonly deps: LarkAdapterDeps;
   private inbound!: InboundProcessor;
   private outbound!: OutboundSender;
   private started = false;
   private stopped = false;
   private receiveLoop?: Promise<void>;
   private connected = false;
-  /** Connection-state-driven auth; the gateway owns platform credentials. */
+  /** Connection-state-driven auth; the upstream driver owns credentials. */
   private authState: 'unknown' | 'authenticated' | 'failed' = 'unknown';
   private readonly now: () => number;
+  /** Internal stop signal merged with the context signal for prompt teardown. */
+  private stopController?: AbortController;
+  private receiveSignal?: AbortSignal;
 
   constructor(private readonly config: LarkConfig, deps: LarkAdapterDeps = {}) {
     this.now = deps.now ?? Date.now;
-    const transport = deps.transport ?? new FetchTransport(config.baseUrl, { timeoutMs: config.timeoutMs });
-    this.upstream = new HttpLarkUpstream({ transport, longPollTimeoutMs: config.longPollTimeoutMs });
+    this.deps = deps;
+    this.transport = deps.transport ?? new FetchTransport(config.baseUrl, { timeoutMs: config.timeoutMs });
   }
 
   async start(ctx: ChannelAdapterContext): Promise<void> {
     if (this.started) return;
     this.ctx = ctx;
     this.stopped = false;
+    this.buildUpstream();
+    this.stopController = new AbortController();
+    this.receiveSignal = AbortSignal.any([ctx.signal, this.stopController.signal]);
     this.inbound = new InboundProcessor({
       ctx,
       meta: { channel: this.id as never, accountId: this.config.accountId as never },
@@ -101,7 +132,10 @@ export class LarkAdapter implements ChannelAdapter {
     this.stopped = true;
     this.started = false;
     this.connected = false;
-    // The owning fiber aborts the context signal first; the loop exits on it.
+    // The owning fiber aborts the context signal first; the loop also exits
+    // on our internal stop signal so stop() never depends on an external
+    // abort (contract tests stop without disposing the context).
+    this.stopController?.abort();
     const loop = this.receiveLoop;
     this.receiveLoop = undefined;
     if (loop) await loop.catch(() => undefined);
@@ -149,23 +183,44 @@ export class LarkAdapter implements ChannelAdapter {
     this.receiveLoop = this.runReceiveLoop();
   }
 
+  /** Select and build the upstream driver for the configured mode. */
+  private buildUpstream(): void {
+    const httpUpstream = new HttpLarkUpstream({
+      transport: this.transport,
+      longPollTimeoutMs: this.config.longPollTimeoutMs,
+    });
+    if (this.config.upstream.mode !== 'sdk') {
+      this.upstream = httpUpstream;
+      return;
+    }
+    const options: LarkSdkUpstreamOptions = {
+      client: this.resolveSdkClient(),
+      outbound: httpUpstream,
+      onConnected: () => this.markConnected(),
+    };
+    this.upstream = new LarkSdkUpstream(options);
+  }
+
+  private resolveSdkClient(): LarkSdkClient {
+    if (this.deps.sdkClient) return this.deps.sdkClient;
+    if (this.deps.sdkClientFactory) return this.deps.sdkClientFactory(this.config);
+    return createDefaultWSClient(this.config);
+  }
+
   private async runReceiveLoop(): Promise<void> {
     let attempt = 0;
     while (!this.stopped && !this.aborted()) {
       try {
-        await this.upstream.receive(this.ctx!.signal, (raw) => {
+        await this.upstream.receive(this.receiveSignal!, (raw) => {
           void this.inbound.handle(raw).catch((error) => {
             this.ctx!.logger.error('[channel-lark] inbound handling failed', error);
           });
         });
         attempt = 0;
-        if (!this.connected) {
-          // A successful long-poll proves the gateway is reachable; auth
-          // follows the connection state (the gateway owns credentials).
-          this.connected = true;
-          this.setAuth('authenticated');
-          this.emitConnection('connected');
-        }
+        // A completed receive cycle proves the upstream is reachable; auth
+        // follows the connection state (the driver owns credentials). In sdk
+        // mode the WS driver also reports connectivity via onConnected.
+        this.markConnected();
       } catch (error) {
         if (this.stopped || this.aborted()) break;
         attempt += 1;
@@ -182,7 +237,7 @@ export class LarkAdapter implements ChannelAdapter {
           this.config.reconnect.maxDelayMs,
         );
         this.ctx!.logger.warn(`[channel-lark] receive loop error; retry in ${delay}ms`, error);
-        await sleep(delay, this.ctx!.signal);
+        await sleep(delay, this.receiveSignal!);
       }
     }
     this.connected = false;
@@ -191,8 +246,20 @@ export class LarkAdapter implements ChannelAdapter {
     }
   }
 
+  /** Flip connection/auth state once the upstream proves reachable. */
+  private markConnected(): void {
+    // Never report connected while stopping; an external abort is not
+    // sufficient (a long-poll cycle may legitimately end on the abort while
+    // having already proven reachability — see the gateway lifecycle tests).
+    if (this.stopped) return;
+    if (this.connected) return;
+    this.connected = true;
+    this.setAuth('authenticated');
+    this.emitConnection('connected');
+  }
+
   private aborted(): boolean {
-    return this.ctx?.signal.aborted ?? false;
+    return this.receiveSignal?.aborted ?? true;
   }
 
   private setAuth(state: 'unknown' | 'authenticated' | 'failed'): void {
@@ -224,6 +291,18 @@ export class LarkAdapter implements ChannelAdapter {
       })
       .catch(() => undefined);
   }
+}
+
+/** Build the real SDK WS client from SDK-mode credentials; never logs them. */
+function createDefaultWSClient(config: LarkConfig): LarkSdkClient {
+  const { appId, appSecret } = config.upstream;
+  if (!appId || !appSecret) {
+    throw new ChannelError(
+      'CHANNEL_ERROR',
+      'lark upstream mode "sdk" requires upstream.appId and upstream.appSecret',
+    );
+  }
+  return new WSClient({ appId, appSecret, domain: Domain.Feishu });
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
