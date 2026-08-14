@@ -86,9 +86,15 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Test
         run: pnpm test
+      # The channel-verify CLI entry is `node lib/cli.js`, which is produced by
+      # `@wsz987/channel-verify`'s OWN build — `turbo run test` only builds each
+      # package's workspace dependencies (`^build`), not the verify package
+      # itself. Build it (and its deps) explicitly so the adapter verification
+      # below never depends on an implicit turbo build side-effect.
+      - name: Build verify CLI
+        run: pnpm build --filter=@wsz987/channel-verify...
       # Verify the Telegram extensibility proof and an
-      # official adapter with the channel-verify CLI (lib/ exists after pnpm test
-      # because turbo builds each package's dependencies first).
+      # official adapter with the channel-verify CLI.
       - name: Verify Telegram adapter (extensibility proof)
         run: pnpm verify ./packages/channel-telegram --test
       - name: Verify Weixin adapter (verify CLI on an official adapter)
