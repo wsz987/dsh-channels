@@ -70,10 +70,6 @@ export function ChannelsSection(props: ChannelsSectionProps) {
 
   return (
     <div style={{ padding: '16px 20px', fontFamily: 'inherit', color: 'inherit' }}>
-      <div style={{ fontSize: 14, lineHeight: 1.6, marginBottom: 12, fontWeight: 500 }} data-testid="channel-web-loaded">
-        {t('loaded')}
-      </div>
-
       {error && (
         <div style={{ fontSize: 12, color: '#d0453b', marginBottom: 12 }} data-testid="channels-error">
           {t('connectionError')}: {error}{' '}
@@ -84,22 +80,23 @@ export function ChannelsSection(props: ChannelsSectionProps) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
         {CARD_IDS.map((id) => {
           const view = byId(id);
-          const connected = view?.configured === true;
           return (
             <div key={id} style={cardBase} data-channel-card={id} data-testid={'channel-card-' + id}>
               <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>{CARD_LABELS[id] ?? id}</div>
               <div style={{ fontSize: 12, lineHeight: 1.7 }}>
-                <div>
-                  {id === 'weixin' ? <span style={{ fontWeight: 600 }}>{connected ? t('configured') : t('notConfigured')}</span> : <span style={{ fontWeight: 600 }}>{t('notConfigured')}</span>}
-                  {' · '}
-                  <span>{view ? (connected ? t('configured') : t('notConfigured')) : '—'}</span>
+                <div style={{ fontWeight: 600 }}>
+                  <span style={{ color: statusColor(view) }}>● </span>
+                  {statusLabel(view, t)}
+                  {view && !view.mounted && (
+                    <span style={{ fontWeight: 400, opacity: 0.6 }}> · {t('notMounted')}</span>
+                  )}
                 </div>
                 <div>
                   {t('capabilities')}: {view ? Object.keys(view.capabilities ?? {}).slice(0, 4).join(', ') : '—'}
                 </div>
-                <div style={{ opacity: 0.7 }}>
-                  {view?.status ?? (view ? 'unknown' : 'down')}
-                </div>
+                {id === 'weixin' && view?.status === 'unconfigured' && view?.mounted === true && (
+                  <div style={{ opacity: 0.7 }}>{t('unconfiguredHint')}</div>
+                )}
               </div>
 
               <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
@@ -151,6 +148,34 @@ function primaryBtn(): Record<string, string> {
     cursor: 'pointer',
     fontSize: 12,
   };
+}
+
+/** User-friendly label for a channel's live status; '—' while still loading. */
+function statusLabel(view: ChannelView | undefined, t: (key: string) => string): string {
+  if (!view) return '—';
+  const map: Record<string, string> = {
+    connected: t('statusConnected'),
+    degraded: t('statusDegraded'),
+    unconfigured: t('statusUnconfigured'),
+    error: t('statusError'),
+    unknown: t('statusUnknown'),
+    down: t('statusDown'),
+  };
+  return map[view.status] ?? view.status;
+}
+
+/** Status dot color: green connected, amber degraded, red error, gray otherwise. */
+function statusColor(view: ChannelView | undefined): string {
+  switch (view?.status) {
+    case 'connected':
+      return '#1a7f37';
+    case 'degraded':
+      return '#9a6700';
+    case 'error':
+      return '#d0453b';
+    default:
+      return '#8a8a8a';
+  }
 }
 
 export default ChannelsSection;

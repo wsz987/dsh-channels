@@ -6,7 +6,6 @@ export const locales = {
   zh: {
     nav: '渠道',
     title: '渠道',
-    loaded: 'dsh-channels web extension loaded',
     comingSoon: '微信、QQ、钉钉、飞书四张渠道卡片将在下一阶段（M1）接入真实状态与配置入口。',
     fourChannels: '微信 · QQ · 钉钉 · 飞书',
     // M1 dashboard
@@ -17,6 +16,13 @@ export const locales = {
     mounted: '已挂载',
     notMounted: '未挂载',
     capabilities: '能力',
+    statusConnected: '已连接',
+    statusDegraded: '部分异常',
+    statusUnconfigured: '未配置',
+    statusError: '出错',
+    statusUnknown: '状态未知',
+    statusDown: '不可用',
+    unconfiguredHint: '点击「连接微信」扫码完成配置',
     configNextPhase: '配置界面将在下一阶段开放',
     waitingScan: '等待扫码',
     scannedConfirm: '已扫码，请确认',
@@ -38,7 +44,6 @@ export const locales = {
   en: {
     nav: 'Channels',
     title: 'Channels',
-    loaded: 'dsh-channels web extension loaded',
     comingSoon: 'The four channel cards (Weixin, QQ, DingTalk, Lark) arrive in the next phase (M1) with live status and configuration.',
     fourChannels: 'Weixin · QQ · DingTalk · Lark',
     // M1 dashboard
@@ -49,6 +54,13 @@ export const locales = {
     mounted: 'Mounted',
     notMounted: 'Not mounted',
     capabilities: 'Capabilities',
+    statusConnected: 'Connected',
+    statusDegraded: 'Degraded',
+    statusUnconfigured: 'Not configured',
+    statusError: 'Error',
+    statusUnknown: 'Unknown',
+    statusDown: 'Unavailable',
+    unconfiguredHint: 'Click “Connect Weixin” to scan and finish setup',
     configNextPhase: 'Configuration UI opens in the next phase',
     waitingScan: 'Waiting for scan',
     scannedConfirm: 'Scanned, please confirm',
