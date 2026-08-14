@@ -27,7 +27,7 @@ import {
   AccountCredentialStore,
   SyncCursorStore,
   ContextTokenStore,
-  DedupWindow,
+  MemoryDedupStore,
   dedupKey,
   mapInbound,
   OutboundSender,
@@ -282,22 +282,24 @@ describe('ContextTokenStore', () => {
 });
 
 describe('dedup', () => {
-  it('identical texts MUST NOT dedup (distinct seq/message_id)', () => {
-    const w = new DedupWindow({ windowMs: 60_000, now: () => 1000 });
+  it('identical texts MUST NOT dedup (distinct seq/message_id)', async () => {
+    const w = new MemoryDedupStore({ windowMs: 60_000, now: () => 1000 });
     const a = { seq: 1, message_id: 1, from_user_id: 'u', item_list: [{ type: 1, text_item: { text: '你好' } }] };
     const b = { seq: 2, message_id: 2, from_user_id: 'u', item_list: [{ type: 1, text_item: { text: '你好' } }] };
     expect(dedupKey(a)).not.toBe(dedupKey(b));
-    expect(w.check(dedupKey(a))).toBe(true);
-    expect(w.check(dedupKey(b))).toBe(true); // second identical-text message NOT dropped
+    expect(await w.has(dedupKey(a))).toBe(false);
+    await w.commit(dedupKey(a));
+    expect(await w.has(dedupKey(b))).toBe(false); // second identical-text message NOT deduped
   });
 
-  it('same message_id MUST dedup', () => {
-    const w = new DedupWindow({ windowMs: 60_000, now: () => 1000 });
+  it('same message_id MUST dedup', async () => {
+    const w = new MemoryDedupStore({ windowMs: 60_000, now: () => 1000 });
     const a = { seq: 1, message_id: 7, from_user_id: 'u' };
     const b = { seq: 1, message_id: 7, from_user_id: 'u' };
     expect(dedupKey(a)).toBe(dedupKey(b));
-    expect(w.check(dedupKey(a))).toBe(true);
-    expect(w.check(dedupKey(b))).toBe(false);
+    expect(await w.has(dedupKey(a))).toBe(false);
+    await w.commit(dedupKey(a));
+    expect(await w.has(dedupKey(b))).toBe(true); // same key -> deduped
   });
 });
 

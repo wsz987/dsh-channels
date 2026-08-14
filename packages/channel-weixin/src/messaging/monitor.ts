@@ -3,26 +3,44 @@
  *
  * Flow per round:
  *   load cursor -> getUpdates(cursor, timeout, signal)
- *     -> for each msg: capture context_token, dedup, map, emit message.received
+ *     -> for each msg: dedup.has -> capture context_token -> map -> emit -> dedup.commit
  *     -> THEN commit the new cursor
  *
+ * R1 ordering guarantees:
+ *   - a message becomes a committed dedup entry ONLY after a successful emit,
+ *     so an emit failure replays it next round instead of dropping it forever;
+ *   - the cursor is persisted only after the whole round succeeded, and a
+ *     failed cursor write throws (CursorCommitError) so the loop retries
+ *     instead of diverging the in-memory cursor from the durable one.
+ *
  * The next long-poll timeout is dynamically updated from the server's
- * `longpolling_timeout_ms`. Reconnect uses exponential backoff per the
+ * longpolling_timeout_ms. Reconnect uses exponential backoff per the
  * reconnect config. On AbortSignal it exits cleanly. Notify lifecycle
  * (notifystart/notifystop) is best-effort.
  */
-import type { ChannelAdapterContext, ChannelId } from '@dsh/channel-core';
+import type { ChannelAdapterContext } from '@dsh/channel-core';
 import type { ILinkClient } from '../ilink/client.js';
 import type { ILinkMessage, WeixinInboundMeta } from '../ilink/types.js';
 import type { SyncCursorStore } from '../storage/sync-cursor.js';
 import type { ContextTokenStore } from '../storage/context-token.js';
-import { DedupWindow, dedupKey } from './dedup.js';
+import { PersistentDedupStore, dedupKey, type DedupStore } from './dedup.js';
 import { mapInbound } from './mapper.js';
 
 export interface MonitorReconnectConfig {
   enabled: boolean;
   baseDelayMs: number;
   maxDelayMs: number;
+}
+
+/** Raised when the durable cursor write fails; the monitor loop retries. */
+export class CursorCommitError extends Error {
+  readonly cursor: string;
+
+  constructor(cursor: string, options?: ErrorOptions) {
+    super('failed to commit sync cursor', options);
+    this.name = 'CursorCommitError';
+    this.cursor = cursor;
+  }
 }
 
 export interface WeixinMonitorOptions {
@@ -38,6 +56,8 @@ export interface WeixinMonitorOptions {
   longPollTimeoutMs: number;
   /** Dedup window in ms. */
   dedupWindowMs: number;
+  /** Two-phase dedup store; defaults to a durable PersistentDedupStore. */
+  dedup?: DedupStore;
   /** Injectable clock (tests). */
   now?: () => number;
   /** Called on health/connection transitions. */
@@ -52,7 +72,7 @@ export class WeixinMonitor {
   private readonly meta: WeixinInboundMeta;
   private readonly emitMsg: (event: ReturnType<typeof mapInbound>) => Promise<void>;
   private readonly reconnect: MonitorReconnectConfig;
-  private readonly dedup: DedupWindow;
+  private readonly dedup: DedupStore;
   private readonly now: () => number;
   private readonly onConnectionChange?: (state: 'connected' | 'reconnecting' | 'disconnected') => void;
 
@@ -68,7 +88,12 @@ export class WeixinMonitor {
     this.meta = options.meta;
     this.emitMsg = options.emit ?? ((event) => this.ctx.emit(event));
     this.reconnect = options.reconnect;
-    this.dedup = new DedupWindow({ windowMs: options.dedupWindowMs, now: options.now ?? Date.now });
+    this.dedup = options.dedup ?? new PersistentDedupStore({
+      storage: options.ctx.storage,
+      accountId: options.meta.accountId,
+      windowMs: options.dedupWindowMs,
+      now: options.now ?? Date.now,
+    });
     this.now = options.now ?? Date.now;
     this.onConnectionChange = options.onConnectionChange;
     this.nextLongPollTimeoutMs = options.longPollTimeoutMs;
@@ -114,11 +139,9 @@ export class WeixinMonitor {
           longPollTimeoutMs: this.nextLongPollTimeoutMs,
           signal,
         });
-        if (this.nextLongPollTimeoutMs !== undefined) {
-          const t = result.nextLongPollTimeoutMs;
-          if (typeof t === 'number' && t > 0) {
-            this.nextLongPollTimeoutMs = t;
-          }
+        const t = result.nextLongPollTimeoutMs;
+        if (typeof t === 'number' && t > 0) {
+          this.nextLongPollTimeoutMs = t;
         }
         attempt = 0;
         this.onConnectionChange?.('connected');
@@ -129,12 +152,9 @@ export class WeixinMonitor {
             if (signal.aborted) break;
             await this.handleMessage(msg);
           }
-          // Persist only after the inbound round is processed (§18).
+          // Persist only after the inbound round is processed (§18 / R1).
           if (result.get_updates_buf !== undefined) {
-            cursor = result.get_updates_buf;
-            await this.cursor.set(result.get_updates_buf).catch((e) => {
-              this.ctx.logger.error('[channel-weixin] failed to commit sync cursor', e);
-            });
+            cursor = await this.commitCursor(result.get_updates_buf);
           }
         }
         // A client-side long-poll timeout is normal control flow; retry.
@@ -147,7 +167,7 @@ export class WeixinMonitor {
           this.reconnect.baseDelayMs * 2 ** Math.min(attempt - 1, 8),
           this.reconnect.maxDelayMs,
         );
-        this.ctx.logger.warn(`[channel-weixin] getUpdates error; retry in ${delay}ms`, error);
+        this.ctx.logger.warn('[channel-weixin] getUpdates error; retry in ' + delay + 'ms', error);
         await sleep(delay, signal);
       }
     }
@@ -155,17 +175,34 @@ export class WeixinMonitor {
     this.onConnectionChange?.('disconnected');
   }
 
+  /**
+   * Persist the new cursor. The local cursor is advanced only after the
+   * durable write succeeds; on failure a CursorCommitError is thrown so the
+   * loop retries with the previous cursor instead of silently diverging.
+   */
+  private async commitCursor(next: string): Promise<string> {
+    try {
+      await this.cursor.set(next);
+    } catch (error) {
+      throw new CursorCommitError(next, { cause: error });
+    }
+    return next;
+  }
+
   private async handleMessage(msg: ILinkMessage): Promise<void> {
     const key = dedupKey(msg);
-    if (!this.dedup.check(key)) {
-      this.ctx.logger.debug(`[channel-weixin] dropped duplicate message '${key}'`);
+    if (await this.dedup.has(key)) {
+      this.ctx.logger.debug("[channel-weixin] dropped duplicate message '" + key + "'");
       return;
     }
+    // Capture the latest peer reply context before emit (idempotent on replay).
     if (msg.context_token && msg.from_user_id) {
       await this.contextTokens.set(msg.from_user_id, msg.context_token);
     }
     const event = mapInbound(msg, this.meta);
     await this.emitMsg(event);
+    // Only after a successful emit is the message a committed dedup entry.
+    await this.dedup.commit(key);
   }
 
   /** Current long-poll timeout (dynamic). */
