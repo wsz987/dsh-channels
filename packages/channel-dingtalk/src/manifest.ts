@@ -44,7 +44,7 @@ export const manifest: DingTalkManifest = {
   upstream: {
     reference: 'open-dingtalk/dingtalk-stream-sdk-nodejs (https://github.com/open-dingtalk/dingtalk-stream-sdk-nodejs)',
     testedVersion: '2.1.5',
-    versionRange: '*',
+    versionRange: '2.1.5',
     strategy: 'sdk',
   },
   sdk: {

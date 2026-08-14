@@ -46,7 +46,7 @@ export const manifest: LarkManifest = {
   upstream: {
     reference: 'larksuite/node-sdk (https://github.com/larksuite/node-sdk)',
     testedVersion: '1.73.0',
-    versionRange: '*',
+    versionRange: '1.73.0',
     strategy: 'sdk',
   },
   sdk: {
