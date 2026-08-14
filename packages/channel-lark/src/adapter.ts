@@ -302,7 +302,21 @@ function createDefaultWSClient(config: LarkConfig): LarkSdkClient {
       'lark upstream mode "sdk" requires upstream.appId and upstream.appSecret',
     );
   }
-  return new WSClient({ appId, appSecret, domain: Domain.Feishu });
+  return new WSClient({
+    appId,
+    appSecret,
+    domain: resolveDomain(config.upstream.domain ?? 'feishu'),
+  });
+}
+
+/**
+ * Resolve a config domain string to the SDK's `Domain` enum, preserving a
+ * custom base domain verbatim (the SDK accepts `Domain | string`).
+ */
+export function resolveDomain(value: string): Domain | string {
+  if (value === 'feishu') return Domain.Feishu;
+  if (value === 'lark') return Domain.Lark;
+  return value;
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {

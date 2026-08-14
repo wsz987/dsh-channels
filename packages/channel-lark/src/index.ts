@@ -23,7 +23,7 @@ export const name = 'channel-lark';
 export const inject: string[] = ['channels'];
 
 export { Config };
-export { LarkAdapter, type LarkAdapterDeps } from './adapter.js';
+export { LarkAdapter, resolveDomain, type LarkAdapterDeps } from './adapter.js';
 export { LarkCardReply, type LarkCardStatus, type LarkCardUpdate } from './card.js';
 export { InboundProcessor } from './inbound.js';
 export { OutboundSender } from './outbound.js';

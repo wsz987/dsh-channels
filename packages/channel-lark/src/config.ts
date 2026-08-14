@@ -46,6 +46,11 @@ export interface LarkUpstreamConfig {
   appId?: string;
   /** Lark AppSecret for SDK mode. SECRET — never logged. */
   appSecret?: string;
+  /**
+   * API domain for SDK mode: 'feishu' | 'lark' | custom base domain.
+   * Defaults to 'feishu' (Feishu China).
+   */
+  domain?: string;
 }
 
 export interface LarkConfig {
@@ -95,5 +100,7 @@ export const Config: Schema<LarkConfig> = Schema.object({
     // Secret strings — never logged, never echoed into error messages.
     appId: Schema.string(),
     appSecret: Schema.string(),
+    // 'feishu' | 'lark' | custom base domain (resolved to the SDK Domain).
+    domain: Schema.string().default('feishu'),
   }),
 });
