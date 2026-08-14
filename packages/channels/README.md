@@ -1,6 +1,6 @@
 # @wsz987/dsh-channels
 
-DeepSeek Harness **DSH Bundle** — official messaging channels:
+DeepSeek Harness **DSH Bundle** — built-in messaging channels:
 
 - Weixin / 微信
 - QQ Bot
