@@ -1,0 +1,54 @@
+{
+  "name": "inbound voice message in a supergroup",
+  "channel": "telegram",
+  "upstreamVersion": "7.10",
+  "payload": {
+    "update_id": 1003,
+    "message": {
+      "message_id": 503,
+      "date": 1700000000,
+      "chat": {
+        "id": 200300400,
+        "type": "supergroup",
+        "title": "Proof Group"
+      },
+      "from": {
+        "id": 100200300,
+        "is_bot": false,
+        "first_name": "Alice",
+        "username": "alice_user"
+      },
+      "voice": {
+        "file_id": "ANON_VOICE_FILE",
+        "file_unique_id": "anon-voice",
+        "duration": 12,
+        "mime_type": "audio/ogg",
+        "file_size": 54321
+      }
+    }
+  },
+  "expected": {
+    "type": "message.received",
+    "channel": "telegram",
+    "accountId": "main",
+    "conversation": {
+      "id": "200300400",
+      "type": "group"
+    },
+    "sender": {
+      "id": "100200300",
+      "name": "Alice"
+    },
+    "message": {
+      "id": "503",
+      "content": [
+        {
+          "type": "audio",
+          "url": "ANON_VOICE_FILE",
+          "durationMs": 12000,
+          "mimeType": "audio/ogg"
+        }
+      ]
+    }
+  }
+}

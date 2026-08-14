@@ -1,0 +1,47 @@
+{
+  "name": "inbound text message",
+  "channel": "telegram",
+  "upstreamVersion": "7.10",
+  "payload": {
+    "update_id": 1001,
+    "message": {
+      "message_id": 501,
+      "date": 1700000000,
+      "chat": {
+        "id": 100200300,
+        "type": "private",
+        "first_name": "Alice",
+        "username": "alice_user"
+      },
+      "from": {
+        "id": 100200300,
+        "is_bot": false,
+        "first_name": "Alice",
+        "username": "alice_user"
+      },
+      "text": "hello harness"
+    }
+  },
+  "expected": {
+    "type": "message.received",
+    "channel": "telegram",
+    "accountId": "main",
+    "conversation": {
+      "id": "100200300",
+      "type": "dm"
+    },
+    "sender": {
+      "id": "100200300",
+      "name": "Alice"
+    },
+    "message": {
+      "id": "501",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello harness"
+        }
+      ]
+    }
+  }
+}

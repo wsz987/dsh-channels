@@ -1,0 +1,171 @@
+/**
+ * Telegram upstream driver — the only module that knows the Bot API.
+ *
+ * The upstream is SDK-agnostic: it speaks the Telegram Bot API HTTP protocol
+ * directly (`/bot<token>/...`), so no SDK dependency is required (manifest
+ * strategy 'source'). The token only ever appears in the request path built
+ * here; it is never logged and never cached beyond the config value.
+ *
+ * Long-poll semantics: every getUpdates call carries the acknowledged offset,
+ * so Telegram stops redelivering confirmed updates (the offset IS the
+ * protocol-level dedup mechanism). The InboundProcessor dedup window is the
+ * adapter-level second layer for webhook-style redelivery inside one cycle.
+ */
+import { ChannelAuthError, ChannelError } from '@dsh/channel-core';
+import type { HttpTransport } from './transport.js';
+
+/** Bot user returned by getMe. */
+export interface TelegramBotUser {
+  id: number;
+  is_bot: boolean;
+  first_name?: string;
+  username?: string;
+}
+
+/** A media reference for outbound sends. */
+export interface TelegramMedia {
+  type: 'image' | 'file' | 'audio' | 'video';
+  /** Public URL or a Telegram file_id. */
+  url: string;
+  caption?: string;
+}
+
+export interface TelegramUpstream {
+  /** Auth check; resolves with the bot user or throws on 401/invalid token. */
+  getMe(): Promise<TelegramBotUser>;
+
+  /**
+   * Long-poll getUpdates until `signal` aborts. Each update is passed to
+   * `onUpdate` as received (unstructured — the mapper owns shape); the
+   * acknowledged offset advances past every forwarded update so the next poll
+   * never redelivers confirmed updates.
+   */
+  getUpdates(
+    offset: number,
+    signal: AbortSignal,
+    onUpdate: (update: unknown) => void,
+  ): Promise<void>;
+
+  /** Send a text message; resolves with the Bot API response. */
+  sendText(chatId: string, text: string): Promise<unknown>;
+
+  /** Send a media reference (image/file/audio/video). */
+  sendMedia(chatId: string, media: TelegramMedia): Promise<unknown>;
+}
+
+export interface HttpTelegramUpstreamOptions {
+  transport: HttpTransport;
+  /** Bot API token; only ever placed in request paths. */
+  token?: string;
+  longPollTimeoutMs: number;
+}
+
+interface TelegramApiResponse {
+  ok?: boolean;
+  result?: unknown;
+  error_code?: number;
+  description?: string;
+}
+
+/** HTTP implementation over the Telegram Bot API. */
+export class HttpTelegramUpstream implements TelegramUpstream {
+  constructor(private readonly options: HttpTelegramUpstreamOptions) {}
+
+  private path(endpoint: string): string {
+    return `/bot${this.options.token ?? ''}/${endpoint}`;
+  }
+
+  async getMe(): Promise<TelegramBotUser> {
+    const payload = (await this.options.transport.request(this.path('getMe'))) as
+      | Partial<TelegramApiResponse>
+      | undefined;
+    const raw = payload ?? {};
+    if (!raw.ok) {
+      if (raw.error_code === 401) {
+        throw new ChannelAuthError('telegram getMe rejected: invalid bot token');
+      }
+      throw new ChannelError('CHANNEL_ERROR', `telegram getMe failed: ${raw.description ?? 'unknown error'}`);
+    }
+    const user = raw.result as TelegramBotUser | undefined;
+    if (!user || typeof user.id !== 'number') {
+      throw new ChannelError('CHANNEL_ERROR', 'telegram getMe returned no bot user');
+    }
+    return user;
+  }
+
+  async getUpdates(
+    offset: number,
+    signal: AbortSignal,
+    onUpdate: (update: unknown) => void,
+  ): Promise<void> {
+    while (!signal.aborted) {
+      let raw: unknown;
+      try {
+        raw = await this.options.transport.request(
+          this.path('getUpdates'),
+          {
+            method: 'POST',
+            body: {
+              offset,
+              // Telegram's long-poll timeout parameter is in seconds; the
+              // HTTP request timeout must exceed it so the fetch outlives
+              // the poll window.
+              timeout: Math.max(1, Math.floor(this.options.longPollTimeoutMs / 1000)),
+              allowed_updates: ['message'],
+            },
+            timeoutMs: this.options.longPollTimeoutMs + 5000,
+          },
+          signal,
+        );
+      } catch (error) {
+        // Abort-driven teardown exits gracefully; other failures propagate to
+        // the adapter, which owns reconnect/backoff.
+        if (signal.aborted) return;
+        throw error;
+      }
+      const result = ((raw as Partial<TelegramApiResponse> | undefined)?.result ?? []) as unknown[];
+      for (const update of result) {
+        if (signal.aborted) return;
+        onUpdate(update);
+        const updateId = (update as { update_id?: number })?.update_id;
+        if (typeof updateId === 'number') {
+          // Acknowledge: the next poll starts after the highest seen update.
+          offset = Math.max(offset, updateId + 1);
+        }
+      }
+    }
+  }
+
+  sendText(chatId: string, text: string): Promise<unknown> {
+    return this.post('sendMessage', { chat_id: chatId, text });
+  }
+
+  sendMedia(chatId: string, media: TelegramMedia): Promise<unknown> {
+    switch (media.type) {
+      case 'image':
+        return this.post('sendPhoto', this.mediaBody(chatId, media, 'photo'));
+      case 'file':
+        return this.post('sendDocument', this.mediaBody(chatId, media, 'document'));
+      case 'audio':
+        return this.post('sendAudio', this.mediaBody(chatId, media, 'audio'));
+      case 'video':
+        return this.post('sendVideo', this.mediaBody(chatId, media, 'video'));
+      default:
+        // Exhaustive over TelegramMedia['type']; kept for safety.
+        throw new ChannelError(
+          'CHANNEL_UNSUPPORTED',
+          `telegram media type '${String(media.type)}' unsupported`,
+        );
+    }
+  }
+
+  private mediaBody(chatId: string, media: TelegramMedia, field: string): Record<string, unknown> {
+    const body: Record<string, unknown> = { chat_id: chatId, [field]: media.url };
+    if (media.caption !== undefined) body.caption = media.caption;
+    return body;
+  }
+
+  private post(endpoint: string, body: unknown): Promise<unknown> {
+    return this.options.transport.request(this.path(endpoint), { method: 'POST', body });
+  }
+}

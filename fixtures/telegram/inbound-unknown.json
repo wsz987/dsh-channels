@@ -1,0 +1,55 @@
+{
+  "name": "inbound unsupported content (sticker)",
+  "channel": "telegram",
+  "upstreamVersion": "7.10",
+  "payload": {
+    "update_id": 1004,
+    "message": {
+      "message_id": 504,
+      "date": 1700000000,
+      "chat": {
+        "id": 100200300,
+        "type": "private",
+        "first_name": "Alice",
+        "username": "alice_user"
+      },
+      "from": {
+        "id": 100200300,
+        "is_bot": false,
+        "first_name": "Alice",
+        "username": "alice_user"
+      },
+      "sticker": {
+        "file_id": "ANON_STICKER_FILE",
+        "file_unique_id": "anon-sticker",
+        "type": "regular",
+        "is_animated": false,
+        "is_video": false,
+        "width": 512,
+        "height": 512
+      }
+    }
+  },
+  "expected": {
+    "type": "message.received",
+    "channel": "telegram",
+    "accountId": "main",
+    "conversation": {
+      "id": "100200300",
+      "type": "dm"
+    },
+    "sender": {
+      "id": "100200300",
+      "name": "Alice"
+    },
+    "message": {
+      "id": "504",
+      "content": [
+        {
+          "type": "unsupported",
+          "reason": "unsupported telegram message type 'sticker'"
+        }
+      ]
+    }
+  }
+}
