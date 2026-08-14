@@ -124,26 +124,29 @@ describe('QQAdapter lifecycle', () => {
     });
 
     await expect(adapter.start(ctx)).rejects.toMatchObject({ code: 'CHANNEL_START_FAILED' });
+    // Rollback ran: the half-started client was stopped and the run promise
+    // was settled, so a subsequent stop() is a clean no-op.
+    expect(client.stopped).toBe(true);
     await adapter.stop();
   });
 
-  it('invalid credentials: a start rejection surfaces as a start failure', async () => {
+  it('invalid credentials: a start rejection surfaces as a fail-fast start failure', async () => {
     const service = new ChannelService(new Context());
     const ctx = createTestContext(service);
     const client = new FakeQQSdkClient();
     // The SDK's `tokenPrefetch: 'sync'` surfaces credential errors; the fake
-    // simulates this with a start rejection. start() should surface it (not
-    // hang silently).
+    // simulates this with a start rejection. start() must reject with that
+    // error immediately (fail-fast) and roll back the half-started client —
+    // not hang until the startup timeout.
     client.startError = new Error('invalid appId/secret');
     const adapter = new QQAdapter(makeConfig({ startupTimeoutMs: 500 }), {
       sdkClient: client,
       now: () => 1000,
     });
 
-    // start()'s runPromise catches the start error internally, but the ready
-    // deferred never resolves, so start times out with a start failure.
-    await expect(adapter.start(ctx)).rejects.toMatchObject({ code: 'CHANNEL_START_FAILED' });
-    await adapter.stop();
+    await expect(adapter.start(ctx)).rejects.toThrow('invalid appId/secret');
+    // Rollback ran: the half-started client was stopped.
+    expect(client.stopped).toBe(true);
   });
 
   it('rejects send before start', async () => {

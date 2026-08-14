@@ -75,6 +75,12 @@ export interface Config {
    * single-flight always holds regardless of this value).
    */
   maxConcurrency: number;
+  /**
+   * Upper bound (ms) the bridge waits for in-flight agent turns to go idle
+   * during unload before giving up and finalizing replies from the durable
+   * log. Deployment-tunable (was previously a hardcoded 5000).
+   */
+  drainTimeoutMs: number;
   /** Prefix inbound user messages with `[channel=.. sender=.. message=..]`. */
   includeMetadataPrefix: boolean;
 }
@@ -112,5 +118,6 @@ export const Config: Schema<Config> = Schema.object({
     finalFlush: Schema.boolean().default(true),
   }),
   maxConcurrency: Schema.natural().default(4),
+  drainTimeoutMs: Schema.natural().default(5000),
   includeMetadataPrefix: Schema.boolean().default(true),
 });

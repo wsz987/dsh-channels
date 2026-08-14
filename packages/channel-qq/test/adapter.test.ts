@@ -81,6 +81,14 @@ describe('QQAdapter streaming (target-aware)', () => {
     ).toBe('buffered');
   });
 
+  it('streaming.enabled=false forces buffered even for dm + replyToMessageId', () => {
+    const adapter = new QQAdapter(
+      makeConfig({ streaming: { enabled: false, throttleMs: 500 } }),
+      { sdkClient: new FakeQQSdkClient() },
+    );
+    expect(adapter.resolveStreamingMode(dmReplyTarget())).toBe('buffered');
+  });
+
   it('capabilities stream buffered (conservative), markdown from config', () => {
     const adapter = new QQAdapter(makeConfig({ markdownSupport: true }), {
       sdkClient: new FakeQQSdkClient(),

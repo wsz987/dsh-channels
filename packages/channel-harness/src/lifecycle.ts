@@ -39,8 +39,6 @@ export interface BridgeLifecycle {
   handleChannelEvent(event: ChannelEvent): Promise<void>;
 }
 
-const DRAIN_TIMEOUT_MS = 5000;
-
 export function startBridge(
   ctx: Context,
   config: Config,
@@ -103,7 +101,7 @@ export function startBridge(
     // 2. Drain active turns with a bounded wait (the session/event listener is
     //    still attached here, but we do NOT depend on it for final-reply
     //    correctness).
-    await drainActiveTurns(agentManager, replyRouter, logger);
+    await drainActiveTurns(agentManager, replyRouter, logger, config.drainTimeoutMs);
     // 3. RECONCILE replies from the Session durable log (final text delivery
     //    does NOT rely on the listener still being attached).
     await reconcileReplies(ctx, persistence, agentManager, replyRouter, logger);
@@ -127,6 +125,7 @@ async function drainActiveTurns(
   agentManager: AgentManager,
   replyRouter: ReplyRouter,
   logger: ChannelLogger,
+  drainTimeoutMs: number,
 ): Promise<void> {
   const sessionIds = replyRouter.activeSessions();
   if (sessionIds.length === 0) return;
@@ -134,7 +133,7 @@ async function drainActiveTurns(
     sessionIds.map(async (sessionId) => {
       const ref = agentManager.refFor(sessionId);
       if (!ref) return;
-      const timedOut = await withTimeout(ref.whenIdle(), DRAIN_TIMEOUT_MS);
+      const timedOut = await withTimeout(ref.whenIdle(), drainTimeoutMs);
       if (timedOut) {
         logger.warn(`[channel-harness] drain timed out for session '${sessionId}'`);
       }

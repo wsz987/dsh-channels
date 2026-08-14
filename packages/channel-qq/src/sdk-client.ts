@@ -13,7 +13,7 @@ import {
   type QQBotInboundMessage,
   type ReplyTarget,
 } from '@tencent-connect/qqbot-nodejs';
-import type { ChannelLogger, OutboundMessage } from '@dsh/channel-core';
+import { ChannelSendError, type ChannelLogger, type OutboundMessage } from '@dsh/channel-core';
 import type { QQConfig } from './config.js';
 
 /** Reply target for outbound text/media send (port-local structural type). */
@@ -129,40 +129,48 @@ function toSdkReplyTarget(target: QQReplyTarget): ReplyTarget {
 
 /**
  * Map an outbound message's first resolvable media part to SDK `sendMedia`
- * options (fileType + source + optional caption).
+ * options (fileType + single source + optional caption).
+ *
+ * A `dataUri` (`data:<mime>;base64,<payload>`) is decoded to its raw base64
+ * payload and sent as `fileData` — never as `url`: the QQ upload API fetches
+ * `url` over HTTP and cannot resolve an inline `data:` URL. Only a real
+ * `http(s)` `url` is passed through as `url`.
  */
-export function mediaOpts(message: OutboundMessage): {
+export interface MediaOptions {
   fileType: MediaFileType;
   url?: string;
+  fileData?: string;
   fileName?: string;
   content?: string;
-} {
+}
+
+export function mediaOpts(message: OutboundMessage): MediaOptions {
   for (const part of message.parts ?? []) {
     switch (part.type) {
       case 'image':
         if (part.url || part.dataUri) {
           return {
             fileType: MediaFileType.IMAGE,
-            url: part.url,
+            ...mediaSource(part),
             content: message.text,
           };
         }
         break;
       case 'audio':
         if (part.url || part.dataUri) {
-          return { fileType: MediaFileType.VOICE, url: part.url ?? part.dataUri };
+          return { fileType: MediaFileType.VOICE, ...mediaSource(part) };
         }
         break;
       case 'video':
         if (part.url || part.dataUri) {
-          return { fileType: MediaFileType.VIDEO, url: part.url ?? part.dataUri };
+          return { fileType: MediaFileType.VIDEO, ...mediaSource(part) };
         }
         break;
       case 'file':
         if (part.url || part.dataUri) {
           return {
             fileType: MediaFileType.FILE,
-            url: part.url,
+            ...mediaSource(part),
             fileName: part.name,
             content: message.text,
           };
@@ -175,6 +183,28 @@ export function mediaOpts(message: OutboundMessage): {
   // No resolvable media part — fall back to a FILE with no source (caller
   // guarantees a media part; this branch is defensive only).
   return { fileType: MediaFileType.FILE, content: message.text };
+}
+
+/** Resolve a media part to the SDK's single-source shape (`url` or `fileData`). */
+function mediaSource(part: { url?: string; dataUri?: string }): { url?: string; fileData?: string } {
+  if (part.dataUri) {
+    return { fileData: decodeDataUri(part.dataUri) };
+  }
+  return { url: part.url };
+}
+
+/**
+ * Decode a `data:<mime>;base64,<payload>` URI into the raw base64 payload the
+ * Tencent `uploadMedia` `fileData` field expects. Rejects non-base64 data URIs
+ * (the QQ upload API ingests raw base64, not arbitrary URL-encoded payloads).
+ */
+export function decodeDataUri(dataUri: string): string {
+  const match = /^data:[^;,]*;base64,([\s\S]+)$/.exec(dataUri);
+  const payload = match?.[1];
+  if (!payload) {
+    throw new ChannelSendError('unsupported media data URI');
+  }
+  return payload;
 }
 
 /** Offline fake SDK client: records calls and exposes controllable emits. */

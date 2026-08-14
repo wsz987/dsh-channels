@@ -82,6 +82,11 @@ export class QQAdapter implements ChannelAdapter {
   }
 
   resolveStreamingMode(target: ChannelTarget): StreamingMode {
+    // `streaming.enabled: false` is a hard off-switch: it forces the buffered
+    // send-once strategy even for a C2C target with a reply message id.
+    if (!this.config.streaming.enabled) {
+      return 'buffered';
+    }
     if (target.conversationType === 'dm' && target.replyToMessageId) {
       return 'native';
     }
@@ -130,19 +135,35 @@ export class QQAdapter implements ChannelAdapter {
     });
 
     // Never `await bot.start()` inline — it resolves only on stop/abort and
-    // would block the Cordis plugin init. Track the promise and surface
+    // would block the Cordis plugin init. Track the raw promise and surface
     // failures through `handleSdkError`.
-    this.runPromise = this.client.start(ctx.signal).catch((error) => {
+    this.runPromise = this.client.start(ctx.signal);
+
+    // Fail-fast (QQ-R14): `tokenPrefetch: 'sync'` makes the SDK reject on bad
+    // credentials before `ready`. Propagate that rejection to the startup
+    // deferred instead of letting it hang until the timeout, and still record
+    // the error for health/event reporting.
+    this.runPromise.catch((error) => {
       this.handleSdkError(error);
+      ready.reject(error);
     });
 
-    await withTimeout(ready.promise, this.config.startupTimeoutMs);
-
-    this.started = true;
+    try {
+      await withTimeout(ready.promise, this.config.startupTimeoutMs);
+      this.started = true;
+    } catch (error) {
+      // Rollback: stop the (possibly half-started) SDK client and settle the
+      // run promise so a failed start never leaks a live client behind a
+      // `started === false` adapter.
+      this.client.stop();
+      await this.runPromise?.catch(() => undefined);
+      this.runPromise = undefined;
+      throw error;
+    }
   }
 
   async stop(): Promise<void> {
-    if (!this.started) return;
+    if (!this.started && this.runPromise === undefined) return;
     this.started = false;
     this.connected = false;
     this.client.stop();
@@ -238,12 +259,14 @@ export class QQAdapter implements ChannelAdapter {
 }
 
 /** Minimal deferred primitive. */
-function createDeferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+function createDeferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reject: (reason?: unknown) => void } {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
     resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 /** Resolve a promise or reject after `timeoutMs`. */

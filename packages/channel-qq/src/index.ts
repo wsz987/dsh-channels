@@ -20,7 +20,7 @@ import { credentialRef } from '@deepseek-ai/dsh-credentials';
 import {
   MemorySecretStore,
   MemoryStorage,
-  type ChannelAdapterContext,
+  mountChannelAdapter,
 } from '@dsh/channel-core';
 import type { QQConfig } from './config.js';
 import { Config } from './config.js';
@@ -38,10 +38,12 @@ export {
   FakeStreamSession,
   adaptLogger,
   mediaOpts,
+  decodeDataUri,
   type QQSdkClient,
   type QQReplyTarget,
   type QQStreamTarget,
   type QQStreamSession,
+  type MediaOptions,
 } from './sdk-client.js';
 export { InboundProcessor } from './inbound.js';
 export { OutboundSender, toReplyTarget } from './outbound.js';
@@ -51,6 +53,10 @@ export { manifest, type QQManifest } from './manifest.js';
 
 export function apply(ctx: Context, config: QQConfig, deps: QQAdapterDeps = {}): void {
   if (!config.enabled) return;
+  // Resolve the AppSecret credential before constructing the adapter, then
+  // hand the mount to the shared transactional `mountChannelAdapter`
+  // (channel-core doc §5): register -> start; on start failure abort +
+  // best-effort stop + unregister + rethrow; on unload abort + stop + unregister.
   ctx.effect(async () => {
     const credential = await ctx.credentials.resolve(credentialRef(config.appSecretRef));
     if (!credential) {
@@ -59,20 +65,15 @@ export function apply(ctx: Context, config: QQConfig, deps: QQAdapterDeps = {}):
 
     const adapter = new QQAdapter(config, { ...deps, appSecret: credential.value });
 
-    const unregister = ctx.channels.register(adapter);
-    const abort = new AbortController();
-    const adapterCtx: ChannelAdapterContext = {
+    mountChannelAdapter(ctx, adapter, (signal) => ({
       emit: (event) => ctx.channels.emit(event),
       logger: ctx.logger('channel-qq'),
       secrets: new MemorySecretStore(),
       storage: new MemoryStorage(),
-      signal: abort.signal,
-    };
-    await adapter.start(adapterCtx);
-    return async () => {
-      abort.abort();
-      await adapter.stop();
-      unregister();
-    };
+      signal,
+    }));
+    // The mount owns the adapter lifecycle; this outer effect only scopes the
+    // async credential resolution, so its disposer is a no-op.
+    return () => {};
   });
 }

@@ -1,7 +1,9 @@
-# M4 — Compatibility Governance: CI gate for every release tag (`v*`) and manual dispatch.
+# M4 — Compatibility Governance: CI gate for every pull request, every push to
+# `main`, every release tag (`v*`), and manual dispatch.
 #
-# Normal commits and pull requests do NOT trigger this workflow — only tag
-# pushes (and the manual workflow_dispatch button).
+# `pull_request` (and `push` to `main`) ensures dependency PRs (e.g. from
+# Renovate) are gated by build / typecheck / tests before merge, closing the
+# loop described in Task 14.3 / plan §32.
 #
 # Task 14.3 CI matrix design (docs/deepseek-harness-channels-execution-plan.md):
 #
@@ -32,7 +34,9 @@
 name: CI
 
 on:
+  pull_request:
   push:
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
 
