@@ -179,17 +179,17 @@ export default defineChannelAdapter({
 - Bundle 校验：`pnpm check:bundle` —— 解析 `cordis.patch.yml`，校验插件 shape / exports 子路径 / 各渠道 `enabled` 配置（Task 16.3）
 - 示例 profile：`apps/example/minimal-profile/`（`dsh plugin --profile minimal add ./packages/channels` → `--dump-config` → start）
 - 发布指南：`docs/release.md`（Changesets 流程 / 独立版本策略 / clean-profile 验证 / Release DoD 清单）
-- 发布 CI：`.github/workflows/release.yml`（main push 时 changesets version + publish；配置 `NPM_TOKEN` 后生效）
+- 发布 CI：`.github/workflows/release.yml`（仅 `v*` tag 触发，`changeset publish` 到 npm；配置 `NPM_TOKEN` 后生效）
 
 ## 后续
 
-- 执行计划 Phase 0–13、15–18 的框架与离线实现基本完成；Phase 14 Harness compatibility 已补 pinned-rc.6 契约回归，但尚无真实 Harness runtime 回归；四官方渠道已完成 Adapter/Gateway Contract（DingTalk/Lark/QQ 的官方 SDK Driver 接入进行中）；Release Pipeline 已实现，但尚无 GitHub Actions 成功运行记录（当前仅打 `v*` tag 触发）。
+- 执行计划 Phase 0–13、15–18 的框架与离线实现基本完成；Phase 14 Harness compatibility 已补 pinned-rc.6 契约回归，但尚无真实 Harness runtime 回归；四官方渠道的官方上游 Driver 已完成（DingTalk/Lark 接官方 SDK、QQ 接官方 WS 协议、Weixin 保留 Gateway 型）；Release Pipeline 已实现，但尚无 GitHub Actions 成功运行记录（当前仅打 `v*` tag 触发）。
 
 **已知缺口 (Known gaps)**
 
 - 框架与离线实现（Phase 0–13、15–18）基本完成，但尚未在真实 dsh runtime 上做过端到端验证。
 - Phase 14 Harness compatibility 仅有 pinned-rc.6 契约回归（`packages/channel-harness/test/harness-compat.test.ts`），尚无真实 Harness runtime 回归。
-- 四官方渠道已完成 Adapter/Gateway Contract；DingTalk / Lark / QQ 的官方 SDK Driver 接入进行中。
+- 四官方渠道已接官方上游：DingTalk `dingtalk-stream@2.1.5`、Lark `@larksuiteoapi/node-sdk@1.73.0`、QQ 官方 WebSocket 网关协议（isolated source）、Weixin 自托管 HTTP Gateway。live-platform E2E 需真实凭据（AppKey/AppSecret/ClientSecret），尚未执行。
 - Release Pipeline 已实现，但尚无 GitHub Actions 成功运行记录（当前仅 `v*` tag 触发 release.yml）。
 
 详见 `docs/deepseek-harness-channels-architecture.md` 与 `docs/deepseek-harness-channels-execution-plan.md`。
