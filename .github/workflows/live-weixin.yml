@@ -1,0 +1,64 @@
+# R6 — Weixin Live Platform Gate.
+#
+# Split from Offline CI (ci.yml): the live gate exercises the REAL Weixin iLink
+# platform, so it must NEVER run on ordinary PRs / pushes. It is
+# workflow_dispatch-ONLY (or a protected release environment) — see the R6
+# "Live 测试不要放普通 PR" section of the correction plan.
+#
+# The live E2E lives in packages/channel-weixin/test/live/ and only runs when
+# DSH_WEIXIN_LIVE=1. Until a maintainer configures the live environment, this
+# workflow is INERT: it refuses to run the live suite unless the repository
+# secret WEIXIN_LIVE_ENABLED is set to 'true', and otherwise fails fast with a
+# clear message instead of a misleading red test run.
+
+name: Weixin Live Gate
+
+on:
+  # Live platform verification is manual only — never on push or pull_request.
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  live-gate:
+    name: Weixin live E2E
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.3
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm build
+      - name: Gate — live environment enabled?
+        # Inert until a maintainer configures the live environment: without
+        # WEIXIN_LIVE_ENABLED='true' (and the real credentials below), fail fast
+        # with actionable instructions instead of attempting the live suite.
+        env:
+          WEIXIN_LIVE_ENABLED: ${{ secrets.WEIXIN_LIVE_ENABLED }}
+        run: |
+          if [ "${WEIXIN_LIVE_ENABLED}" != "true" ]; then
+            echo "::error::Weixin live platform gate is INERT. Set the repository secret"
+            echo "::error::WEIXIN_LIVE_ENABLED to 'true' and configure the real Weixin"
+            echo "::error::live credentials (WEIXIN_LIVE_*) before running this gate."
+            exit 1
+          fi
+          echo "Live environment enabled; proceeding to real-Weixin E2E."
+      - name: Weixin live E2E
+        env:
+          DSH_WEIXIN_LIVE: '1'
+          WEIXIN_LIVE_DSH: ${{ secrets.WEIXIN_LIVE_DSH }}
+          WEIXIN_LIVE_APP_ID: ${{ secrets.WEIXIN_LIVE_APP_ID }}
+          WEIXIN_LIVE_SECRET: ${{ secrets.WEIXIN_LIVE_SECRET }}
+        run: pnpm exec vitest run packages/channel-weixin/test/live --passWithNoTests=false

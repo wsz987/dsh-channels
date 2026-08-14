@@ -154,6 +154,73 @@ without an org token; the repository field links npm back to the source.
 | architecture docs            | ✅     | `docs/deepseek-harness-channels-architecture.md` |
 | adapter authoring docs       | ✅     | `docs/adapter-authoring.md` |
 
+## Weixin release gate (plan R6)
+
+Before a Weixin channel release is declared, every item below must be green.
+The gate is split into an **Offline CI** leg (runs on every PR / push to `main`)
+and a **Live Platform Gate** (manual only — separation per the R6 "Live 测试不要放
+普通 PR" rule).
+
+### Offline CI ✓
+
+- `pnpm build` + `pnpm typecheck` green.
+- Full offline test suite (`pnpm test`) green.
+- Governance green: `pnpm check:fixtures && pnpm check:manifests && pnpm doctor`
+  and `pnpm check:bundle`.
+
+### Harness compatibility ✓
+
+- The pinned @deepseek-ai Harness family stays green against the committed
+  `pnpm-lock.yaml` (frozen-lockfile install) — see `ci.yml` and `upgrade.yml`.
+
+### iLink fixtures ✓
+
+- The Weixin iLink fixtures under `fixtures/weixin/` cover the inbound/outbound
+  and QR-login protocol surfaces the adapter consumes, and `pnpm check:fixtures`
+  passes.
+
+### Persistent restart test ✓
+
+- Credentials cursor + context state survive a process restart (no re-login /
+  no cursor reset / no duplicate replay after restart).
+
+### Real Weixin Text smoke ✓ (Live Platform Gate)
+
+- A real-Weixin **Text** round-trip succeeds via the live E2E
+  (`packages/channel-weixin/test/live/`, only runs with `DSH_WEIXIN_LIVE=1`).
+- The live gate is **`workflow_dispatch`-only** (never PR/CI) or a protected
+  release environment — see `.github/workflows/live-weixin.yml`, which stays
+  inert until the `WEIXIN_LIVE_ENABLED` repository secret is set to `'true'`.
+
+### Manifest pinned ✓
+
+- `packages/channel-weixin/src/manifest.ts` must NOT claim `status: 'tested'`
+  before the live gate passes — it stays `'experimental'` until then, and
+  `upstream.testedVersion` / `upstream.testedCommit` stay pending (filled only
+  after live verification).
+- `versionRange` must be pinned to the verified commit/range — do NOT keep
+  `versionRange: '*'` long-term (doc R6 "不要保留 versionRange: '*' 长期").
+
+### README ✓
+
+- `packages/channel-weixin/README.md` reflects the actual (verified) support
+  matrix and does not over-advertise unverified capabilities.
+
+### Text-only release caveat (until WX5 lands)
+
+Until WX5 (image/audio/file/video media paths) completes, a **Text-only** Weixin
+release is allowed, but it must be explicit:
+
+```ts
+image: false
+audio: false
+file: false
+video: false
+```
+
+Such a release must NOT be advertised as a full Weixin media channel — it is a
+Text-only channel until the live media smoke passes.
+
 ## `.github/workflows/release.yml`
 
 Tag-driven publish — it runs **only when a `v*` release tag is pushed** (or via
