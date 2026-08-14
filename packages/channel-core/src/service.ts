@@ -19,7 +19,7 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-export type ChannelEventListener = (event: ChannelEvent) => void;
+export type ChannelEventListener = (event: ChannelEvent) => void | Promise<void>;
 
 export class ChannelService extends Service {
   /** Stable registry of live adapters. */
@@ -55,20 +55,32 @@ export class ChannelService extends Service {
     };
   }
 
-  /** Deliver one adapter event to every registered listener. */
-  emit(event: ChannelEvent): Promise<void> {
-    for (const listener of this.listeners) {
+  /**
+   * Deliver one adapter event to every registered listener. Async listeners
+   * are awaited; a sync throw or rejected promise never blocks the other
+   * listeners, but every rejection is logged and the first one is rethrown
+   * so the error surfaces to the caller instead of being lost.
+   */
+  async emit(event: ChannelEvent): Promise<void> {
+    const results = await Promise.allSettled(
+      [...this.listeners].map((listener) =>
+        Promise.resolve().then(() => listener(event)),
+      ),
+    );
+    let firstError: unknown;
+    for (const result of results) {
+      if (result.status !== 'rejected') continue;
       try {
-        listener(event);
-      } catch (error) {
-        // Listener failures must not break the emit path; surface them to
-        // the caller so the adapter can log with context.
-        queueMicrotask(() => {
-          throw error;
-        });
+        this.ctx.logger('channels').error(
+          '[channels] listener failed while emitting an event',
+          result.reason,
+        );
+      } catch {
+        console.error('[channels] listener failed while emitting an event', result.reason);
       }
+      if (firstError === undefined) firstError = result.reason;
     }
-    return Promise.resolve();
+    if (firstError !== undefined) throw firstError;
   }
 
   /** Resolve the canonical conversation key (shared with the bridge). */

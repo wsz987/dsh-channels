@@ -12,6 +12,10 @@
  * Per-session single-flight: concurrent `resolve()` for the same session id
  * shares one in-flight promise, so create/resume never races with itself.
  *
+ * Global concurrency gate: at most `maxConcurrency` `create()`/`resume()`
+ * calls are in flight at once across all sessions (`get()` is never
+ * limited); a `resolve()` that needs a slot queues until one frees.
+ *
  * `AgentGateway` is the minimal port abstraction so tests can run the whole
  * pipeline against a fake instead of a real Harness agent loop.
  */
@@ -119,12 +123,25 @@ export class AgentManager {
   private readonly refs = new Map<string, AgentRef>();
   /** sessionId -> binding, the reverse lookup used by the ReplyRouter. */
   private readonly bindings = new Map<string, SessionBinding>();
+  /**
+   * Global concurrency gate over the expensive gateway operations
+   * (`create`/`resume`). At most `maxConcurrency` of them are in flight at
+   * once; `get()` (live lookup) is never limited. `Config.maxConcurrency`
+   * (default 4) feeds this value.
+   */
+  private readonly maxConcurrency: number;
+  private active = 0;
+  /** Waiters queued for a free concurrency slot. */
+  private readonly waiters: Array<() => void> = [];
   private closed = false;
 
   constructor(
     private readonly gateway: AgentGateway,
     private readonly logger: ChannelLogger,
-  ) {}
+    maxConcurrency = 4,
+  ) {
+    this.maxConcurrency = Math.max(1, maxConcurrency);
+  }
 
   get supportsResume(): boolean {
     return this.gateway.supportsResume;
@@ -180,6 +197,10 @@ export class AgentManager {
    */
   async disposeAll(): Promise<void> {
     this.closed = true;
+    // Wake every queued concurrency waiter; each one re-checks `closed`
+    // and rejects its resolve with a clear "closed" error.
+    const waiters = this.waiters.splice(0);
+    for (const wake of waiters) wake();
     const handles = [...this.owned.values()];
     this.owned.clear();
     this.refs.clear();
@@ -197,24 +218,62 @@ export class AgentManager {
     if (live) {
       return this.makeRef(sessionId, agentId, live);
     }
-    if (this.gateway.supportsResume) {
-      try {
-        const handle = await this.gateway.resume(sessionId);
-        this.owned.set(sessionId, handle);
-        return this.makeRef(sessionId, agentId, handle);
-      } catch (error) {
-        if (isPersistenceError(error)) {
-          this.logger.info(
-            `session '${sessionId}' has no persisted state; falling back to create: ${error instanceof Error ? error.message : String(error)}`,
-          );
-        } else {
-          throw error;
+    // `create`/`resume` are the expensive gateway operations: gate them so
+    // at most `maxConcurrency` are in flight at once across all sessions.
+    return this.withSlot(async () => {
+      if (this.gateway.supportsResume) {
+        try {
+          const handle = await this.gateway.resume(sessionId);
+          this.owned.set(sessionId, handle);
+          return this.makeRef(sessionId, agentId, handle);
+        } catch (error) {
+          if (isPersistenceError(error)) {
+            this.logger.info(
+              `session '${sessionId}' has no persisted state; falling back to create: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          } else {
+            throw error;
+          }
         }
       }
+      const handle = await this.gateway.create(sessionId, agentId);
+      this.owned.set(sessionId, handle);
+      return this.makeRef(sessionId, agentId, handle);
+    });
+  }
+
+  /**
+   * Counting semaphore: acquire one of the `maxConcurrency` gateway slots
+   * before running `fn`, releasing it when `fn` settles. A `resolve()` that
+   * finds all slots busy queues until one frees; `disposeAll()` wakes queued
+   * waiters with a "closed" rejection.
+   */
+  private async withSlot<T>(fn: () => Promise<T>): Promise<T> {
+    await this.acquireSlot();
+    try {
+      return await fn();
+    } finally {
+      this.releaseSlot();
     }
-    const handle = await this.gateway.create(sessionId, agentId);
-    this.owned.set(sessionId, handle);
-    return this.makeRef(sessionId, agentId, handle);
+  }
+
+  private async acquireSlot(): Promise<void> {
+    while (true) {
+      if (this.closed) {
+        throw new Error(`AgentManager is closed; cannot resolve a session`);
+      }
+      if (this.active < this.maxConcurrency) {
+        this.active += 1;
+        return;
+      }
+      await new Promise<void>((resolve) => this.waiters.push(resolve));
+    }
+  }
+
+  private releaseSlot(): void {
+    this.active -= 1;
+    const next = this.waiters.shift();
+    if (next) next();
   }
 
   private makeRef(sessionId: string, agentId: string, agent: GatewayAgent): AgentRef {

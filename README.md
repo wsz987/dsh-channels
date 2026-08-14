@@ -183,6 +183,13 @@ export default defineChannelAdapter({
 
 ## 后续
 
-- 执行计划 Phase 0–18 全部完成（M0–M5 + Release Pipeline）；剩余为发布执行（配置 `NPM_TOKEN` 后由 release.yml 触发 npm publish）与生态扩展（第三方渠道 Wave 1：Discord / Slack / Teams 等）。
+- 执行计划 Phase 0–13、15–18 的框架与离线实现基本完成；Phase 14 Harness compatibility 已补 pinned-rc.6 契约回归，但尚无真实 Harness runtime 回归；四官方渠道已完成 Adapter/Gateway Contract（DingTalk/Lark/QQ 的官方 SDK Driver 接入进行中）；Release Pipeline 已实现，但尚无 GitHub Actions 成功运行记录（当前仅打 `v*` tag 触发）。
+
+**已知缺口 (Known gaps)**
+
+- 框架与离线实现（Phase 0–13、15–18）基本完成，但尚未在真实 dsh runtime 上做过端到端验证。
+- Phase 14 Harness compatibility 仅有 pinned-rc.6 契约回归（`packages/channel-harness/test/harness-compat.test.ts`），尚无真实 Harness runtime 回归。
+- 四官方渠道已完成 Adapter/Gateway Contract；DingTalk / Lark / QQ 的官方 SDK Driver 接入进行中。
+- Release Pipeline 已实现，但尚无 GitHub Actions 成功运行记录（当前仅 `v*` tag 触发 release.yml）。
 
 详见 `docs/deepseek-harness-channels-architecture.md` 与 `docs/deepseek-harness-channels-execution-plan.md`。

@@ -58,9 +58,16 @@ class FakeGateway implements AgentGateway {
   live = new Map<string, GatewayAgentHandle>();
   createCalls: string[] = [];
   resumeCalls: string[] = [];
+  /** Gateway entry markers, recorded BEFORE any gate, so tests can observe
+   *  that a call started (and is waiting) independently of completion. */
+  createStarts: string[] = [];
+  resumeStarts: string[] = [];
   disposed: string[] = [];
   followups: { sessionId: string; message: unknown }[] = [];
   failResumeWith?: Error;
+  /** Optional hooks that block create/resume until released (concurrency tests). */
+  createGate?: () => Promise<void>;
+  resumeGate?: () => Promise<void>;
 
   get(sessionId: string) {
     const agent = this.live.get(sessionId);
@@ -69,12 +76,16 @@ class FakeGateway implements AgentGateway {
   }
 
   async create(sessionId: string, agentId: string) {
+    this.createStarts.push(sessionId);
+    if (this.createGate) await this.createGate();
     this.createCalls.push(sessionId);
     return this.makeHandle(sessionId);
   }
 
   async resume(sessionId: string) {
     if (this.failResumeWith) throw this.failResumeWith;
+    this.resumeStarts.push(sessionId);
+    if (this.resumeGate) await this.resumeGate();
     this.resumeCalls.push(sessionId);
     return this.makeHandle(sessionId);
   }
@@ -145,6 +156,15 @@ function makeMessageEvent(overrides: Partial<MessageReceived> = {}): MessageRece
 
 function fakeSession(id: string): Session {
   return { id } as unknown as Session;
+}
+
+function turnStartEvent(turn: number): SessionEvent<'turn/start'> {
+  return {
+    type: 'turn/start',
+    seq: 0,
+    time: Date.now(),
+    data: { turn },
+  };
 }
 
 function chunkEvent(turn: number, text: string): SessionEvent<'assistant/chunk'> {
@@ -236,7 +256,7 @@ describe('AgentManager', () => {
       whenIdle: () => Promise.resolve(),
       dispose: async () => {},
     });
-    const manager = new AgentManager(gateway, silentLogger);
+    const manager = new AgentManager(gateway, silentLogger, 4);
     const ref = await manager.resolve('s1', 'default');
     expect(ref.sessionId).toBe('s1');
     expect(gateway.createCalls).toEqual([]);
@@ -246,7 +266,7 @@ describe('AgentManager', () => {
   });
 
   it('single-flights concurrent resolve for the same session', async () => {
-    const manager = new AgentManager(gateway, silentLogger);
+    const manager = new AgentManager(gateway, silentLogger, 4);
     const [a, b] = await Promise.all([
       manager.resolve('s1', 'default'),
       manager.resolve('s1', 'default'),
@@ -258,7 +278,7 @@ describe('AgentManager', () => {
   });
 
   it('resumes persisted sessions and falls back to create on persistence errors', async () => {
-    const manager = new AgentManager(gateway, silentLogger);
+    const manager = new AgentManager(gateway, silentLogger, 4);
     await manager.resolve('s1', 'default');
     expect(gateway.resumeCalls).toEqual(['s1']);
     expect(gateway.createCalls).toEqual([]);
@@ -270,7 +290,7 @@ describe('AgentManager', () => {
   });
 
   it('disposes owned handles exactly once on disposeAll', async () => {
-    const manager = new AgentManager(gateway, silentLogger);
+    const manager = new AgentManager(gateway, silentLogger, 4);
     await manager.resolve('s1', 'default');
     await manager.resolve('s2', 'default');
     await manager.disposeAll();
@@ -280,9 +300,55 @@ describe('AgentManager', () => {
   });
 
   it('rejects resolution after close', async () => {
-    const manager = new AgentManager(gateway, silentLogger);
+    const manager = new AgentManager(gateway, silentLogger, 4);
     await manager.disposeAll();
     await expect(manager.resolve('s1', 'default')).rejects.toThrow(/closed/);
+  });
+
+  it('serializes gateway create/resume across sessions with maxConcurrency: 1', async () => {
+    let release!: () => void;
+    // One shared gate: every gateway call awaits the same promise so a single
+    // release() unblocks them in FIFO order.
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    gateway.resumeGate = () => gate;
+    const manager = new AgentManager(gateway, silentLogger, 1);
+
+    const first = manager.resolve('s1', 'default');
+    const second = manager.resolve('s2', 'default');
+    // The first resolve holds the only slot; the second queues and must not
+    // reach the gateway until the first completes.
+    await vi.waitFor(() => {
+      expect(gateway.resumeStarts).toEqual(['s1']);
+    });
+    expect(gateway.resumeStarts).toEqual(['s1']);
+    expect(gateway.createStarts).toEqual([]);
+
+    release();
+    const [ref1, ref2] = await Promise.all([first, second]);
+    expect(gateway.resumeStarts).toEqual(['s1', 's2']);
+    expect(gateway.resumeCalls).toEqual(['s1', 's2']);
+    expect(ref1.sessionId).toBe('s1');
+    expect(ref2.sessionId).toBe('s2');
+  });
+
+  it('rejects queued resolves with a closed error when disposeAll runs', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    gateway.resumeGate = () => gate;
+    const manager = new AgentManager(gateway, silentLogger, 1);
+
+    const first = manager.resolve('s1', 'default');
+    const second = manager.resolve('s2', 'default');
+    await vi.waitFor(() => {
+      expect(gateway.resumeStarts).toEqual(['s1']);
+    });
+
+    // disposeAll wakes the queued waiter; it re-checks `closed` and rejects.
+    await manager.disposeAll();
+    await expect(second).rejects.toThrow(/closed/);
+
+    release(); // let the in-flight resume settle so the test does not leak
+    await expect(first).resolves.toBeDefined();
   });
 
   it('isPersistenceError classifies persistence messages', () => {
@@ -500,7 +566,7 @@ describe('ReplyRouter', () => {
 describe('ChannelHarnessBridge end-to-end', () => {
   it('routes message.received to followup and registers a binding', async () => {
     const gateway = new FakeGateway();
-    const manager = new AgentManager(gateway, silentLogger);
+    const manager = new AgentManager(gateway, silentLogger, 4);
     const router = new AgentRouter(baseConfig());
     const bindingStore = new MemoryBindingStore();
     const bridge = new ChannelHarnessBridge({
@@ -526,7 +592,7 @@ describe('ChannelHarnessBridge end-to-end', () => {
 
   it('reuses the same session for the same conversation', async () => {
     const gateway = new FakeGateway();
-    const manager = new AgentManager(gateway, silentLogger);
+    const manager = new AgentManager(gateway, silentLogger, 4);
     const bridge = new ChannelHarnessBridge({
       config: baseConfig(),
       bindingStore: new MemoryBindingStore(),
@@ -574,6 +640,189 @@ describe('ChannelHarnessBridge end-to-end', () => {
     await lifecycle.dispose();
     expect(adapter.stopped).toBe(false); // adapter owned by its own plugin fiber
   });
+
+  it('keeps the session/event listener attached while draining so in-flight replies finalize', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-drain-'));
+    try {
+      const file = join(dir, 'bindings.json');
+      const seed = new FileBindingStore(file);
+      const binding: SessionBinding = {
+        channelId: 'weixin',
+        accountId: 'main',
+        conversationId: 'user_123',
+        sessionId: 'seed-session',
+        agentId: 'weixin-agent',
+        createdAt: 1,
+        updatedAt: 1,
+      };
+      await seed.put(binding);
+
+      const ctx = new Context();
+      new ChannelService(ctx);
+      const agents = new AgentRegistry(ctx);
+      const idleResolvers: Array<() => void> = [];
+      agents.setFactory({
+        createAgent: async (_owner, options) => ({
+          agent: {
+            id: options.sessionId,
+            followup: () => {},
+            whenIdle: () =>
+              new Promise<void>((resolve) => idleResolvers.push(resolve)),
+          } as never,
+          dispose: async () => {},
+        }),
+        resume: async (_owner, options) => ({
+          agent: {
+            id: options.resumeSessionId,
+            followup: () => {},
+            whenIdle: () =>
+              new Promise<void>((resolve) => idleResolvers.push(resolve)),
+          } as never,
+          dispose: async () => {},
+        }),
+      });
+      const adapter = new FakeAdapter('weixin');
+      ctx.channels.register(adapter as never);
+
+      const lifecycle = startBridge(ctx, {
+        ...baseConfig(),
+        bindingStore: { type: 'file', path: file },
+      });
+      await lifecycle.handleChannelEvent(makeMessageEvent());
+
+      // The turn starts streaming but has not ended when unload begins.
+      const session = fakeSession('seed-session');
+      ctx.emit('session/event', session, turnStartEvent(0));
+      ctx.emit('session/event', session, chunkEvent(0, 'hello '));
+
+      const disposePromise = lifecycle.dispose();
+      // Drain is now waiting on the agent whenIdle with the session/event
+      // listener still attached — a turn/end arriving now must finalize the
+      // reply instead of being dropped.
+      await vi.waitFor(() => {
+        expect(idleResolvers).toHaveLength(1);
+      });
+      ctx.emit('session/event', session, turnEndEvent(0));
+      await vi.waitFor(() => {
+        expect(adapter.sent).toHaveLength(1);
+      });
+      idleResolvers[0]?.();
+      await disposePromise;
+
+      expect(adapter.sent[0]?.text).toBe('hello ');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('flushAll delivers buffered content for turns that never ended at dispose', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-flush-'));
+    try {
+      const file = join(dir, 'bindings.json');
+      const seed = new FileBindingStore(file);
+      await seed.put({
+        channelId: 'weixin',
+        accountId: 'main',
+        conversationId: 'user_123',
+        sessionId: 'seed-session',
+        agentId: 'weixin-agent',
+        createdAt: 1,
+        updatedAt: 1,
+      } satisfies SessionBinding);
+
+      const ctx = new Context();
+      new ChannelService(ctx);
+      const agents = new AgentRegistry(ctx);
+      agents.setFactory({
+        createAgent: async (_owner, options) => ({
+          agent: {
+            id: options.sessionId,
+            followup: () => {},
+            whenIdle: async () => {},
+          } as never,
+          dispose: async () => {},
+        }),
+        resume: async (_owner, options) => ({
+          agent: {
+            id: options.resumeSessionId,
+            followup: () => {},
+            whenIdle: async () => {},
+          } as never,
+          dispose: async () => {},
+        }),
+      });
+      const adapter = new FakeAdapter('weixin');
+      ctx.channels.register(adapter as never);
+
+      const lifecycle = startBridge(ctx, {
+        ...baseConfig(),
+        bindingStore: { type: 'file', path: file },
+      });
+      await lifecycle.handleChannelEvent(makeMessageEvent());
+
+      // The turn streams a chunk but never emits turn/end; dispose must still
+      // flush the buffered content through flushAll.
+      const session = fakeSession('seed-session');
+      ctx.emit('session/event', session, turnStartEvent(0));
+      ctx.emit('session/event', session, chunkEvent(0, 'partial reply'));
+      await lifecycle.dispose();
+
+      expect(adapter.sent[0]?.text).toBe('partial reply');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('startBridge reuses the persisted session binding across restarts', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-restart-'));
+    try {
+      const file = join(dir, 'bindings.json');
+
+      async function runBridge(): Promise<string> {
+        const ctx = new Context();
+        new ChannelService(ctx);
+        const agents = new AgentRegistry(ctx);
+        agents.setFactory({
+          createAgent: async (_owner, options) => ({
+            agent: {
+              id: options.sessionId,
+              followup: () => {},
+              whenIdle: async () => {},
+            } as never,
+            dispose: async () => {},
+          }),
+          resume: async (_owner, options) => ({
+            agent: {
+              id: options.resumeSessionId,
+              followup: () => {},
+              whenIdle: async () => {},
+            } as never,
+            dispose: async () => {},
+          }),
+        });
+        const adapter = new FakeAdapter('weixin');
+        ctx.channels.register(adapter as never);
+        const lifecycle = startBridge(ctx, {
+          ...baseConfig(),
+          bindingStore: { type: 'file', path: file },
+        });
+        await lifecycle.handleChannelEvent(makeMessageEvent());
+        await lifecycle.dispose();
+        const store = new FileBindingStore(file);
+        const binding = await store.get('weixin:main:user_123');
+        return binding?.sessionId ?? '';
+      }
+
+      const firstSessionId = await runBridge();
+      const secondSessionId = await runBridge();
+
+      expect(firstSessionId).toBeTruthy();
+      // The same conversation maps to the same sessionId across bridge restarts.
+      expect(secondSessionId).toBe(firstSessionId);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('HarnessAgentGateway against real dsh types', () => {
@@ -595,7 +844,7 @@ describe('bridge integration with ChannelService events', () => {
     service.register(adapter as never);
 
     const gateway = new FakeGateway();
-    const manager = new AgentManager(gateway, silentLogger);
+    const manager = new AgentManager(gateway, silentLogger, 4);
     const bridge = new ChannelHarnessBridge({
       config: baseConfig(),
       bindingStore: new MemoryBindingStore(),

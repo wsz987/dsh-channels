@@ -2,10 +2,11 @@
  * Schemastery configuration for the channel-harness bridge.
  *
  * All deployment-related parameters are configurable here; defaults match the
- * v1 behavior (global default agent, memory binding store, throttled reply
- * previews, per-session single-flight concurrency).
+ * v1 behavior (global default agent, file-backed binding store with restart
+ * recovery, throttled reply previews, bounded gateway concurrency).
  */
 import Schema from '@deepseek-ai/schemastery';
+import { DEFAULT_BINDING_STORE_PATH } from './binding-store.js';
 
 /** How the default agent is selected for a conversation. */
 export interface RoutingConfig {
@@ -83,8 +84,10 @@ export const Config: Schema<Config> = Schema.object({
     }),
   }),
   bindingStore: Schema.object({
-    type: Schema.union(['memory', 'file']).default('memory'),
-    path: Schema.string(),
+    // File-backed by default so session bindings survive restarts; the file
+    // (relative to cwd) is created on demand.
+    type: Schema.union(['memory', 'file']).default('file'),
+    path: Schema.string().default(DEFAULT_BINDING_STORE_PATH),
   }),
   reply: Schema.object({
     updateIntervalMs: Schema.natural().default(200),

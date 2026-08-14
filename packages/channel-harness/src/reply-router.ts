@@ -103,6 +103,19 @@ export class ReplyRouter {
     return [...this.active.keys()];
   }
 
+  /**
+   * Finalize every reply still marked active, exactly like `turn/end` would.
+   * Turns still streaming at unload never deliver `turn/end`, so the lifecycle
+   * drain calls this after `whenIdle` to guarantee buffered/final text is
+   * delivered (or the reply handle fails) instead of being dropped.
+   */
+  async flushAll(): Promise<void> {
+    for (const sessionId of [...this.active.keys()]) {
+      const active = this.active.get(sessionId);
+      if (active) await this.finalize(active);
+    }
+  }
+
   /** Clear all timers and drop active replies. */
   dispose(): void {
     for (const active of this.active.values()) {
@@ -226,11 +239,21 @@ export class ReplyRouter {
     const sessionId = String(session.id);
     const active = this.active.get(sessionId);
     if (!active) return;
+    await this.finalize(active);
+  }
+
+  /**
+   * Finalize one active reply: clear its timer, drain any in-flight preview
+   * chain, and deliver the accumulated text (or fail the handle). Shared by
+   * `turn/end` handling and the lifecycle `flushAll()` so an unloaded turn is
+   * finalized exactly like a completed one.
+   */
+  private async finalize(active: ActiveReply): Promise<void> {
     if (active.timer) {
       clearTimeout(active.timer);
       active.timer = null;
     }
-    this.active.delete(sessionId);
+    this.active.delete(active.binding.sessionId);
     if (active.finished) return;
     // Let any in-flight preview chain drain first; otherwise the flush could
     // land an update on a card that is about to be finalized (orphan card).
@@ -267,7 +290,7 @@ export class ReplyRouter {
         // Ignore secondary failure during fail.
       }
       this.options.logger.error(
-        `[channel-harness] reply finish failed for session '${sessionId}'`,
+        `[channel-harness] reply finish failed for session '${active.binding.sessionId}'`,
         error,
       );
     }

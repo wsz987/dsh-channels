@@ -2,9 +2,10 @@
  * Session binding persistence.
  *
  * Adapters never touch this store; only the bridge does (architecture §18).
- * `MemoryBindingStore` is the default; `FileBindingStore` persists a plain
- * JSON file, written atomically via a temp file + rename and read once into a
- * cache map.
+ * `FileBindingStore` is the default (persists a plain JSON file, written
+ * atomically via a temp file + rename and read once into a cache map) so
+ * session bindings survive restarts; `MemoryBindingStore` is opt-in for
+ * non-persistent deployments.
  */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -96,13 +97,19 @@ export class FileBindingStore implements SessionBindingStore {
   }
 }
 
-/** Build the store selected by configuration (file requires a path). */
+/**
+ * Default binding store path, relative to the process cwd; the file (and its
+ * parent directory) is created on demand by `FileBindingStore`.
+ */
+export const DEFAULT_BINDING_STORE_PATH = './data/channels/bindings.json';
+
+/** Build the store selected by configuration (file without a path falls back to the default). */
 export function createBindingStore(config: {
   type: 'memory' | 'file';
   path?: string;
 }): SessionBindingStore {
-  if (config.type === 'file' && config.path) {
-    return new FileBindingStore(config.path);
+  if (config.type === 'file') {
+    return new FileBindingStore(config.path ?? DEFAULT_BINDING_STORE_PATH);
   }
   return new MemoryBindingStore();
 }

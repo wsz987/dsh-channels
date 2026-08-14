@@ -4,9 +4,13 @@
  * `startBridge(ctx, config)` wires everything together and returns a
  * disposer with the mandated stop order (execution plan Phase 5.4):
  * 1. stop new inbound (unregister the ChannelService listener);
- * 2. drain necessary active turns (`whenIdle`, bounded by a timeout);
- * 3. dispose all owned agent handles;
- * 4. dispose the ReplyRouter (clear timers).
+ * 2. keep the `session/event` listener attached and drain active turns
+ *    (`whenIdle`, bounded by a timeout) so streaming replies can still
+ *    finalize via `turn/end`;
+ * 3. flush any replies still marked active (`ReplyRouter.flushAll`);
+ * 4. stop listening to `session/event`;
+ * 5. dispose all owned agent handles;
+ * 6. dispose the ReplyRouter (clear timers).
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { ChannelAdapter, ChannelEvent, ChannelLogger } from '@dsh/channel-core';
@@ -28,7 +32,7 @@ export function startBridge(ctx: Context, config: Config): BridgeLifecycle {
   const logger: ChannelLogger = ctx.logger('channel-harness');
   const bindingStore = createBindingStore(config.bindingStore);
   const agentGateway = new HarnessAgentGateway(ctx, config.agentOptions);
-  const agentManager = new AgentManager(agentGateway, logger);
+  const agentManager = new AgentManager(agentGateway, logger, config.maxConcurrency);
   const agentRouter = new AgentRouter(config);
   const getAdapter = (channelId: string): ChannelAdapter | undefined =>
     ctx.channels.get(channelId);
@@ -49,23 +53,29 @@ export function startBridge(ctx: Context, config: Config): BridgeLifecycle {
     getAdapter,
     logger,
   });
-  const stopInbound = ctx.channels.on((event) => {
-    void bridge.handleChannelEvent(event);
-  });
+  // Return the promise so `ChannelService.emit` awaits the bridge and can
+  // surface async failures to the emitting adapter instead of swallowing them.
+  const stopInbound = ctx.channels.on((event) => bridge.handleChannelEvent(event));
 
   let disposed = false;
 
   async function dispose(): Promise<void> {
     if (disposed) return;
     disposed = true;
-    // 1. Stop new inbound.
+    // 1. Stop new inbound (adapter events no longer reach the bridge).
     stopInbound();
-    stopListening();
-    // 2. Drain active turns with a bounded wait.
+    // 2. Keep the `session/event` listener attached and drain active turns
+    //    with a bounded wait, so a turn still streaming at unload can still
+    //    deliver its `turn/end` (and final chunks) through the reply pipeline.
     await drainActiveTurns(agentManager, replyRouter, logger);
-    // 3. Dispose owned agent handles (each exactly once).
+    // 3. Finalize any replies still marked active whose `turn/end` never
+    //    arrived (deliver buffered/final text or fail the handle).
+    await replyRouter.flushAll();
+    // 4. Stop listening to `session/event`.
+    stopListening();
+    // 5. Dispose owned agent handles (each exactly once).
     await agentManager.disposeAll();
-    // 4. Dispose the reply router (clear timers).
+    // 6. Dispose the reply router (clear timers).
     replyRouter.dispose();
   }
 

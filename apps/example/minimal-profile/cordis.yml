@@ -37,10 +37,12 @@ plugins:
       #   conversation:
       #     "lark:main:oc_abc123": lark-agent
     bindingStore:
-      type: memory
-      # Persist session bindings across restarts:
-      # type: file
-      # path: ./data/bindings.json
+      # File-backed by default: session bindings persist across restarts
+      # (path is relative to the process cwd; created on demand).
+      type: file
+      path: ./data/channels/bindings.json
+      # Use an in-memory store when restart recovery is not needed:
+      # type: memory
     reply:
       updateIntervalMs: 200
       maxTextLength: 4000

@@ -126,6 +126,68 @@ describe('ChannelService (Cordis Service)', () => {
     await ctx.channels.emit(event);
     expect(listener).toHaveBeenCalledTimes(1);
   });
+
+  it('isolates listener failures and surfaces the first rejection from emit', async () => {
+    const ctx = new Context();
+    new ChannelService(ctx);
+
+    const calls: string[] = [];
+    const syncError = new Error('sync listener boom');
+    const asyncError = new Error('async listener boom');
+    const disposeSync = ctx.channels.on(() => {
+      calls.push('sync');
+      throw syncError;
+    });
+    const disposeAsync = ctx.channels.on(async () => {
+      calls.push('async');
+      throw asyncError;
+    });
+    const disposeOk = ctx.channels.on(() => {
+      calls.push('ok');
+    });
+
+    const event = {
+      type: 'message.received',
+      channel: 'weixin',
+      accountId: 'main',
+      conversation: { id: 'c1', type: 'dm' },
+      sender: { id: 'u1' },
+      message: { id: 'm2', content: [{ type: 'text', text: 'hi' }] },
+    } satisfies MessageReceived;
+
+    // A sync throw and an async rejection must not break the other listeners;
+    // emit rejects with the first (sync) error.
+    await expect(ctx.channels.emit(event)).rejects.toBe(syncError);
+    expect(calls).toEqual(['sync', 'async', 'ok']);
+
+    // After removing the failing listeners, emit resolves again.
+    disposeSync();
+    disposeAsync();
+    disposeOk();
+    await expect(ctx.channels.emit(event)).resolves.toBeUndefined();
+  });
+
+  it('propagates async listener rejections to the emit caller', async () => {
+    const ctx = new Context();
+    new ChannelService(ctx);
+
+    const asyncError = new Error('async rejection boom');
+    const dispose = ctx.channels.on(async () => {
+      throw asyncError;
+    });
+
+    const event = {
+      type: 'message.received',
+      channel: 'weixin',
+      accountId: 'main',
+      conversation: { id: 'c1', type: 'dm' },
+      sender: { id: 'u1' },
+      message: { id: 'm3', content: [{ type: 'text', text: 'hi' }] },
+    } satisfies MessageReceived;
+
+    await expect(ctx.channels.emit(event)).rejects.toBe(asyncError);
+    dispose();
+  });
 });
 
 describe('BufferedReply', () => {
