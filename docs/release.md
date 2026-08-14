@@ -98,21 +98,19 @@ The automated gate runs against the workspace packages; the final release
 validation installs the bundle into a **clean profile** with the real dsh CLI:
 
 ```bash
-# 1. clean profile — never reuse a dirty profile for release validation
-dsh profile create release-validation
-
-# 2. add the bundle (installs it into dsh.profile.bundles and applies
-#    cordis.patch.yml to the clean profile)
+# 1. add the bundle to a clean profile — `dsh plugin` auto-initializes the
+#    profile on first use (never reuse a dirty profile for release validation;
+#    there is no `dsh profile create` step)
 dsh plugin --profile release-validation add @wsz987/dsh-channels
 
-# 3. dump the merged config — verify the six plugins were inserted
+# 2. dump the merged config — verify the six plugins were inserted
 dsh --profile release-validation --dump-config
 
-# 4. start the profile — all plugins load (channels-service, channels-harness,
+# 3. start the profile — all plugins load (channels-service, channels-harness,
 #    channels-weixin, channels-qq, channels-dingtalk, channels-lark)
 dsh --profile release-validation
 
-# 5. override channels via a profile patch (apps/example/minimal-profile/
+# 4. override channels via a profile patch (apps/example/minimal-profile/
 #    cordis.patch.yml shows a QQ-only override). A patch REPLACES the whole
 #    target config (not a deep merge). QQ config uses `appSecretRef` (a
 #    credential reference — the real AppSecret lives in ctx.credentials).

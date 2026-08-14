@@ -16,37 +16,49 @@
 
 ## 安装
 
-```bash
-pnpm add @wsz987/dsh-channels   # 或 npm install @wsz987/dsh-channels
-```
-
-按需也可单装某个渠道：`@wsz987/channel-weixin`、`@wsz987/channel-qq`、`@wsz987/channel-dingtalk`、`@wsz987/channel-lark`。
-
-## 接入 DeepSeek Harness
-
 前提：已安装 DeepSeek Harness CLI（`dsh`），安装方式见 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)。
 
 ```bash
-# 1. 创建 profile
-dsh profile create my-profile
+# 1. 把 channels bundle 装进 Harness 的 web profile
+#    （`dsh plugin` 首次使用会自动初始化 profile；bundle 声明了 dsh.bundle，
+#      装完自动加入该 profile 的 dsh.profile.bundles 层并应用其 cordis.patch.yml）
+dsh plugin --profile web add @wsz987/dsh-channels
 
-# 2. 安装渠道 bundle（自动注入 channels-service / channels-harness / 四个渠道插件）
-dsh plugin --profile my-profile add @wsz987/dsh-channels
+# 2. 确认 bundle 已合并：dump-config 里应能看到 channels-service /
+#    channels-harness / channels-weixin / channels-qq / channels-dingtalk / channels-lark
+dsh --profile web --dump-config
 
-# 3. 查看合并后的配置
-dsh --profile my-profile --dump-config
+# 3. 启动 Harness（`dsh web` 等价于 `dsh --profile web`）
+dsh web
+```
 
-# 4. 启动
-dsh --profile my-profile
+装这一个包即挂上完整链路：
+
+```text
+DSH profile（web）
+  ↓
+@wsz987/dsh-channels bundle
+  ↓
+ChannelService（channels-service）
+  ↓
+Harness Bridge（channels-harness）
+  ↓
+Weixin / QQ / DingTalk / Lark Adapter
 ```
 
 不配置也能启动；完成对应渠道的登录后即可收发消息（见下）。
+
+> 说明：`dsh plugin --profile <name> add <pkg>` 就是在该 profile 内执行 pnpm 安装，
+> 首次使用自动初始化 profile——**没有 `dsh profile create` 这一步**。
+> 装到哪个 profile 由 `--profile` 决定（`web` 为 Harness 内置模板，也可用其他名称）。
+
+按需也可只装某个渠道（同样通过 `dsh plugin --profile <name> add`）：`@wsz987/channel-weixin`、`@wsz987/channel-qq`、`@wsz987/channel-dingtalk`、`@wsz987/channel-lark`。
 
 ## 渠道配置与登录
 
 | 渠道 | 必需配置 | 登录方式 |
 | --- | --- | --- |
-| **微信** | 无需配置 | 启动后**微信扫码**登录，凭据持久化，重启免登录 |
+| **微信** | 无需配置 | 通过 `beginAuth()` / `pollAuth()` 触发**扫码**登录（启动不会自动弹二维码），凭据持久化，重启免登录 |
 | **QQ** | `appId` + `appSecretRef` | [QQ 开放平台](https://q.qq.com/) 创建机器人；AppSecret 存 `ctx.credentials`（如环境变量 `QQBOT_APP_SECRET`） |
 | **钉钉** | `upstream.clientId` + `clientSecret` | [钉钉开放平台](https://open.dingtalk.com/) 创建应用，取 AppKey / AppSecret |
 | **飞书** | `upstream.appId` + `appSecret` | [飞书开放平台](https://open.feishu.cn/) 创建应用，取 AppId / AppSecret |
@@ -89,7 +101,7 @@ dsh --profile my-profile
       domain: feishu              # feishu（国内）| lark（海外）
 ```
 
-**微信**：无需配置密钥。启动后调用扫码登录（QR 状态机：等待扫码 → 确认 → 绑定），凭据写入 SecretStore，重启自动恢复。当前为 **Text-only**（图片/语音/文件/视频媒体路径开发中）。
+**微信**：无需配置密钥。扫码登录由 `beginAuth()` / `pollAuth()` 触发（QR 状态机：等待扫码 → 确认 → 绑定）——启动后**不会自动弹出二维码**，看不到二维码不代表插件未加载。凭据写入 SecretStore，重启自动恢复。当前为 **Text-only**（图片/语音/文件/视频媒体路径开发中）。
 
 ## 渠道总览
 
