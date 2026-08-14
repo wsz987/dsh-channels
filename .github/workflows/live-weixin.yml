@@ -2,20 +2,32 @@
 #
 # Split from Offline CI (ci.yml): the live gate exercises the REAL Weixin iLink
 # platform, so it must NEVER run on ordinary PRs / pushes. It is
-# workflow_dispatch-ONLY (or a protected release environment) — see the R6
-# live-test separation rule (live tests never run on ordinary PRs).
+# workflow_dispatch-ONLY — see the R6 live-test separation rule (live tests never
+# run on ordinary PRs).
 #
-# The live E2E lives in packages/channel-weixin/test/live/ and only runs when
-# DSH_WEIXIN_LIVE=1. Until a maintainer configures the live environment, this
-# workflow is INERT: it refuses to run the live suite unless the repository
-# secret WEIXIN_LIVE_ENABLED is set to 'true', and otherwise fails fast with a
-# clear message instead of a misleading red test run.
+# Credential model: Weixin iLink auth is QR-login based (get_bot_qrcode ->
+# get_qrcode_status). There are NO pre-seeded app secrets — the live E2E prints a
+# QR that a maintainer scans with a real WeChat account. The only repository
+# secret is the inert-gate WEIXIN_LIVE_ENABLED.
+#
+# The workflow is a STRICT preflight: it validates every gate input BEFORE the
+# first Weixin request, so a missing/blank value fails fast with an actionable
+# message instead of surfacing mid-test as a fuzzy 401/timeout.
 
 name: Weixin Live Gate
 
 on:
-  # Live platform verification is manual only — never on push or pull_request.
   workflow_dispatch:
+    inputs:
+      upstream_commit:
+        description: 'Tencent/openclaw-weixin commit SHA this gate verifies against (40-hex)'
+        required: true
+      upstream_version:
+        description: 'Upstream version/tag this gate verifies against (written to testedVersion)'
+        required: true
+      base_url:
+        description: 'iLink API base URL (blank = production default)'
+        required: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -41,24 +53,45 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Build
         run: pnpm build
-      - name: Gate — live environment enabled?
-        # Inert until a maintainer configures the live environment: without
-        # WEIXIN_LIVE_ENABLED='true' (and the real credentials below), fail fast
-        # with actionable instructions instead of attempting the live suite.
+
+      # Strict preflight: fail fast with actionable messages BEFORE any Weixin
+      # request. Every gate input is validated here.
+      - name: Preflight — validate live gate inputs
         env:
           WEIXIN_LIVE_ENABLED: ${{ secrets.WEIXIN_LIVE_ENABLED }}
+          UPSTREAM_COMMIT: ${{ inputs.upstream_commit }}
+          UPSTREAM_VERSION: ${{ inputs.upstream_version }}
+          BASE_URL: ${{ inputs.base_url }}
         run: |
+          fail() { echo "::error::$1"; exit 1; }
+
           if [ "${WEIXIN_LIVE_ENABLED}" != "true" ]; then
-            echo "::error::Weixin live platform gate is INERT. Set the repository secret"
-            echo "::error::WEIXIN_LIVE_ENABLED to 'true' and configure the real Weixin"
-            echo "::error::live credentials (WEIXIN_LIVE_*) before running this gate."
-            exit 1
+            fail "WEIXIN_LIVE_ENABLED is not 'true'. Set the repository secret WEIXIN_LIVE_ENABLED=true before running this gate."
           fi
-          echo "Live environment enabled; proceeding to real-Weixin E2E."
+
+          if [ -z "${UPSTREAM_COMMIT}" ]; then
+            fail "workflow input 'upstream_commit' is required — the Tencent/openclaw-weixin commit SHA being verified."
+          fi
+          if ! printf '%s' "${UPSTREAM_COMMIT}" | grep -Eq '^[0-9a-fA-F]{40}$'; then
+            fail "workflow input 'upstream_commit' must be a 40-hex Git SHA (got: ${UPSTREAM_COMMIT})."
+          fi
+
+          if [ -z "${UPSTREAM_VERSION}" ]; then
+            fail "workflow input 'upstream_version' is required — the upstream version/tag being verified."
+          fi
+
+          TARGET="${BASE_URL:-https://ilinkai.weixin.qq.com}"
+          echo "Preflight OK:"
+          echo "  - live gate armed (WEIXIN_LIVE_ENABLED=true)"
+          echo "  - upstream_commit = ${UPSTREAM_COMMIT}"
+          echo "  - upstream_version = ${UPSTREAM_VERSION}"
+          echo "  - test target      = ${TARGET}"
+          echo "NOTE: the live E2E performs QR login — scan the printed QR with a real WeChat account when prompted."
+
       - name: Weixin live E2E
         env:
           DSH_WEIXIN_LIVE: '1'
-          WEIXIN_LIVE_DSH: ${{ secrets.WEIXIN_LIVE_DSH }}
-          WEIXIN_LIVE_APP_ID: ${{ secrets.WEIXIN_LIVE_APP_ID }}
-          WEIXIN_LIVE_SECRET: ${{ secrets.WEIXIN_LIVE_SECRET }}
-        run: pnpm exec vitest run packages/channel-weixin/test/live --passWithNoTests=false
+          DSH_WEIXIN_BASE_URL: ${{ inputs.base_url }}
+          DSH_WEIXIN_UPSTREAM_COMMIT: ${{ inputs.upstream_commit }}
+          DSH_WEIXIN_UPSTREAM_VERSION: ${{ inputs.upstream_version }}
+        run: pnpm --filter @wsz987/channel-weixin test:live
