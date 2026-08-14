@@ -43,13 +43,13 @@ export const manifest: DingTalkManifest = {
   adapterVersion: '0.7.0',
   upstream: {
     reference: 'open-dingtalk/dingtalk-stream-sdk-nodejs (https://github.com/open-dingtalk/dingtalk-stream-sdk-nodejs)',
-    testedVersion: '2.1.6-beta.1',
+    testedVersion: '2.1.5',
     versionRange: '*',
     strategy: 'sdk',
   },
   sdk: {
     package: 'dingtalk-stream',
-    testedVersion: '2.1.6-beta.1',
+    testedVersion: '2.1.5',
   },
   status: 'tested',
 };
