@@ -27,6 +27,7 @@ import { AgentRouter } from '../../channel-harness/src/agent-router.ts';
 import { MemoryBindingStore } from '../../channel-harness/src/binding-store.ts';
 import { ChannelHarnessBridge } from '../../channel-harness/src/bridge.ts';
 import { Config as HarnessConfig } from '../../channel-harness/src/config.ts';
+import { ReplyContextStore } from '../../channel-harness/src/reply-context-store.ts';
 import { sessionKey } from '../../channel-harness/src/session-router.ts';
 import { mapInbound } from '../src/mapper.ts';
 
@@ -109,6 +110,7 @@ function makeBridge() {
     agentManager: manager,
     agentRouter: new AgentRouter(harnessConfig()),
     getAdapter: () => undefined,
+    replyContexts: new ReplyContextStore(),
     logger: silentLogger,
   });
   return { gateway, manager, bridge, store };
@@ -164,12 +166,14 @@ describe('M3 acceptance: threads → SessionBinding isolation (Task 12.2)', () =
     expect(binding).toBeDefined();
     expect(binding!.threadId).toBe('om_1');
 
-    // Both messages resolved into the SAME session: only one gateway
-    // resolution happened, both messages were delivered, and the store holds
+    // Both messages resolved into the SAME session: the first (new binding)
+    // created the agent, the second reused it via live get (no resume, no
+    // second create), both messages were delivered, and the store holds
     // exactly one binding for the thread.
-    expect(gateway.resumeCalls).toHaveLength(1);
+    expect(gateway.createCalls).toHaveLength(1);
+    expect(gateway.resumeCalls).toHaveLength(0);
     expect(gateway.followups).toHaveLength(2);
-    expect(gateway.resumeCalls[0]).toBe(binding!.sessionId);
+    expect(gateway.createCalls[0]).toBe(binding!.sessionId);
     expect(gateway.followups.every((f) => f.sessionId === binding!.sessionId)).toBe(true);
   });
 

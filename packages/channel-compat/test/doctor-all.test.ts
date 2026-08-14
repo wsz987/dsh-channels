@@ -41,12 +41,12 @@ const qq = new QQAdapter(
   QQConfig({
     enabled: true,
     accountId: 'main',
-    baseUrl: 'http://fake',
-    timeoutMs: 1000,
-    longPollTimeoutMs: 1000,
-    auth: { statePath: undefined, qrPollIntervalMs: 100, qrExpireMs: 10000 },
-    reconnect: { enabled: false, baseDelayMs: 1, maxDelayMs: 10, maxRetries: 2 },
+    appId: 'dummy-app-id',
+    appSecretRef: 'QQBOT_APP_SECRET',
+    markdownSupport: false,
+    streaming: { enabled: true, throttleMs: 500 },
     dedup: { enabled: true, windowMs: 5000 },
+    startupTimeoutMs: 15000,
   }),
 );
 

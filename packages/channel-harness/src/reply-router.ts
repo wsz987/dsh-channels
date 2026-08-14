@@ -7,7 +7,9 @@
  * - `assistant/message` provides a fallback final text when no deltas flowed;
  * - `turn/end` flushes and finishes the reply, then cleans up.
  *
- * Strategy comes from the adapter's streaming capability:
+ * Strategy comes from the adapter's resolved streaming mode, which may be
+ * target-aware (via `adapter.resolveStreamingMode(target)` falling back to the
+ * static `adapter.capabilities.streaming`):
  * - `native`  — `adapter.createReply` + `handle.append` (throttled previews);
  * - `edit`    — `adapter.createReply` + `handle.replace` (throttled previews);
  * - `buffered` — accumulate and send once via `adapter.send` at `turn/end`
@@ -15,7 +17,16 @@
  * An adapter without `createReply` is always `buffered`.
  *
  * The reply target is resolved by reversing `sessionId -> SessionBinding`,
- * never by inspecting the agent itself.
+ * never by inspecting the agent itself. Per-turn reply context (conversation
+ * type + triggering message id) comes from the shared `ReplyContextStore`,
+ * but — unlike v1.0 — it is NOT guessed at `turn/start`. Instead:
+ * - `turn/start` only establishes turn existence (`context: undefined`);
+ * - `assistant/chunk` / `assistant/message` resolve the context lazily via
+ *   `ReplyContextStore.getTurn(sessionId, turn)`, which is authoritative by
+ *   then because `agent/inbox/claimed` (message id → turn) has already fired;
+ * - `turn/end` releases the active context via `releaseTurn`.
+ * The target passed to `createReply`/`send` carries the context so
+ * target-aware adapters (e.g. QQ C2C native streaming) behave correctly.
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
@@ -28,12 +39,15 @@ import type {
 } from '@dsh/channel-core';
 import type { ReplyConfig } from './config.js';
 import type { SessionBinding } from './session-router.js';
+import type { ChannelReplyContext, ReplyContextStore } from './reply-context-store.js';
 
 type ReplyStrategy = 'native' | 'edit' | 'buffered';
 
 interface ActiveReply {
   binding: SessionBinding;
   strategy: ReplyStrategy;
+  target: ChannelTarget;
+  context?: ChannelReplyContext;
   handle: ReplyHandle | null;
   buffer: string;
   /** Fallback text from `assistant/message` when no deltas flowed. */
@@ -55,6 +69,7 @@ export interface ReplyRouterOptions {
   config: ReplyConfig;
   getAdapter(channelId: string): ChannelAdapter | undefined;
   getBinding(sessionId: string): SessionBinding | undefined;
+  replyContexts: ReplyContextStore;
   logger: ChannelLogger;
 }
 
@@ -74,6 +89,9 @@ export class ReplyRouter {
   onSessionEvent(session: Session, event: SessionEvent): void {
     switch (event.type) {
       case 'turn/start':
+        // Turn existence only — ReplyContext is NOT derived here (v1.1 §25).
+        // The authoritative message↔turn correlation arrives later via the
+        // store's `getTurn`, populated by `agent/inbox/claimed`.
         this.ensureActive(session, event.data.turn);
         break;
       case 'assistant/chunk': {
@@ -112,7 +130,7 @@ export class ReplyRouter {
   async flushAll(): Promise<void> {
     for (const sessionId of [...this.active.keys()]) {
       const active = this.active.get(sessionId);
-      if (active) await this.finalize(active);
+      if (active) await this.finalize(active, active.turn);
     }
   }
 
@@ -128,7 +146,13 @@ export class ReplyRouter {
   private ensureActive(session: Session, turn: number): ActiveReply | null {
     const sessionId = String(session.id);
     const existing = this.active.get(sessionId);
-    if (existing) return existing;
+    if (existing) {
+      // A turn already active: re-resolve its context lazily. By the time
+      // chunks flow, `agent/inbox/claimed` has fired and `getTurn` is
+      // authoritative, so an already-open turn can still pick up its binding.
+      this.applyContext(existing, turn);
+      return existing;
+    }
     const binding = this.options.getBinding(sessionId);
     if (!binding) {
       this.options.logger.warn(`[channel-harness] no session binding for '${sessionId}'`);
@@ -141,9 +165,15 @@ export class ReplyRouter {
       );
       return null;
     }
+    // Active record starts with `context: undefined`; the store's active
+    // context (populated by `agent/inbox/claimed`) is resolved lazily below
+    // and on later chunks once it becomes available.
+    const target = targetFor(binding, undefined);
     const active: ActiveReply = {
       binding,
-      strategy: strategyFor(adapter),
+      strategy: strategyFor(adapter, target),
+      target,
+      context: undefined,
       handle: null,
       buffer: '',
       finalText: '',
@@ -155,7 +185,26 @@ export class ReplyRouter {
       flushing: null,
     };
     this.active.set(sessionId, active);
+    this.applyContext(active, turn);
     return active;
+  }
+
+  /**
+   * Resolve the active reply context lazily from the store at this moment and
+   * (re)compute target + strategy when the context first appears or changes.
+   * `agent/inbox/claimed` fires before any chunks flow, so `getTurn` is the
+   * authoritative correlation (v1.1 replacement for FIFO-at-turn/start).
+   */
+  private applyContext(active: ActiveReply, turn: number): void {
+    const context = this.options.replyContexts.getTurn(String(active.binding.sessionId), turn);
+    if (!context) return;
+    if (active.context === context) return;
+    active.context = context;
+    active.target = targetFor(active.binding, context);
+    active.strategy = strategyFor(
+      this.options.getAdapter(active.binding.channelId)!,
+      active.target,
+    );
   }
 
   private appendText(active: ActiveReply, delta: string): void {
@@ -212,7 +261,7 @@ export class ReplyRouter {
     if (!adapter?.createReply) return;
     try {
       if (!active.handle) {
-        active.handle = await adapter.createReply(targetFor(active.binding), {
+        active.handle = await adapter.createReply(active.target, {
           markdown: true,
         });
         // The owning scope may have finished while the card was created.
@@ -238,17 +287,23 @@ export class ReplyRouter {
   private async finishTurn(session: Session, turn: number): Promise<void> {
     const sessionId = String(session.id);
     const active = this.active.get(sessionId);
-    if (!active) return;
-    await this.finalize(active);
+    if (!active) {
+      // Even without an active reply, drop the active context for this turn
+      // (v1.1 §20) so it never leaks.
+      this.options.replyContexts.releaseTurn(sessionId, turn);
+      return;
+    }
+    await this.finalize(active, turn);
   }
 
   /**
    * Finalize one active reply: clear its timer, drain any in-flight preview
-   * chain, and deliver the accumulated text (or fail the handle). Shared by
-   * `turn/end` handling and the lifecycle `flushAll()` so an unloaded turn is
-   * finalized exactly like a completed one.
+   * chain, deliver the accumulated text (or fail the handle), and release the
+   * active reply context for its turn (v1.1 §20). Shared by `turn/end`
+   * handling and the lifecycle `flushAll()` so an unloaded turn is finalized
+   * exactly like a completed one.
    */
-  private async finalize(active: ActiveReply): Promise<void> {
+  private async finalize(active: ActiveReply, turn: number): Promise<void> {
     if (active.timer) {
       clearTimeout(active.timer);
       active.timer = null;
@@ -268,9 +323,11 @@ export class ReplyRouter {
       this.options.logger.warn(
         `[channel-harness] no adapter for channel '${active.binding.channelId}'`,
       );
+      // Still release the active context for this turn (v1.1 §20).
+      this.options.replyContexts.releaseTurn(active.binding.sessionId, turn);
       return;
     }
-    const target = targetFor(active.binding);
+    const target = active.target;
     try {
       if (active.handle) {
         // Pass the authoritative accumulated text: for `edit`, deltas pending
@@ -294,6 +351,8 @@ export class ReplyRouter {
         error,
       );
     }
+    // Release the active reply context for this turn (v1.1 §20).
+    this.options.replyContexts.releaseTurn(active.binding.sessionId, turn);
   }
 
   private async deliver(
@@ -314,10 +373,11 @@ export class ReplyRouter {
   }
 }
 
-function strategyFor(adapter: ChannelAdapter): ReplyStrategy {
+function strategyFor(adapter: ChannelAdapter, target: ChannelTarget): ReplyStrategy {
+  const mode = adapter.resolveStreamingMode?.(target) ?? adapter.capabilities.streaming;
   if (adapter.createReply) {
-    if (adapter.capabilities.streaming === 'native') return 'native';
-    if (adapter.capabilities.streaming === 'edit') return 'edit';
+    if (mode === 'native') return 'native';
+    if (mode === 'edit') return 'edit';
   }
   return 'buffered';
 }
@@ -330,7 +390,7 @@ function assistantText(message: AssistantMessage): string {
   return text;
 }
 
-function targetFor(binding: SessionBinding): ChannelTarget {
+function targetFor(binding: SessionBinding, context?: ChannelReplyContext): ChannelTarget {
   const target: ChannelTarget = {
     channelId: binding.channelId as ChannelTarget['channelId'],
     accountId: binding.accountId as ChannelTarget['accountId'],
@@ -338,6 +398,15 @@ function targetFor(binding: SessionBinding): ChannelTarget {
   };
   if (binding.threadId) {
     target.threadId = binding.threadId as ChannelTarget['threadId'];
+  }
+  if (context) {
+    target.conversationType = context.conversationType;
+    if (context.replyToMessageId) {
+      target.replyToMessageId = context.replyToMessageId as ChannelTarget['replyToMessageId'];
+    }
+    if (context.raw !== undefined) {
+      target.raw = context.raw;
+    }
   }
   return target;
 }

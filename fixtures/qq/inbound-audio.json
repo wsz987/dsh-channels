@@ -1,35 +1,48 @@
 {
-  "name": "inbound audio",
+  "name": "inbound c2c voice message",
   "channel": "qq",
-  "upstreamVersion": "m3",
+  "upstreamVersion": "1.0.4",
   "payload": {
-    "type": "audio",
-    "msgId": "msg_aud_1",
+    "rawEventType": "C2C_MESSAGE_CREATE",
+    "kind": "c2c",
     "senderId": "user_123",
-    "conversationId": "conv_456",
-    "conversationType": "dm",
-    "mediaUrl": "https://example.com/a.silk",
-    "durationMs": 5200
+    "senderName": "alice",
+    "senderIsBot": false,
+    "content": "",
+    "messageId": "msg_aud_1",
+    "timestamp": "2026-08-14T10:00:00+08:00",
+    "attachments": [
+      { "content_type": "voice", "url": "https://example.com/a.silk", "filename": "a.silk", "voice_wav_url": "https://example.com/a.wav", "asr_refer_text": "你好" }
+    ],
+    "replyTarget": { "scope": "c2c", "targetId": "user_123", "msgId": "msg_aud_1" },
+    "raw": {
+      "id": "msg_aud_1",
+      "content": "",
+      "timestamp": "2026-08-14T10:00:00+08:00",
+      "author": { "user_openid": "user_123" },
+      "attachments": [
+        { "content_type": "voice", "url": "https://example.com/a.silk", "filename": "a.silk", "voice_wav_url": "https://example.com/a.wav", "asr_refer_text": "你好" }
+      ]
+    }
   },
   "expected": {
     "type": "message.received",
     "channel": "qq",
     "accountId": "main",
-    "conversation": {
-      "id": "conv_456",
-      "type": "dm"
-    },
-    "sender": {
-      "id": "user_123"
-    },
+    "conversation": { "id": "user_123", "type": "dm" },
+    "sender": { "id": "user_123", "name": "alice" },
     "message": {
       "id": "msg_aud_1",
-      "content": [
-        {
-          "type": "audio",
-          "url": "https://example.com/a.silk",
-          "durationMs": 5200
-        }
+      "content": [{ "type": "audio", "url": "https://example.com/a.wav" }],
+      "createdAt": 1786672800000
+    },
+    "raw": {
+      "id": "msg_aud_1",
+      "content": "",
+      "timestamp": "2026-08-14T10:00:00+08:00",
+      "author": { "user_openid": "user_123" },
+      "attachments": [
+        { "content_type": "voice", "url": "https://example.com/a.silk", "filename": "a.silk", "voice_wav_url": "https://example.com/a.wav", "asr_refer_text": "你好" }
       ]
     }
   }

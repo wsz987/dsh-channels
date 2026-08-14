@@ -1,21 +1,22 @@
 /**
  * @dsh/channel-qq — QQ channel adapter for DeepSeek Harness.
  *
- * Maps the QQ platform to the stable Channel Contract. Two upstream drivers
- * implement `QQUpstream` behind `config.upstream.mode`:
- * - 'sdk'     — the official QQ 开放平台 WebSocket gateway protocol
- *   implemented in-source (isolated source, no third-party SDK): token auth
- *   (AppId + ClientSecret → access token), gateway connect/identify/
- *   heartbeat/reconnect, inbound C2C / group-@ dispatch, and real v2 OpenAPI
- *   outbound sends.
- * - 'gateway' — self-hosted HTTP gateway long-poll driver (legacy; QR auth
- *   via beginAuth/pollAuth).
+ * Maps the QQ platform (via the official Tencent SDK
+ * `@tencent-connect/qqbot-nodejs`) to the stable Channel Contract. The SDK
+ * owns Token acquisition/refresh, the WebSocket gateway, media upload and C2C
+ * streaming; DSH keeps its own dedup policy and reply routing.
  *
- * Streaming is `buffered` (QQ has no native streaming or editable cards):
- * chunks accumulate and are delivered once via `adapter.send` at turn/end.
- * Supports direct (`dm`) and group conversations.
+ * The adapter requires `ctx.channels` and `ctx.credentials`: the QQ AppSecret
+ * is resolved at startup through `ctx.credentials` (`appSecretRef`) and passed
+ * to the adapter as `deps.appSecret`. The secret value never enters the
+ * profile config — only its reference name does (v1.1 §7, QQ-R5).
+ *
+ * Streaming is target-aware: C2C with a triggering message id streams natively
+ * (replace-semantics full-text); groups are buffered and delivered once at
+ * `turn/end`.
  */
 import { type Context } from '@deepseek-ai/cordis';
+import { credentialRef } from '@deepseek-ai/dsh-credentials';
 import {
   MemorySecretStore,
   MemoryStorage,
@@ -26,40 +27,38 @@ import { Config } from './config.js';
 import { QQAdapter, type QQAdapterDeps } from './adapter.js';
 
 export const name = 'channel-qq';
-export const inject: string[] = ['channels'];
+export const inject: string[] = ['channels', 'credentials'];
 
 export { Config };
+export type { QQConfig } from './config.js';
 export { QQAdapter, type QQAdapterDeps } from './adapter.js';
-export { QQAuthManager, type QQAuthState } from './auth.js';
+export {
+  TencentQQSdkClient,
+  FakeQQSdkClient,
+  FakeStreamSession,
+  adaptLogger,
+  mediaOpts,
+  type QQSdkClient,
+  type QQReplyTarget,
+  type QQStreamTarget,
+  type QQStreamSession,
+} from './sdk-client.js';
 export { InboundProcessor } from './inbound.js';
-export { OutboundSender } from './outbound.js';
-export { HttpQQUpstream, type QQUpstream } from './upstream.js';
-export {
-  QQGatewayUpstream,
-  createDefaultGatewayClient,
-  toGatewayRaw,
-  QQ_INTENT_GROUP_AND_C2C,
-  QQ_OP,
-  QQ_EVENT_C2C_MESSAGE_CREATE,
-  QQ_EVENT_GROUP_AT_MESSAGE_CREATE,
-  type QQGatewayClient,
-  type QQGatewayFrame,
-  type QQGatewayUpstreamOptions,
-} from './qq-gateway-upstream.js';
-export { FetchTransport, type HttpTransport } from './transport.js';
-export {
-  mapInbound,
-  toTextPayload,
-  dedupKey,
-  simpleHash,
-  type QQTextPayload,
-} from './mapper.js';
+export { OutboundSender, toReplyTarget } from './outbound.js';
+export { QQStreamingReply } from './streaming-reply.js';
+export { mapInbound, mapMessageParts, type QQInboundMeta } from './mapper.js';
 export { manifest, type QQManifest } from './manifest.js';
 
 export function apply(ctx: Context, config: QQConfig, deps: QQAdapterDeps = {}): void {
   if (!config.enabled) return;
-  const adapter = new QQAdapter(config, deps);
   ctx.effect(async () => {
+    const credential = await ctx.credentials.resolve(credentialRef(config.appSecretRef));
+    if (!credential) {
+      throw new Error(`QQ credential "${config.appSecretRef}" is not configured`);
+    }
+
+    const adapter = new QQAdapter(config, { ...deps, appSecret: credential.value });
+
     const unregister = ctx.channels.register(adapter);
     const abort = new AbortController();
     const adapterCtx: ChannelAdapterContext = {

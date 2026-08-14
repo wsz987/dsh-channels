@@ -20,6 +20,7 @@ import type { AgentRouter } from './agent-router.js';
 import type { SessionBinding } from './session-router.js';
 import { sessionKey } from './session-router.js';
 import { toHarnessUserMessage } from './message-converter.js';
+import { ReplyContextStore } from './reply-context-store.js';
 
 export interface ChannelHarnessBridgeOptions {
   config: Config;
@@ -27,6 +28,7 @@ export interface ChannelHarnessBridgeOptions {
   agentManager: AgentManager;
   agentRouter: AgentRouter;
   getAdapter(channelId: string): ChannelAdapter | undefined;
+  replyContexts: ReplyContextStore;
   logger: ChannelLogger;
 }
 
@@ -57,28 +59,54 @@ export class ChannelHarnessBridge {
       bindingAgentId: binding?.agentId,
     });
     const now = Date.now();
+
+    let agentRef;
     if (!binding) {
+      // New conversation: mint the session id, create the agent, and only
+      // THEN persist the binding (v1.1 §33: create success before binding
+      // write). If the binding write fails after create, dispose the owned
+      // handle to roll back — never leave a dangling owned handle.
+      const sessionId = `ch-${randomUUID()}`;
+      agentRef = await this.options.agentManager.create(sessionId, agentId);
       binding = {
         channelId: event.channel,
         accountId: event.accountId,
         conversationId: event.conversation.id,
         ...(event.conversation.threadId ? { threadId: event.conversation.threadId } : {}),
         agentId,
-        sessionId: `ch-${randomUUID()}`,
+        sessionId,
         createdAt: now,
         updatedAt: now,
       };
-      await this.options.bindingStore.put(binding);
-    } else if (binding.agentId !== agentId) {
-      binding = { ...binding, agentId, updatedAt: now };
-      await this.options.bindingStore.put(binding);
+      try {
+        await this.options.bindingStore.put(binding);
+      } catch (error) {
+        await this.options.agentManager.disposeSession(sessionId).catch(() => {});
+        throw error;
+      }
+    } else {
+      if (binding.agentId !== agentId) {
+        binding = { ...binding, agentId, updatedAt: now };
+        await this.options.bindingStore.put(binding);
+      }
+      // Existing conversation: live get → resume; resume failure is loud.
+      agentRef = await this.options.agentManager.resolve(binding.sessionId, agentId);
     }
 
-    const agentRef = await this.options.agentManager.resolve(binding.sessionId, agentId);
     this.options.agentManager.registerBinding(binding);
 
     const userMessage = toHarnessUserMessage(event, {
       includeMetadataPrefix: this.options.config.includeMetadataPrefix,
+    });
+    // Register the reply context keyed by the Harness UserMessage id strictly
+    // BEFORE followup, so `agent/inbox/claimed` (the authoritative correlation
+    // this replaces) can always find the pending context for this message.
+    this.options.replyContexts.register(userMessage.id, {
+      sessionId: binding.sessionId,
+      context: {
+        conversationType: event.conversation.type,
+        replyToMessageId: event.message.id,
+      },
     });
     agentRef.followup(userMessage);
   }

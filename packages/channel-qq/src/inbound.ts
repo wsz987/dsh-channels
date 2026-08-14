@@ -1,8 +1,14 @@
 /**
  * Inbound processing: dedup window + structured mapping + emit.
+ *
+ * Input is the Tencent SDK's `QQBotInboundMessage`. Dedup keys on `messageId`
+ * (DSH keeps its own dedup policy; the SDK middleware chain is unused). Only
+ * `kind === 'c2c'` and `kind === 'group'` are accepted in V1 — anything else
+ * (guild/dm) is logged and dropped.
  */
 import type { ChannelAdapterContext, MessageReceived } from '@dsh/channel-core';
-import { dedupKey, mapInbound, type QQInboundMeta } from './mapper.js';
+import type { QQBotInboundMessage } from '@tencent-connect/qqbot-nodejs';
+import { mapInbound, type QQInboundMeta } from './mapper.js';
 
 export interface InboundProcessorOptions {
   ctx: ChannelAdapterContext;
@@ -15,16 +21,23 @@ export interface InboundProcessorOptions {
 
 export class InboundProcessor {
   private readonly now: () => number;
-  /** dedup key -> last-seen timestamp, pruned on every handle. */
+  /** messageId -> last-seen timestamp, pruned on every handle. */
   private readonly seen = new Map<string, number>();
 
   constructor(private readonly options: InboundProcessorOptions) {
     this.now = options.now ?? Date.now;
   }
 
-  /** Process one raw payload from the upstream; dedup then emit. */
-  async handle(raw: unknown): Promise<void> {
-    const key = dedupKey(raw);
+  /** Process one SDK inbound message; dedup then emit. */
+  async handle(raw: QQBotInboundMessage): Promise<void> {
+    if (raw.kind !== 'c2c' && raw.kind !== 'group') {
+      this.options.ctx.logger.debug(
+        `[channel-qq] dropping unsupported inbound kind '${raw.kind}'`,
+      );
+      return;
+    }
+
+    const key = raw.messageId;
     if (this.options.dedupEnabled) {
       const now = this.now();
       const last = this.seen.get(key);
@@ -35,6 +48,7 @@ export class InboundProcessor {
       this.seen.set(key, now);
       this.prune(now);
     }
+
     const event: MessageReceived = mapInbound(raw, this.options.meta);
     await this.options.ctx.emit(event);
   }

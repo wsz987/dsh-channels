@@ -17,6 +17,7 @@ export * from './agent-router.js';
 export * from './agent-manager.js';
 export * from './message-converter.js';
 export * from './reply-router.js';
+export * from './reply-context-store.js';
 export * from './bridge.js';
 export * from './lifecycle.js';
 export { name, inject, apply } from './plugin.js';

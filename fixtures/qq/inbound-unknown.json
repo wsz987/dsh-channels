@@ -1,32 +1,48 @@
 {
-  "name": "inbound unknown type",
+  "name": "inbound c2c unknown attachment",
   "channel": "qq",
-  "upstreamVersion": "m3",
+  "upstreamVersion": "1.0.4",
   "payload": {
-    "type": "sticker",
-    "msgId": "msg_unk_1",
+    "rawEventType": "C2C_MESSAGE_CREATE",
+    "kind": "c2c",
     "senderId": "user_123",
-    "conversationId": "conv_456",
-    "conversationType": "dm"
+    "senderName": "alice",
+    "senderIsBot": false,
+    "content": "",
+    "messageId": "msg_unk_1",
+    "timestamp": "2026-08-14T10:00:00+08:00",
+    "attachments": [
+      { "content_type": "sticker", "url": "https://example.com/sticker.webp" }
+    ],
+    "replyTarget": { "scope": "c2c", "targetId": "user_123", "msgId": "msg_unk_1" },
+    "raw": {
+      "id": "msg_unk_1",
+      "content": "",
+      "timestamp": "2026-08-14T10:00:00+08:00",
+      "author": { "user_openid": "user_123" },
+      "attachments": [
+        { "content_type": "sticker", "url": "https://example.com/sticker.webp" }
+      ]
+    }
   },
   "expected": {
     "type": "message.received",
     "channel": "qq",
     "accountId": "main",
-    "conversation": {
-      "id": "conv_456",
-      "type": "dm"
-    },
-    "sender": {
-      "id": "user_123"
-    },
+    "conversation": { "id": "user_123", "type": "dm" },
+    "sender": { "id": "user_123", "name": "alice" },
     "message": {
       "id": "msg_unk_1",
-      "content": [
-        {
-          "type": "unsupported",
-          "reason": "unknown qq type 'sticker'"
-        }
+      "content": [{ "type": "unsupported", "reason": "unknown qq attachment type 'sticker'" }],
+      "createdAt": 1786672800000
+    },
+    "raw": {
+      "id": "msg_unk_1",
+      "content": "",
+      "timestamp": "2026-08-14T10:00:00+08:00",
+      "author": { "user_openid": "user_123" },
+      "attachments": [
+        { "content_type": "sticker", "url": "https://example.com/sticker.webp" }
       ]
     }
   }

@@ -1,34 +1,41 @@
 {
-  "name": "duplicate message (webhook retry)",
+  "name": "duplicate message (repeated messageId)",
   "channel": "qq",
-  "upstreamVersion": "m3",
+  "upstreamVersion": "1.0.4",
   "payload": {
-    "type": "text",
-    "msgId": "msg_dup_1",
+    "rawEventType": "C2C_MESSAGE_CREATE",
+    "kind": "c2c",
     "senderId": "user_123",
-    "conversationId": "conv_456",
-    "conversationType": "dm",
-    "content": "hello harness"
+    "senderName": "alice",
+    "senderIsBot": false,
+    "content": "hello harness",
+    "messageId": "msg_dup_1",
+    "timestamp": "2026-08-14T10:00:00+08:00",
+    "attachments": [],
+    "replyTarget": { "scope": "c2c", "targetId": "user_123", "msgId": "msg_dup_1" },
+    "raw": {
+      "id": "msg_dup_1",
+      "content": "hello harness",
+      "timestamp": "2026-08-14T10:00:00+08:00",
+      "author": { "user_openid": "user_123" }
+    }
   },
   "expected": {
     "type": "message.received",
     "channel": "qq",
     "accountId": "main",
-    "conversation": {
-      "id": "conv_456",
-      "type": "dm"
-    },
-    "sender": {
-      "id": "user_123"
-    },
+    "conversation": { "id": "user_123", "type": "dm" },
+    "sender": { "id": "user_123", "name": "alice" },
     "message": {
       "id": "msg_dup_1",
-      "content": [
-        {
-          "type": "text",
-          "text": "hello harness"
-        }
-      ]
+      "content": [{ "type": "text", "text": "hello harness" }],
+      "createdAt": 1786672800000
+    },
+    "raw": {
+      "id": "msg_dup_1",
+      "content": "hello harness",
+      "timestamp": "2026-08-14T10:00:00+08:00",
+      "author": { "user_openid": "user_123" }
     }
   }
 }

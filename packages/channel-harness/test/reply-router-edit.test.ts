@@ -12,6 +12,7 @@ import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
 import type { ChannelAdapter } from '@dsh/channel-core';
 import { ReplyRouter } from '../src/reply-router.ts';
 import type { SessionBinding } from '../src/session-router.ts';
+import { ReplyContextStore } from '../src/reply-context-store.ts';
 
 const silentLogger = {
   debug: () => {},
@@ -141,6 +142,7 @@ function makeRouter(
     },
     getAdapter: () => adapter,
     getBinding: () => makeBinding(),
+    replyContexts: new ReplyContextStore(),
     logger: silentLogger,
   });
 }
@@ -259,6 +261,7 @@ describe('ReplyRouter edit strategy', () => {
       },
       getAdapter: () => adapter as unknown as ChannelAdapter,
       getBinding: () => makeBinding(),
+      replyContexts: new ReplyContextStore(),
       logger: silentLogger,
     });
     const session = fakeSession('s1');
@@ -309,6 +312,7 @@ describe('ReplyRouter edit strategy', () => {
       },
       getAdapter: () => adapter as unknown as ChannelAdapter,
       getBinding: () => makeBinding(),
+      replyContexts: new ReplyContextStore(),
       logger: silentLogger,
     });
     const session = fakeSession('s1');
@@ -352,5 +356,81 @@ describe('ReplyRouter edit strategy', () => {
       expect(created[0]?.finishCalls).toHaveLength(1);
     });
     expect(created[0]?.finishCalls[0]).toBe('final answer');
+  });
+});
+
+describe('ReplyRouter message-id → claimed → turn correlation (no cross-wire)', () => {
+  it('binds two messages A/B with distinct ids and turns to their OWN targets', async () => {
+    // A target-aware adapter records the replyToMessageId each send sees.
+    const sent: { target: unknown; text?: string }[] = [];
+    const adapter = {
+      id: 'target-aware',
+      capabilities: {
+        text: true,
+        image: false,
+        file: false,
+        audio: false,
+        video: false,
+        markdown: true,
+        cards: false,
+        reactions: false,
+        threads: false,
+        streaming: 'buffered',
+      },
+      start: async () => {},
+      stop: async () => {},
+      send: async (target: unknown, message: { text?: string }) => {
+        sent.push({ target, text: message.text });
+        return { delivered: true };
+      },
+    };
+    const store = new ReplyContextStore();
+    const router = new ReplyRouter({
+      config: {
+        updateIntervalMs: 0,
+        maxTextLength: undefined,
+        splitParagraphs: true,
+        splitCodeBlocks: true,
+        finalFlush: true,
+      },
+      getAdapter: () => adapter as unknown as ChannelAdapter,
+      getBinding: () => makeBinding(),
+      replyContexts: store,
+      logger: silentLogger,
+    });
+    const session = fakeSession('s1');
+
+    // Message A registers by its own Harness message id; `agent/inbox/claimed`
+    // moves it to active turn 1 before any chunk flows.
+    store.register('harness_A', {
+      sessionId: 's1',
+      context: { conversationType: 'dm', replyToMessageId: 'qq_A' },
+    });
+    store.claim({ sessionId: 's1', messageId: 'harness_A', turn: 1 });
+    router.onSessionEvent(session, turnStartEvent(1));
+    router.onSessionEvent(session, chunkEvent(1, 'reply for A'));
+    router.onSessionEvent(session, turnEndEvent(1));
+    await vi.waitFor(() => {
+      expect(sent).toHaveLength(1);
+    });
+    expect(sent[0]?.target).toMatchObject({ replyToMessageId: 'qq_A' });
+    expect(store.getTurn('s1', 1)).toBeUndefined(); // released at turn/end
+
+    // Message B, a different id and turn, must target qq_B — never qq_A.
+    store.register('harness_B', {
+      sessionId: 's1',
+      context: { conversationType: 'group', replyToMessageId: 'qq_B' },
+    });
+    store.claim({ sessionId: 's1', messageId: 'harness_B', turn: 2 });
+    router.onSessionEvent(session, turnStartEvent(2));
+    router.onSessionEvent(session, chunkEvent(2, 'reply for B'));
+    router.onSessionEvent(session, turnEndEvent(2));
+    await vi.waitFor(() => {
+      expect(sent).toHaveLength(2);
+    });
+    expect(sent[1]?.target).toMatchObject({
+      conversationType: 'group',
+      replyToMessageId: 'qq_B',
+    });
   });
 });

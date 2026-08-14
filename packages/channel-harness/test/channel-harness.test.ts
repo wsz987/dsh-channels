@@ -9,7 +9,6 @@ import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
 import {
   AgentManager,
   HarnessAgentGateway,
-  isPersistenceError,
   type AgentGateway,
   type GatewayAgentHandle,
 } from '../src/agent-manager.ts';
@@ -18,6 +17,7 @@ import { FileBindingStore, MemoryBindingStore } from '../src/binding-store.ts';
 import { ChannelHarnessBridge } from '../src/bridge.ts';
 import { Config } from '../src/config.ts';
 import { ReplyRouter, splitMessage } from '../src/reply-router.ts';
+import { ReplyContextStore } from '../src/reply-context-store.ts';
 import { bindingKey, sessionKey, type SessionBinding } from '../src/session-router.ts';
 import { partsToText, toHarnessUserMessage } from '../src/message-converter.ts';
 import { startBridge } from '../src/lifecycle.ts';
@@ -271,22 +271,47 @@ describe('AgentManager', () => {
       manager.resolve('s1', 'default'),
       manager.resolve('s1', 'default'),
     ]);
-    // FakeGateway.supportsResume is true, so resolve takes the resume path.
+    // resolve = live get → resume; both miss the live agent and share one
+    // in-flight resume.
     expect(gateway.resumeCalls).toEqual(['s1']);
     expect(gateway.createCalls).toEqual([]);
     expect(a.sessionId).toBe(b.sessionId);
   });
 
-  it('resumes persisted sessions and falls back to create on persistence errors', async () => {
+  it('resumes persisted sessions via resolve (existing conversation)', async () => {
     const manager = new AgentManager(gateway, silentLogger, 4);
     await manager.resolve('s1', 'default');
     expect(gateway.resumeCalls).toEqual(['s1']);
     expect(gateway.createCalls).toEqual([]);
+  });
 
-    gateway.resumeCalls = [];
-    gateway.failResumeWith = new Error('sessionPersistence not configured');
-    await manager.resolve('s2', 'default');
-    expect(gateway.createCalls).toContain('s2');
+  it('create opens a NEW session directly (no resume)', async () => {
+    const manager = new AgentManager(gateway, silentLogger, 4);
+    await manager.create('s1', 'default');
+    expect(gateway.createCalls).toEqual(['s1']);
+    expect(gateway.resumeCalls).toEqual([]);
+  });
+
+  it('existing binding + resume failure rejects loudly (no create fallback)', async () => {
+    const manager = new AgentManager(gateway, silentLogger, 4);
+    gateway.failResumeWith = new Error('session corruption: unsupported format');
+    await expect(manager.resolve('s1', 'default')).rejects.toThrow(/unsupported format/);
+    // Never silently downgrades to create.
+    expect(gateway.createCalls).toEqual([]);
+  });
+
+  it('existing binding + live agent resolves via get (no create, no resume)', async () => {
+    gateway.live.set('s1', {
+      id: 's1',
+      followup: () => {},
+      whenIdle: () => Promise.resolve(),
+      dispose: async () => {},
+    });
+    const manager = new AgentManager(gateway, silentLogger, 4);
+    const ref = await manager.resolve('s1', 'default');
+    expect(ref.sessionId).toBe('s1');
+    expect(gateway.createCalls).toEqual([]);
+    expect(gateway.resumeCalls).toEqual([]);
   });
 
   it('disposes owned handles exactly once on disposeAll', async () => {
@@ -349,12 +374,6 @@ describe('AgentManager', () => {
 
     release(); // let the in-flight resume settle so the test does not leak
     await expect(first).resolves.toBeDefined();
-  });
-
-  it('isPersistenceError classifies persistence messages', () => {
-    expect(isPersistenceError(new Error('session persistence unavailable'))).toBe(true);
-    expect(isPersistenceError(new Error('boom'))).toBe(false);
-    expect(isPersistenceError('nope')).toBe(false);
   });
 });
 
@@ -426,6 +445,7 @@ describe('ReplyRouter', () => {
       config: baseConfig().reply,
       getAdapter: () => adapter as never,
       getBinding: () => binding,
+      replyContexts: new ReplyContextStore(),
       logger: silentLogger,
     });
     const session = fakeSession('s1');
@@ -488,6 +508,7 @@ describe('ReplyRouter', () => {
       config: { ...baseConfig().reply, updateIntervalMs: 0 },
       getAdapter: () => adapter as never,
       getBinding: () => binding,
+      replyContexts: new ReplyContextStore(),
       logger: silentLogger,
     });
     const session = fakeSession('s1');
@@ -517,6 +538,7 @@ describe('ReplyRouter', () => {
       config: { ...baseConfig().reply, maxTextLength: 10 },
       getAdapter: () => adapter as never,
       getBinding: () => binding,
+      replyContexts: new ReplyContextStore(),
       logger: silentLogger,
     });
     const session = fakeSession('s1');
@@ -532,6 +554,7 @@ describe('ReplyRouter', () => {
       config: { ...baseConfig().reply, updateIntervalMs: 1000 },
       getAdapter: () => new FakeAdapter('fake') as never,
       getBinding: () => undefined,
+      replyContexts: new ReplyContextStore(),
       logger: silentLogger,
     });
     const session = fakeSession('s1');
@@ -575,17 +598,19 @@ describe('ChannelHarnessBridge end-to-end', () => {
       agentManager: manager,
       agentRouter: router,
       getAdapter: () => new FakeAdapter('weixin') as never,
+      replyContexts: new ReplyContextStore(),
       logger: silentLogger,
     });
 
     const event = makeMessageEvent();
     await bridge.handleChannelEvent(event);
 
-    // FakeGateway.supportsResume is true, so resolution goes through resume.
-    expect(gateway.resumeCalls).toHaveLength(1);
+    // New conversation (no binding) → create, then persist the binding.
+    expect(gateway.createCalls).toHaveLength(1);
+    expect(gateway.resumeCalls).toHaveLength(0);
     expect(gateway.followups).toHaveLength(1);
     const binding = await bindingStore.get('weixin:main:user_123');
-    expect(binding?.sessionId).toBe(gateway.resumeCalls[0]);
+    expect(binding?.sessionId).toBe(gateway.createCalls[0]);
     expect(binding?.agentId).toBe('weixin-agent');
     expect(manager.bindingFor(binding!.sessionId)).toEqual(binding);
   });
@@ -599,6 +624,7 @@ describe('ChannelHarnessBridge end-to-end', () => {
       agentManager: manager,
       agentRouter: new AgentRouter(baseConfig()),
       getAdapter: () => new FakeAdapter('weixin') as never,
+      replyContexts: new ReplyContextStore(),
       logger: silentLogger,
     });
     await bridge.handleChannelEvent(makeMessageEvent({ message: { id: 'm1', content: [{ type: 'text', text: 'a' }] } }));
@@ -851,6 +877,7 @@ describe('bridge integration with ChannelService events', () => {
       agentManager: manager,
       agentRouter: new AgentRouter(baseConfig()),
       getAdapter: (id) => service.get(id),
+      replyContexts: new ReplyContextStore(),
       logger: silentLogger,
     });
 

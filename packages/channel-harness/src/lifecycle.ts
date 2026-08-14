@@ -11,6 +11,12 @@
  * 4. stop listening to `session/event`;
  * 5. dispose all owned agent handles;
  * 6. dispose the ReplyRouter (clear timers).
+ *
+ * It also registers the two reply-context correlation listeners
+ * (`agent/inbox/claimed` → `ReplyContextStore.claim`, `agent/inbox/discarded`
+ * → `ReplyContextStore.discard`) on the Cordis context. They are plain
+ * `ctx.on` (auto-disposed with the context) and stay active for the whole
+ * bridge lifetime so every message↔turn correlation is captured.
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { ChannelAdapter, ChannelEvent, ChannelLogger } from '@dsh/channel-core';
@@ -20,6 +26,7 @@ import { AgentManager, HarnessAgentGateway } from './agent-manager.js';
 import { AgentRouter } from './agent-router.js';
 import { ReplyRouter } from './reply-router.js';
 import { ChannelHarnessBridge } from './bridge.js';
+import { ReplyContextStore } from './reply-context-store.js';
 
 export interface BridgeLifecycle {
   dispose(): Promise<void>;
@@ -37,10 +44,39 @@ export function startBridge(ctx: Context, config: Config): BridgeLifecycle {
   const getAdapter = (channelId: string): ChannelAdapter | undefined =>
     ctx.channels.get(channelId);
 
+  // One shared ReplyContextStore: the bridge registers per-message reply
+  // context (keyed by Harness UserMessage id), the `agent/inbox/claimed`
+  // listener claims it into an active `sessionId`+`turn` slot, and the reply
+  // router resolves it lazily when chunks flow.
+  const replyContexts = new ReplyContextStore();
+
+  // Correlation listeners (v1.1 §15/§18/§19). They are plain `ctx.on` and
+  // therefore auto-dispose with the context, but they must stay active for the
+  // WHOLE bridge lifetime (not just during drain) — a turn claimed while the
+  // plugin is still live must correlate. Registered at the top level
+  // (outside the effect) so they are not tied to any drain window.
+  ctx.on(
+    'agent/inbox/claimed',
+    ({ agent, message, turn }: { agent: { session: { id: string } }; message: { id: string }; turn: number }) => {
+      replyContexts.claim({
+        sessionId: String(agent.session.id),
+        messageId: String(message.id),
+        turn,
+      });
+    },
+  );
+  ctx.on(
+    'agent/inbox/discarded',
+    ({ message }: { message: { id: string } }) => {
+      replyContexts.discard(String(message.id));
+    },
+  );
+
   const replyRouter = new ReplyRouter({
     config: config.reply,
     getAdapter,
     getBinding: (sessionId) => agentManager.bindingFor(sessionId),
+    replyContexts,
     logger,
   });
   const stopListening = replyRouter.attach(ctx);
@@ -51,6 +87,7 @@ export function startBridge(ctx: Context, config: Config): BridgeLifecycle {
     agentManager,
     agentRouter,
     getAdapter,
+    replyContexts,
     logger,
   });
   // Return the promise so `ChannelService.emit` awaits the bridge and can

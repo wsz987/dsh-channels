@@ -44,11 +44,13 @@ fixtures/dingtalk/
 **M3 — 四官方渠道统一 ✅**
 
 ```text
-QQ（buffered 流式 + dm/group + QR auth）与 Lark（threads → SessionBinding、可编辑卡片）
+QQ（Tencent 官方 SDK @tencent-connect/qqbot-nodejs：C2C native 流式 + 群 buffered + dm/group）与 Lark（threads → SessionBinding、可编辑卡片）
 统一 health / doctor / routing / auth
 channels doctor（Task 13.2，上游兼容性诊断）
 fixtures/qq/ + fixtures/lark/
 ```
+
+> QQ Runtime: Tencent SDK → Channel Adapter → Harness。No OpenClaw runtime dependency. No custom QQ gateway required. QQ AppSecret 通过 `ctx.credentials` 接入（config 仅存 `appSecretRef` 引用，v1.1 QQ-R5）；`channel-harness` 正式依赖 `sessionPersistence`。
 
 **M4 — 兼容性治理 ✅**
 
@@ -183,13 +185,13 @@ export default defineChannelAdapter({
 
 ## 后续
 
-- 执行计划 Phase 0–13、15–18 的框架与离线实现基本完成；Phase 14 Harness compatibility 已补 pinned-rc.6 契约回归，但尚无真实 Harness runtime 回归；四官方渠道的官方上游 Driver 已完成（DingTalk/Lark 接官方 SDK、QQ 接官方 WS 协议、Weixin 保留 Gateway 型）；Release Pipeline 已实现，但尚无 GitHub Actions 成功运行记录（当前仅打 `v*` tag 触发）。
+- 执行计划 Phase 0–13、15–18 的框架与离线实现基本完成；Phase 14 Harness compatibility 已补 pinned-rc.6 契约回归，但尚无真实 Harness runtime 回归；四官方渠道的官方上游 Driver 已完成（DingTalk/Lark/QQ 接官方 SDK、Weixin 保留 Gateway 型）；Release Pipeline 已实现，但尚无 GitHub Actions 成功运行记录（当前仅打 `v*` tag 触发）。
 
 **已知缺口 (Known gaps)**
 
 - 框架与离线实现（Phase 0–13、15–18）基本完成，但尚未在真实 dsh runtime 上做过端到端验证。
 - Phase 14 Harness compatibility 仅有 pinned-rc.6 契约回归（`packages/channel-harness/test/harness-compat.test.ts`），尚无真实 Harness runtime 回归。
-- 四官方渠道已接官方上游：DingTalk `dingtalk-stream@2.1.5`、Lark `@larksuiteoapi/node-sdk@1.73.0`、QQ 官方 WebSocket 网关协议（isolated source）、Weixin 自托管 HTTP Gateway。live-platform E2E 需真实凭据（AppKey/AppSecret/ClientSecret），尚未执行。
+- 四官方渠道已接官方上游：DingTalk `dingtalk-stream@2.1.5`、Lark `@larksuiteoapi/node-sdk@1.73.0`、QQ 官方 SDK `@tencent-connect/qqbot-nodejs@1.0.4`、Weixin 自托管 HTTP Gateway。live-platform E2E 需真实凭据（AppKey/AppSecret/ClientSecret），尚未执行。
 - Release Pipeline 已实现，但尚无 GitHub Actions 成功运行记录（当前仅 `v*` tag 触发 release.yml）。
 
 详见 `docs/deepseek-harness-channels-architecture.md` 与 `docs/deepseek-harness-channels-execution-plan.md`。

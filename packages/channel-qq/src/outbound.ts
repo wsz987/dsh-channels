@@ -1,36 +1,34 @@
 /**
- * Outbound sending: channel message → qq payload → upstream.
+ * Outbound sending: channel message → QQReplyTarget → QQSdkClient.
  *
- * Text messages go through `sendText`; messages carrying media parts (e.g. an
- * image with a resolvable url) go through `sendMedia`. Everything else falls
- * back to the single-text `toTextPayload` (buffered strategy).
+ * Text-only messages go through `sendText`; messages carrying a media part
+ * with a resolvable source go through `sendMedia` (fileType mapped from the
+ * part type). Failures are wrapped in `ChannelSendError`.
  */
 import type {
   ChannelLogger,
   ChannelTarget,
-  MessagePart,
   OutboundMessage,
   SendResult,
 } from '@dsh/channel-core';
 import { ChannelSendError } from '@dsh/channel-core';
-import { toTextPayload } from './mapper.js';
-import type { QQMedia, QQUpstream } from './upstream.js';
+import type { QQReplyTarget, QQSdkClient } from './sdk-client.js';
 
 export class OutboundSender {
   constructor(
-    private readonly upstream: QQUpstream,
+    private readonly client: QQSdkClient,
     private readonly logger: ChannelLogger,
   ) {}
 
   async send(target: ChannelTarget, message: OutboundMessage): Promise<SendResult> {
     try {
-      const media = firstMedia(message.parts);
-      if (media) {
-        const response = await this.upstream.sendMedia(target.conversationId, media);
+      const replyTarget = toReplyTarget(target);
+      if (hasMedia(message)) {
+        const response = await this.client.sendMedia(replyTarget, message);
         return { delivered: true, raw: response };
       }
-      const payload = toTextPayload(target, message);
-      const response = await this.upstream.sendText(payload.to, payload.content);
+      const text = message.text ?? '';
+      const response = await this.client.sendText(replyTarget, text);
       return { delivered: true, raw: response };
     } catch (error) {
       this.logger.error(
@@ -44,13 +42,30 @@ export class OutboundSender {
   }
 }
 
-/** First media part with a resolvable url, if any. */
-function firstMedia(parts: MessagePart[] | undefined): QQMedia | undefined {
-  if (!parts) return undefined;
-  for (const part of parts) {
-    if (part.type === 'image' && part.url) return { type: 'image', url: part.url };
-    if (part.type === 'audio' && part.url) return { type: 'audio', url: part.url };
-    if (part.type === 'file' && part.url) return { type: 'file', url: part.url };
+/** Build a port `QQReplyTarget` from a DSH `ChannelTarget`. */
+export function toReplyTarget(target: ChannelTarget): QQReplyTarget {
+  return {
+    scope: target.conversationType === 'group' ? 'group' : 'c2c',
+    targetId: target.conversationId,
+    msgId: target.replyToMessageId,
+  };
+}
+
+/** Whether the message carries a media part with a resolvable source. */
+function hasMedia(message: OutboundMessage): boolean {
+  for (const part of message.parts ?? []) {
+    switch (part.type) {
+      case 'image':
+      case 'audio':
+      case 'video':
+        if (part.url || part.dataUri) return true;
+        break;
+      case 'file':
+        if (part.url || part.dataUri) return true;
+        break;
+      default:
+        break;
+    }
   }
-  return undefined;
+  return false;
 }

@@ -13,6 +13,7 @@ import { Context } from '@deepseek-ai/cordis';
 import { ChannelService, ChannelError, type MessageReceived } from '@dsh/channel-core';
 import { createTestContext } from '@dsh/channel-testkit';
 import { ReplyRouter } from '../../channel-harness/src/reply-router.ts';
+import { ReplyContextStore } from '../../channel-harness/src/reply-context-store.ts';
 import type { SessionBinding } from '../../channel-harness/src/session-router.ts';
 import {
   Config,
@@ -114,6 +115,7 @@ function makeRouter(
     },
     getAdapter: () => adapter,
     getBinding: () => binding,
+    replyContexts: new ReplyContextStore(),
     logger: silentLogger,
   });
 }

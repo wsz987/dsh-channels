@@ -9,12 +9,21 @@
  *   plugin unload. Owned handles live in `owned` and are disposed exactly
  *   once by `disposeAll()`.
  *
- * Per-session single-flight: concurrent `resolve()` for the same session id
- * shares one in-flight promise, so create/resume never races with itself.
+ * Per-session single-flight: concurrent `create()`/`resolve()` for the same
+ * session id share one in-flight promise, so create/resume never races with
+ * itself.
+ *
+ * Create/resume is decided by the CALLER (the bridge), not by error-regex
+ * fallback:
+ * - `create(sessionId, agentId)` — a NEW conversation with no prior binding;
+ *   calls `gateway.create` directly and owns the handle.
+ * - `resolve(sessionId, agentId)` — an EXISTING conversation; live `get`
+ *   first, then `gateway.resume`; a resume failure propagates loudly (throws)
+ *   and is never silently downgraded to create.
  *
  * Global concurrency gate: at most `maxConcurrency` `create()`/`resume()`
  * calls are in flight at once across all sessions (`get()` is never
- * limited); a `resolve()` that needs a slot queues until one frees.
+ * limited); a call that needs a slot queues until one frees.
  *
  * `AgentGateway` is the minimal port abstraction so tests can run the whole
  * pipeline against a fake instead of a real Harness agent loop.
@@ -148,9 +157,35 @@ export class AgentManager {
   }
 
   /**
-   * Resolve an agent for a session: live get first, then persisted resume
-   * (degrading to create when the error says no persistence is configured),
-   * then create. Single-flight per session id.
+   * Create a NEW agent for a session (no prior binding). Calls
+   * `gateway.create` directly (under the concurrency slot), owns the handle,
+   * and returns the ref. Never resumes — the caller already decided this is a
+   * fresh conversation. Single-flight per session id.
+   */
+  create(sessionId: string, agentId: string): Promise<AgentRef> {
+    if (this.closed) {
+      return Promise.reject(new Error(`AgentManager is closed; cannot create '${sessionId}'`));
+    }
+    const pending = this.inFlight.get(sessionId);
+    if (pending) return pending;
+    const run = this.doCreate(sessionId, agentId);
+    this.inFlight.set(sessionId, run);
+    void run.then(
+      () => {
+        this.inFlight.delete(sessionId);
+      },
+      () => {
+        this.inFlight.delete(sessionId);
+      },
+    );
+    return run;
+  }
+
+  /**
+   * Resolve an agent for an EXISTING session: live `get` first; on a miss,
+   * `gateway.resume`. A resume failure propagates loudly (throws) — never
+   * falls back to create and never sniffs error messages. Single-flight per
+   * session id.
    */
   resolve(sessionId: string, agentId: string): Promise<AgentRef> {
     if (this.closed) {
@@ -213,30 +248,47 @@ export class AgentManager {
     }
   }
 
+  /**
+   * Dispose a single owned handle (used to roll back a create whose binding
+   * write failed afterward). No-op for handles the manager does not own (a
+   * `get()`-obtained live agent is never disposed).
+   */
+  async disposeSession(sessionId: string): Promise<void> {
+    const handle = this.owned.get(sessionId);
+    if (!handle) return;
+    this.owned.delete(sessionId);
+    this.refs.delete(sessionId);
+    this.bindings.delete(sessionId);
+    try {
+      await handle.dispose();
+    } catch (error) {
+      this.logger.error(`failed to dispose owned agent handle for '${sessionId}'`, error);
+    }
+  }
+
+  private async doCreate(sessionId: string, agentId: string): Promise<AgentRef> {
+    // `create` is an expensive gateway operation: gate it so at most
+    // `maxConcurrency` are in flight at once across all sessions.
+    return this.withSlot(async () => {
+      const handle = await this.gateway.create(sessionId, agentId);
+      this.owned.set(sessionId, handle);
+      return this.makeRef(sessionId, agentId, handle);
+    });
+  }
+
   private async doResolve(sessionId: string, agentId: string): Promise<AgentRef> {
     const live = this.gateway.get(sessionId);
     if (live) {
       return this.makeRef(sessionId, agentId, live);
     }
-    // `create`/`resume` are the expensive gateway operations: gate them so
-    // at most `maxConcurrency` are in flight at once across all sessions.
+    // `resume` is an expensive gateway operation: gate it so at most
+    // `maxConcurrency` are in flight at once across all sessions.
     return this.withSlot(async () => {
-      if (this.gateway.supportsResume) {
-        try {
-          const handle = await this.gateway.resume(sessionId);
-          this.owned.set(sessionId, handle);
-          return this.makeRef(sessionId, agentId, handle);
-        } catch (error) {
-          if (isPersistenceError(error)) {
-            this.logger.info(
-              `session '${sessionId}' has no persisted state; falling back to create: ${error instanceof Error ? error.message : String(error)}`,
-            );
-          } else {
-            throw error;
-          }
-        }
-      }
-      const handle = await this.gateway.create(sessionId, agentId);
+      // Resume failure propagates loudly — no create fallback, no message
+      // sniffing. An existing binding means the session existed before; a
+      // failed resume must surface so a corrupt/lost session is never silently
+      // replaced with a fresh one.
+      const handle = await this.gateway.resume(sessionId);
       this.owned.set(sessionId, handle);
       return this.makeRef(sessionId, agentId, handle);
     });
@@ -290,9 +342,4 @@ export class AgentManager {
     this.refs.set(sessionId, ref);
     return ref;
   }
-}
-
-/** Classify resume failures that mean "persistence not configured". */
-export function isPersistenceError(error: unknown): boolean {
-  return error instanceof Error && /persistence|persist/i.test(error.message);
 }

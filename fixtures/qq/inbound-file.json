@@ -1,5 +1,5 @@
 {
-  "name": "inbound c2c image message",
+  "name": "inbound c2c file message",
   "channel": "qq",
   "upstreamVersion": "1.0.4",
   "payload": {
@@ -9,19 +9,19 @@
     "senderName": "alice",
     "senderIsBot": false,
     "content": "",
-    "messageId": "msg_img_1",
+    "messageId": "msg_file_1",
     "timestamp": "2026-08-14T10:00:00+08:00",
     "attachments": [
-      { "content_type": "image/png", "url": "https://example.com/pic.png", "filename": "a photo", "height": 600, "width": 800, "size": 1234 }
+      { "content_type": "file", "url": "https://example.com/report.pdf", "filename": "report.pdf", "size": 4096 }
     ],
-    "replyTarget": { "scope": "c2c", "targetId": "user_123", "msgId": "msg_img_1" },
+    "replyTarget": { "scope": "c2c", "targetId": "user_123", "msgId": "msg_file_1" },
     "raw": {
-      "id": "msg_img_1",
+      "id": "msg_file_1",
       "content": "",
       "timestamp": "2026-08-14T10:00:00+08:00",
       "author": { "user_openid": "user_123" },
       "attachments": [
-        { "content_type": "image/png", "url": "https://example.com/pic.png", "filename": "a photo", "height": 600, "width": 800, "size": 1234 }
+        { "content_type": "file", "url": "https://example.com/report.pdf", "filename": "report.pdf", "size": 4096 }
       ]
     }
   },
@@ -32,17 +32,17 @@
     "conversation": { "id": "user_123", "type": "dm" },
     "sender": { "id": "user_123", "name": "alice" },
     "message": {
-      "id": "msg_img_1",
-      "content": [{ "type": "image", "url": "https://example.com/pic.png", "alt": "a photo" }],
+      "id": "msg_file_1",
+      "content": [{ "type": "file", "url": "https://example.com/report.pdf", "name": "report.pdf", "size": 4096 }],
       "createdAt": 1786672800000
     },
     "raw": {
-      "id": "msg_img_1",
+      "id": "msg_file_1",
       "content": "",
       "timestamp": "2026-08-14T10:00:00+08:00",
       "author": { "user_openid": "user_123" },
       "attachments": [
-        { "content_type": "image/png", "url": "https://example.com/pic.png", "filename": "a photo", "height": 600, "width": 800, "size": 1234 }
+        { "content_type": "file", "url": "https://example.com/report.pdf", "filename": "report.pdf", "size": 4096 }
       ]
     }
   }

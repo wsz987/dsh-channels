@@ -63,7 +63,7 @@ the consumer side requires TypeScript compilation**:
 
 `lib/` is gitignored; the release workflow builds before publishing.
 
-## DSH Bundle Validation (Task 16.3)
+## DSH Bundle Validation (Task 16.3, v1.1 profile/patch model)
 
 ### Automated (offline) gate — `pnpm check:bundle`
 
@@ -73,7 +73,9 @@ the consumer side requires TypeScript compilation**:
 1. parses `packages/channels/cordis.patch.yml` (hand-rolled parser, no YAML
    dependency) and asserts the patch inserts exactly the six plugin ids —
    `channels-service`, `channels-harness`, `channels-weixin`,
-   `channels-qq`, `channels-dingtalk`, `channels-lark`;
+   `channels-qq`, `channels-dingtalk`, `channels-lark` — with the v1.1
+   `inject` lists (`channels-harness` → `[channels, agents, sessionPersistence]`,
+   `channels-qq` → `[channels, credentials]`, the rest → `[channels]`);
 2. dynamically `import()`s every plugin specifier — this enforces Node ESM
    **exports-map resolution** (`@dsh/channel-core/plugin` fails the test if
    the subpath export is missing) — and asserts the Cordis plugin shape
@@ -83,6 +85,11 @@ the consumer side requires TypeScript compilation**:
 4. asserts every channel adapter's `Config` exposes an `enabled` boolean
    (Schemastery object-schema introspection) so all channels can be disabled
    via config.
+
+The bundle package (`@dsh/channels`) is marked as a DSH bundle with the
+`dsh.bundle.patch` key pointing at `cordis.patch.yml` (v1.1 §38). A profile
+consumes it via the `dsh.profile.bundles` list, not a hand-written
+`plugins:` map (see `apps/example/minimal-profile/`).
 
 `pnpm check:bundle` is wired into the CI governance job.
 
@@ -95,8 +102,9 @@ validation installs the bundle into a **clean profile** with the real dsh CLI:
 # 1. clean profile — never reuse a dirty profile for release validation
 dsh profile create release-validation
 
-# 2. add the bundle (applies cordis.patch.yml to the clean profile)
-dsh plugin --profile release-validation add ./packages/channels
+# 2. add the bundle (installs it into dsh.profile.bundles and applies
+#    cordis.patch.yml to the clean profile)
+dsh plugin --profile release-validation add @dsh/channels
 
 # 3. dump the merged config — verify the six plugins were inserted
 dsh --profile release-validation --dump-config
@@ -105,15 +113,16 @@ dsh --profile release-validation --dump-config
 #    channels-weixin, channels-qq, channels-dingtalk, channels-lark)
 dsh --profile release-validation
 
-# 5. disable individual channels via config — edit the profile config (see
-#    apps/example/minimal-profile/cordis.yml) and set
-#    plugins.channels-weixin.enabled = false (etc.), then restart. The adapter
-#    plugin's apply() returns early when enabled is false.
+# 5. override channels via a profile patch (apps/example/minimal-profile/
+#    cordis.patch.yml shows a QQ-only override). A patch REPLACES the whole
+#    target config (not a deep merge). QQ config uses `appSecretRef` (a
+#    credential reference — the real AppSecret lives in ctx.credentials).
 dsh --profile release-validation
 ```
 
-See `apps/example/minimal-profile/` for a reference profile showing the bundle
-result.
+See `apps/example/minimal-profile/` for a reference profile (`package.json`
+with `dsh.profile.bundles` + `cordis.patch.yml` + `README.md`) showing the
+bundle result and the profile-override semantics.
 
 ## Publish metadata
 

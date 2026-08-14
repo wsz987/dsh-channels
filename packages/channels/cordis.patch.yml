@@ -18,6 +18,7 @@
       inject:
         - channels
         - agents
+        - sessionPersistence
 
     - id: channels-weixin
       name: '@dsh/channel-weixin'
@@ -28,6 +29,7 @@
       name: '@dsh/channel-qq'
       inject:
         - channels
+        - credentials
 
     - id: channels-dingtalk
       name: '@dsh/channel-dingtalk'

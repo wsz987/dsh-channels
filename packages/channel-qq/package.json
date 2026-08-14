@@ -8,7 +8,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "QQ channel adapter for DeepSeek Harness (buffered streaming, dm/group, QR auth)",
+  "description": "QQ channel adapter for DeepSeek Harness (Tencent official SDK, native C2C streaming + buffered group)",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -30,13 +30,13 @@
   },
   "dependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-credentials": "^0.1.0-rc.6",
     "@deepseek-ai/schemastery": "^3.18.1",
     "@dsh/channel-core": "workspace:*",
-    "ws": "^8"
+    "@tencent-connect/qqbot-nodejs": "1.0.4"
   },
   "devDependencies": {
     "@dsh/channel-testkit": "workspace:*",
-    "@types/ws": "^8",
     "rimraf": "^6.0.0"
   },
   "license": "MIT"

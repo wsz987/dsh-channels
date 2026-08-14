@@ -1,35 +1,50 @@
-# Example DSH profile — minimal (bundle)
+# Example DSH profile — minimal
 
-Example profile for the **@dsh/channels** DSH bundle (Phase 16, Task 16.3). It
-shows the result of the bundle patch (`packages/channels/cordis.patch.yml`):
-the ChannelService (`channels-service`), the Harness bridge
-(`channels-harness`) and the four official channel adapters
-(`channels-weixin`, `channels-qq`, `channels-dingtalk`, `channels-lark`),
-each with realistic per-channel config including `enabled: true` and commented
-`enabled: false` examples for disabling channels via config.
+Example DSH profile using the official v1.1 **bundle / profile / patch** model
+(v1.1 §40–§41, §52). It shows a user profile that consumes the
+**@dsh/channels** bundle and then overrides it to run a QQ-only channel setup.
 
-> This directory intentionally has **no package.json**: it is not a workspace
-> package and is ignored by turbo / vitest. It is a reference profile, not a
-> buildable app (compare `apps/fake-channel`).
+## Files
 
-## Commands
+- `package.json` — the profile manifest: declares the bundles to install via
+  the `dsh.profile.bundles` list (`@deepseek-ai/dsh-base`, `@dsh/channels`).
+- `cordis.patch.yml` — the **user profile patch** that overrides rows inserted
+  by the bundle: disables weixin / dingtalk / lark and overrides `channels-qq`
+  with its full QQ config.
 
-Apply the bundle to a clean `minimal` profile and inspect the merged config:
+## Install flow
 
 ```bash
-# 1. add the bundle (installs the patch into the clean profile)
-dsh plugin --profile minimal add ./packages/channels
+# 1. add the bundle to the profile (DSH installs the bundle into
+#    dsh.profile.bundles and applies the bundle's cordis.patch.yml)
+dsh plugin --profile minimal add @dsh/channels
 
-# 2. dump the merged config — verify the six plugins from cordis.patch.yml
+# 2. inspect the merged config
 dsh --profile minimal --dump-config
 
-# 3. start the profile — all plugins load, channels register on ctx.channels
+# 3. run the profile
 dsh --profile minimal
 ```
 
-To disable a single channel, edit the profile config (mirroring this file) and
-set `plugins.channels-weixin.enabled: false` (etc.) — the adapter plugin's
-`apply()` returns early when `enabled` is false.
+## Profile override semantics (v1.1 §41)
+
+A Harness patch **replaces the whole `config` of the target row** — it is *not*
+a deep merge. Every `config:` block in `cordis.patch.yml` must therefore carry
+the complete config for that plugin, not just the key you want to change.
+
+## Credentials (QQ-R5)
+
+The QQ AppSecret is **never** written into the profile, the bundle config, or
+git. Config carries only the credential **reference** (`appSecretRef`, e.g.
+`QQBOT_APP_SECRET`); the actual secret lives in `ctx.credentials` and is
+resolved at startup:
+
+```yaml
+appSecretRef: QQBOT_APP_SECRET   # reference only — the value lives in ctx.credentials
+```
+
+The `channels-qq` plugin injects `[channels, credentials]`; the
+`channel-harness` bridge injects `[channels, agents, sessionPersistence]`.
 
 > **Note:** a real clean-profile install requires the dsh CLI (this repo ships
 > the bundle, not the CLI) and is a **manual release-validation step** —

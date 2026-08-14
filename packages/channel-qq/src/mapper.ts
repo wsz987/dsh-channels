@@ -1,21 +1,10 @@
 /**
- * Pure payload mapping (no I/O): platform raw payloads → Channel Contract,
- * and outbound Channel messages → qq text/media payloads.
+ * Pure payload mapping (no I/O) — Tencent SDK inbound messages → Channel
+ * Contract, plus the outbound media extraction helper shared with
+ * OutboundSender.
  *
  * Raw payloads only ever ride along in `event.raw` for debugging — core and
  * the harness bridge never depend on their shape (red line 6).
- *
- * QQ-ish raw shapes are protocol-level and deliberately simple, e.g.:
- * ```json
- * { "type": "text", "msgId": "msg_1", "senderId": "user_123",
- *   "conversationId": "conv_456", "conversationType": "dm",
- *   "content": "hello" }
- * ```
- *
- * Direct messages carry `conversationType: "dm"`; group chats carry
- * `conversationType: "group"` with the group id as `conversationId`. The
- * conversation `type` is mapped verbatim so the harness can bind group chats
- * to their own sessions (Task 11.2).
  */
 import type {
   AccountId,
@@ -24,141 +13,108 @@ import type {
   MessageId,
   MessagePart,
   MessageReceived,
-  OutboundMessage,
   SenderId,
 } from '@dsh/channel-core';
 import { textParts } from '@dsh/channel-core';
+import type { QQBotInboundMessage } from '@tencent-connect/qqbot-nodejs';
+import type { InboundAttachment } from '@tencent-connect/qqbot-nodejs/protocol';
 
 export interface QQInboundMeta {
   channel: ChannelId;
   accountId: AccountId;
 }
 
-interface QQRaw {
-  type?: string;
-  msgId?: string;
-  /** Gateway event id; used as a dedup fallback when `msgId` is absent. */
-  eventId?: string;
-  senderId?: string;
-  conversationId?: string;
-  /** `dm` (direct) or `group` (group chat); absent defaults to `dm`. */
-  conversationType?: string;
-  content?: string;
-  picUrl?: string;
-  mediaUrl?: string;
-  durationMs?: number;
-  title?: string;
-  [key: string]: unknown;
-}
-
-/** Stable hash for ids when the gateway omits a msgId. */
-export function simpleHash(input: string): string {
-  let hash = 0;
-  for (let i = 0; i < input.length; i += 1) {
-    hash = (hash * 31 + input.charCodeAt(i)) | 0;
-  }
-  return Math.abs(hash).toString(36);
-}
-
-/** Map one raw qq message into the stable channel event shape. */
-export function mapInbound(raw: unknown, meta: QQInboundMeta): MessageReceived {
-  const value = raw as QQRaw;
-  const sender: SenderId = (value.senderId ?? 'unknown') as SenderId;
-  // QQ payloads carry a conversation id for both dm and group messages; fall
-  // back to the sender when the gateway omits it (direct/one-off payloads).
-  const conversationId: ConversationId = (value.conversationId ?? sender) as ConversationId;
-
-  const messageId: MessageId = value.msgId
-    ? value.msgId as MessageId
-    : `qq-${simpleHash(`${sender}:${value.content ?? ''}:${value.type ?? 'unknown'}`)}` as MessageId;
+/**
+ * Map one Tencent SDK inbound message into the stable channel event shape.
+ *
+ * - C2C    → conversation.id = `senderId`, type `dm`
+ * - Group  → conversation.id = `groupOpenid`, type `group`
+ * Other kinds (`guild`/`dm`) are not formally supported in V1 and are dropped
+ * by the `InboundProcessor` before they reach this mapper.
+ */
+export function mapInbound(msg: QQBotInboundMessage, meta: QQInboundMeta): MessageReceived {
+  const group = msg.kind === 'group';
 
   return {
     type: 'message.received',
     channel: meta.channel,
     accountId: meta.accountId,
     conversation: {
-      id: conversationId,
-      // dm ↔ direct chat, group ↔ group chat; the group id is the
-      // conversation id for group messages.
-      type: value.conversationType === 'group' ? 'group' : 'dm',
+      id: (group ? msg.groupOpenid! : msg.senderId) as ConversationId,
+      type: group ? 'group' : 'dm',
     },
-    sender: { id: sender },
+    sender: {
+      id: msg.senderId as SenderId,
+      name: msg.senderName,
+    },
     message: {
-      id: messageId,
-      content: partsFor(value),
-      createdAt: Date.now(),
+      id: msg.messageId as MessageId,
+      content: mapMessageParts(msg),
+      createdAt: Date.parse(msg.timestamp),
     },
-    raw,
+    raw: msg.raw,
   };
 }
 
-function partsFor(raw: QQRaw): MessagePart[] {
-  switch (raw.type) {
-    case 'text':
-      return textParts(raw.content ?? '');
-    case 'image':
-    case 'picture':
-      return [{ type: 'image', url: raw.picUrl ?? raw.mediaUrl, alt: raw.title }];
-    case 'audio':
-    case 'voice':
-      return [{ type: 'audio', url: raw.mediaUrl, durationMs: raw.durationMs }];
-    case 'video':
-      return [{ type: 'video', url: raw.mediaUrl, durationMs: raw.durationMs }];
-    case 'file':
-      return [{ type: 'file', url: raw.mediaUrl, name: raw.title }];
-    case 'link':
-      return textParts(raw.title ?? raw.content ?? '');
-    default:
-      return [{ type: 'unsupported', reason: `unknown qq type '${raw.type ?? 'undefined'}'` }];
+/**
+ * Map an SDK inbound message's text + attachments into structured parts.
+ *
+ * Text comes from `msg.content`; each attachment is mapped by its
+ * `content_type` (image/voice/audio/video/file → typed parts, unknown →
+ * unsupported).
+ */
+export function mapMessageParts(msg: QQBotInboundMessage): MessagePart[] {
+  const parts: MessagePart[] = [];
+
+  if (msg.content) {
+    parts.push(...textParts(msg.content));
   }
-}
 
-/** Outbound qq text payload; buffered strategy → single text message. */
-export interface QQTextPayload {
-  to: string;
-  type: 'text';
-  content: string;
-}
-
-/** Convert an outbound channel message into a qq text payload. */
-export function toTextPayload(target: { conversationId: string }, message: OutboundMessage): QQTextPayload {
-  const segments: string[] = [];
-  if (message.text) segments.push(message.text);
-  if (message.parts) {
-    for (const part of message.parts) {
-      switch (part.type) {
-        case 'text':
-          segments.push(part.text);
-          break;
-        case 'image':
-          segments.push(part.alt ? `[image: ${part.alt}]` : '[image]');
-          break;
-        case 'audio':
-          segments.push('[audio]');
-          break;
-        case 'video':
-          segments.push('[video]');
-          break;
-        case 'file':
-          segments.push(part.name ? `[file: ${part.name}]` : '[file]');
-          break;
-        case 'location':
-          segments.push(`[location: ${part.latitude},${part.longitude}]`);
-          break;
-        case 'card':
-          segments.push(`[card: ${part.kind}]`);
-          break;
-        case 'unsupported':
-          segments.push('[unsupported content]');
-          break;
-      }
-    }
+  for (const attachment of msg.attachments ?? []) {
+    const part = mapAttachment(attachment);
+    if (part) parts.push(part);
   }
-  return { to: target.conversationId, type: 'text', content: segments.join('') };
+
+  // A message with no content and no attachments becomes a single unsupported
+  // part so it is never silently empty.
+  if (parts.length === 0) {
+    parts.push({ type: 'unsupported', reason: 'empty qq message' });
+  }
+
+  return parts;
 }
 
-/** Dedup identity for raw payloads (webhook retries share one msgId/eventId). */
-export function dedupKey(raw: unknown): string {
-  const value = raw as QQRaw;
-  return value.msgId ?? value.eventId ?? `qq-${simpleHash(JSON.stringify(value))}`;
+/** Map one SDK inbound attachment to a structured part (or undefined). */
+function mapAttachment(attachment: InboundAttachment): MessagePart | undefined {
+  const type = attachment.content_type?.toLowerCase() ?? '';
+
+  if (type.includes('image')) {
+    return { type: 'image', url: attachment.url, alt: attachment.filename };
+  }
+
+  if (type.includes('voice') || type.includes('audio')) {
+    return {
+      type: 'audio',
+      // QQ exposes a server-converted WAV when available; prefer it.
+      url: attachment.voice_wav_url ?? attachment.url,
+    };
+  }
+
+  if (type.includes('video')) {
+    return { type: 'video', url: attachment.url };
+  }
+
+  if (type.includes('file')) {
+    return {
+      type: 'file',
+      url: attachment.url,
+      name: attachment.filename,
+      size: attachment.size,
+    };
+  }
+
+  return {
+    type: 'unsupported',
+    reason: `unknown qq attachment type '${attachment.content_type}'`,
+  };
 }

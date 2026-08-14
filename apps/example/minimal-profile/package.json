@@ -1,0 +1,12 @@
+{
+  "name": "dsh-profile-minimal",
+  "private": true,
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@dsh/channels"
+      ]
+    }
+  }
+}
