@@ -12,6 +12,9 @@
       "dependsOn": ["^build"],
       "outputs": []
     },
+    "@wsz987/channel-web#test": {
+      "dependsOn": ["^build", "build"]
+    },
     "clean": {
       "cache": false
     }
