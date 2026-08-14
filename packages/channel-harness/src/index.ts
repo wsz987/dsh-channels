@@ -11,6 +11,8 @@
  * channel packages.
  */
 export * from './config.js';
+export * from './channel-label.js';
+export * from './dsh-home.js';
 export * from './session-router.js';
 export * from './binding-store.js';
 export * from './agent-router.js';
@@ -20,4 +22,5 @@ export * from './reply-router.js';
 export * from './reply-context-store.js';
 export * from './bridge.js';
 export * from './lifecycle.js';
+export * from './workspace-resolver.js';
 export { name, inject, apply } from './plugin.js';

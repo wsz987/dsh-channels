@@ -57,10 +57,21 @@ export interface PersistenceProbe {
   exists(sessionId: string): Promise<boolean>;
 }
 
+/** Caller-supplied metadata for a fresh agent create (plan §8). */
+export interface AgentCreateMeta {
+  /** Explicit working directory for the new session's header.cwd. */
+  cwd?: string;
+}
+
 /** Minimal port the bridge needs from the Harness agent runtime. */
 export interface AgentGateway {
   get(sessionId: string): GatewayAgent | undefined;
-  create(sessionId: string, route: AgentRouteSpec, setup?: AgentSetup): Promise<GatewayAgentHandle>;
+  create(
+    sessionId: string,
+    route: AgentRouteSpec,
+    setup?: AgentSetup,
+    meta?: AgentCreateMeta,
+  ): Promise<GatewayAgentHandle>;
   resume(sessionId: string, route: AgentRouteSpec, setup?: AgentSetup): Promise<GatewayAgentHandle>;
   /** Whether a sessionPersistence service is available (enables resume). */
   canResume(): boolean;
@@ -197,16 +208,23 @@ export class HarnessAgentGateway implements AgentGateway {
     return service?.currentSelection();
   }
 
-  async create(sessionId: string, route: AgentRouteSpec, setup?: AgentSetup): Promise<GatewayAgentHandle> {
+  async create(
+    sessionId: string,
+    route: AgentRouteSpec,
+    setup?: AgentSetup,
+    meta?: AgentCreateMeta,
+  ): Promise<GatewayAgentHandle> {
     const resolved = resolveRoute(route, this.defaultSelection());
     const handle = await this.ctx.agents.create({
       sessionId: SessionId(sessionId),
-      // A fresh channel session inherits the Harness process cwd (the same
-      // semantic the official Web entry applies when the user picks no
-      // workspace). `{{cwd}}` reads `session.header.cwd`, so this must be set
-      // at creation — `resume` has no `meta` and cannot add it later.
+      // `{{cwd}}` reads `session.header.cwd`, and `dsh-workspace` groups the
+      // session under the workspace whose path matches that cwd. The cwd is
+      // decided by the CALLER (the bridge) and passed through `meta.cwd` —
+      // `HarnessAgentGateway` only creates the session with the given cwd and
+      // never falls back to `process.cwd()`. This must be set at creation —
+      // `resume` has no `meta` and cannot add it later.
       meta: {
-        cwd: process.cwd(),
+        ...(meta?.cwd ? { cwd: meta.cwd } : {}),
         ...(resolved.preset ? { agentPreset: resolved.preset } : {}),
       },
       agentOptions: optionsFor(resolved),
@@ -278,13 +296,18 @@ export class AgentManager {
    * and returns the ref. Never resumes — the caller already decided this is a
    * fresh conversation. Single-flight per session id.
    */
-  create(sessionId: string, route: AgentRouteSpec, setup?: AgentSetup): Promise<AgentRef> {
+  create(
+    sessionId: string,
+    route: AgentRouteSpec,
+    setup?: AgentSetup,
+    meta?: AgentCreateMeta,
+  ): Promise<AgentRef> {
     if (this.closed) {
       return Promise.reject(new Error(`AgentManager is closed; cannot create '${sessionId}'`));
     }
     const pending = this.inFlight.get(sessionId);
     if (pending) return pending;
-    const run = this.doCreate(sessionId, route, setup);
+    const run = this.doCreate(sessionId, route, setup, meta);
     this.inFlight.set(sessionId, run);
     void run.then(
       () => {
@@ -437,9 +460,14 @@ export class AgentManager {
     this.configuredAgents.add(agent.agent);
   }
 
-  private async doCreate(sessionId: string, route: AgentRouteSpec, setup?: AgentSetup): Promise<AgentRef> {
+  private async doCreate(
+    sessionId: string,
+    route: AgentRouteSpec,
+    setup?: AgentSetup,
+    meta?: AgentCreateMeta,
+  ): Promise<AgentRef> {
     return this.withSlot(async () => {
-      const handle = await this.gateway.create(sessionId, route, setup);
+      const handle = await this.gateway.create(sessionId, route, setup, meta);
       this.owned.set(sessionId, handle);
       if (setup) this.configuredAgents.add(handle.agent);
       return this.makeRef(sessionId, route, handle);

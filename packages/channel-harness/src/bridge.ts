@@ -25,6 +25,7 @@ import { randomUUID } from 'node:crypto';
 import { type Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import { parseCommand, type CommandResult } from '@deepseek-ai/dsh-commands';
+import { SessionId } from '@deepseek-ai/dsh-session';
 import type {
   ChannelAdapter,
   ChannelLogger,
@@ -39,11 +40,14 @@ import type { AgentManager, AgentRef } from './agent-manager.js';
 import type { AgentRouter, AgentRouteSpec } from './agent-router.js';
 import { routesEqual } from './agent-router.js';
 import {
+  bindingKey,
   SESSION_BINDING_SCHEMA_VERSION,
   sessionKey,
   type SessionBinding,
   type SessionKeyInput,
 } from './session-router.js';
+import type { ChannelWorkspaceResolver, ResolvedChannelWorkspace } from './workspace-resolver.js';
+import { stableSafeAccountKey } from './channel-label.js';
 import { toHarnessUserMessage, type SaveImageHook } from './message-converter.js';
 import { ReplyContextStore } from './reply-context-store.js';
 import {
@@ -68,6 +72,41 @@ export interface ChannelHarnessBridgeOptions {
   ctx: Context;
   /** Bridge hook the channel commands need (the one-capability `startNewSession`). */
   commandDeps: ChannelCommandDependencies;
+  /**
+   * Resolves a channel conversation to a Session working directory and (when
+   * applicable) a Harness `WorkspaceRegistry` member (plan §6 / §9 / M3).
+   */
+  workspaceResolver: ChannelWorkspaceResolver;
+}
+
+/**
+ * Workspace attach failed after the agent/session was created (plan §11).
+ * Raised inside the `createFreshSession` transaction when step C (attach
+ * Session -> Workspace) fails; the caller must treat the session as NOT
+ * created even though the underlying Harness session was minted (it is
+ * disposed as part of the rollback before this is thrown).
+ */
+export class ChannelWorkspaceAttachError extends Error {
+  readonly sessionId: string;
+  readonly workspaceId: string;
+  readonly cwd: string;
+  readonly channelId: string;
+  readonly accountId: string;
+  constructor(input: {
+    sessionId: string;
+    workspaceId: string;
+    cwd: string;
+    channelId: string;
+    accountId: string;
+  }) {
+    super(`channel session '${input.sessionId}' could not attach to workspace '${input.workspaceId}'`);
+    this.name = 'ChannelWorkspaceAttachError';
+    this.sessionId = input.sessionId;
+    this.workspaceId = input.workspaceId;
+    this.cwd = input.cwd;
+    this.channelId = input.channelId;
+    this.accountId = input.accountId;
+  }
 }
 
 /** A freshly-minted session + its persisted binding (plan §16/§17). */
@@ -259,19 +298,65 @@ export class ChannelHarnessBridge {
   }
 
   /**
-   * The single fresh-session implementation (plan §16/§17), shared by the
-   * first-message path and `startNewSession`. Mints a NEW session id, creates
-   * the agent (with command setup), writes the binding with rollback (on a
-   * binding-write failure the fresh owned handle is disposed and the error
-   * propagates — the pre-existing binding is never deleted first), and
-   * registers the reverse binding. Returns the persisted binding + agent ref.
+   * The single fresh-session implementation (plan §12 / §16/§17 / M3/M4), shared
+   * by the first-message path and `startNewSession`. Mints a NEW session id and
+   * runs the atomic transaction:
+   *
+   *   A. resolve/create Workspace        → workspaceResolver.resolve(conversation)
+   *   B. create Harness Session          → agentManager.create(sessionId, route, commandSetup, { cwd })
+   *   C. attach Session → Workspace      → if workspace: workspace.attachSession(SessionId(sessionId))
+   *   D. persist Binding                 → bindingStore.put(binding)
+   *   E. register reverse binding        → registerBinding(binding)
+   *   F. success                         → structured log + return
+   *
+   * Rollback (plan §12): a Workspace resolve failure creates nothing; an agent
+   * create failure leaves the (harmless empty) Workspace behind; an attach
+   * failure disposes the freshly-created session before rethrowing a
+   * `ChannelWorkspaceAttachError`; a binding-write failure detaches the session
+   * from the Workspace (best-effort) and disposes the fresh session while the
+   * pre-existing binding is never deleted. Returns the persisted binding +
+   * agent ref.
    */
   private async createFreshSession(
     conversation: SessionKeyInput,
     route: AgentRouteSpec,
   ): Promise<FreshSession> {
     const sessionId = "ch-" + randomUUID();
-    const agentRef = await this.options.agentManager.create(sessionId, route, this.commandSetup);
+
+    // A. resolve/create Workspace (plan §10: cwd MUST be the workspace's
+    // canonical path — when a workspace exists, use its `path`, never a
+    // divergent joined path, so Harness's canonical-cwd membership check passes).
+    const resolved: ResolvedChannelWorkspace = await this.options.workspaceResolver.resolve(conversation);
+    const cwd = resolved.workspace?.path ?? resolved.cwd ?? this.options.config.cwd ?? process.cwd();
+
+    // B. create Harness Session with the resolved cwd.
+    const agentRef = await this.options.agentManager.create(sessionId, route, this.commandSetup, { cwd });
+
+    // C. attach Session -> Workspace (plan §11). Roll back the freshly-created
+    // session on failure — "创建成功" = Session + Workspace + Binding ALL built.
+    if (resolved.workspace) {
+      try {
+        await resolved.workspace.attachSession(SessionId(sessionId));
+      } catch (error) {
+        this.options.logger.error('[channel-harness] workspace attach failed', {
+          sessionId,
+          workspaceId: resolved.workspace.id,
+          cwd: resolved.workspace.path,
+          channelId: conversation.channelId,
+          accountId: conversation.accountId,
+          error,
+        });
+        await this.options.agentManager.disposeSession(sessionId).catch(() => {});
+        throw new ChannelWorkspaceAttachError({
+          sessionId,
+          workspaceId: resolved.workspace.id,
+          cwd: resolved.workspace.path,
+          channelId: conversation.channelId,
+          accountId: conversation.accountId,
+        });
+      }
+    }
+
     const now = Date.now();
     const binding: SessionBinding = {
       channelId: conversation.channelId,
@@ -284,26 +369,47 @@ export class ChannelHarnessBridge {
       createdAt: now,
       updatedAt: now,
     };
+
+    // D. persist Binding (rollback extended: detach the session from the
+    // Workspace BEFORE disposing the fresh agent, then rethrow — the
+    // pre-existing binding is never deleted first).
     try {
       await this.options.bindingStore.put(binding);
     } catch (error) {
+      await resolved.workspace?.detachSession(SessionId(sessionId)).catch(() => {});
       await this.options.agentManager.disposeSession(sessionId).catch(() => {});
       throw error;
     }
+
+    // E. register reverse binding (in-memory operation).
     this.options.agentManager.registerBinding(binding);
+
+    // F. success — structured observability (plan §13.1 / M4): confirms the
+    // Harness session was created, the Workspace was attached (or intentionally
+    // skipped), and the binding persisted. Uses a non-sensitive account hash.
+    this.options.logger.info('[channel-harness] fresh channel session created', {
+      sessionId,
+      channelId: conversation.channelId,
+      accountIdHash: stableSafeAccountKey(conversation.accountId),
+      workspaceId: resolved.workspace?.id,
+      cwd,
+      bindingKey: bindingKey(binding),
+    });
+
     return { binding, agentRef };
   }
 
   /**
-   * The `commandDeps.startNewSession` implementation (plan §12/§17).
+   * The `commandDeps.startNewSession` implementation (plan §12/§13/§17).
    * Resolves the conversation from the CURRENT binding of the invoking agent
    * (the session id IS the agent id), then mints a fresh session via
-   * `createFreshSession` (a NEW session id — never a copy of the old one) and
+   * `createFreshSession` (a NEW session id — never a copy of the old one), which
+   * also (re-)attaches the new session to the same channel Workspace, and
    * registers its binding. The OLD agent is NOT disposed here; the bridge's
    * post-command retire handles that. Failure semantics: if `createFreshSession`
    * throws, the old binding stays untouched (we never delete it before the new
-   * one is safely written; on a binding-write failure the fresh agent is
-   * disposed inside `createFreshSession`).
+   * one is safely written; on a Workspace-attach or binding-write failure the
+   * fresh agent is disposed inside `createFreshSession`).
    */
   async startNewSession(agent: Agent): Promise<void> {
     const sessionId = String(agent.id);

@@ -39,6 +39,7 @@ import { MemoryBindingStore } from '../src/binding-store.ts';
 import { ChannelHarnessBridge } from '../src/bridge.ts';
 import { Config } from '../src/config.ts';
 import { ReplyContextStore } from '../src/reply-context-store.ts';
+import type { ChannelWorkspaceResolver } from '../src/workspace-resolver.ts';
 
 const defaultRoute: AgentRouteSpec = { preset: 'default' };
 
@@ -50,6 +51,7 @@ function baseConfig(overrides: Partial<Config> = {}): Config {
       overrides: { channel: { weixin: { model: 'weixin-agent' } } },
     },
     bindingStore: { type: 'memory' },
+    workspace: { mode: 'disabled' },
     reply: { updateIntervalMs: 0, maxTextLength: undefined, splitParagraphs: true, splitCodeBlocks: true, finalFlush: true },
     maxConcurrency: 4,
     includeMetadataPrefix: true,
@@ -58,6 +60,11 @@ function baseConfig(overrides: Partial<Config> = {}): Config {
 }
 
 const silentLogger = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
+
+/** Hermetic no-op workspace resolver: no workspace, no cwd (bridge falls back to config.cwd ?? process.cwd()). */
+const noopResolver: ChannelWorkspaceResolver = {
+  resolve: async () => ({}),
+};
 
 class FakeAdapter {
   id: string;
@@ -204,6 +211,7 @@ function makeBridge(rootCtx: Context, config: Config = baseConfig()): BridgeFixt
     logger: silentLogger,
     ctx: rootCtx,
     commandDeps: { startNewSession: (agent) => bridge.startNewSession(agent) },
+    workspaceResolver: noopResolver,
   });
   return { gateway, manager, bridge, adapter, bindingStore };
 }
@@ -265,6 +273,7 @@ function makeRealGatewayBridge(defaultSelection?: { provider: string; model: str
     logger: silentLogger,
     ctx: rootCtx,
     commandDeps: { startNewSession: (agent) => bridge.startNewSession(agent) },
+    workspaceResolver: noopResolver,
   });
   return { rootCtx, agents, gateway, manager, bridge, adapter, bindingStore, created };
 }
@@ -446,6 +455,7 @@ describe('E. rollback', () => {
       logger: silentLogger,
       ctx: rootCtx,
       commandDeps: { startNewSession: (agent) => bridge.startNewSession(agent) },
+      workspaceResolver: noopResolver,
     });
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
     const A = gateway.createCalls[0]!;
@@ -474,6 +484,7 @@ describe('E. rollback', () => {
       logger: silentLogger,
       ctx: rootCtx,
       commandDeps: { startNewSession: (agent) => bridge.startNewSession(agent) },
+      workspaceResolver: noopResolver,
     });
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
     const A = gateway.createCalls[0]!;
@@ -570,6 +581,7 @@ describe('I. multi-channel sharing one command plane', () => {
       logger: silentLogger,
       ctx: rootCtx,
       commandDeps: { startNewSession: (agent) => bridge.startNewSession(agent) },
+      workspaceResolver: noopResolver,
     });
     for (const channel of ['weixin', 'qq', 'dingtalk', 'lark'] as const) {
       await bridge.handleChannelEvent(makeMessageEvent({ channel, conversation: { id: 'c-' + channel, type: 'dm' }, accountId: 'main', ...textEvent('1', 'hi') }));
@@ -620,6 +632,7 @@ describe('J. concurrency / serialization', () => {
       logger: silentLogger,
       ctx: rootCtx,
       commandDeps: { startNewSession: (agent) => bridge.startNewSession(agent) },
+      workspaceResolver: noopResolver,
     });
     // Hold every create behind one gate so we can observe BOTH conversations enter
     // create before either finishes — proving distinct conversations run in parallel

@@ -124,7 +124,7 @@ describe('Harness compatibility (pinned rc.6 contract)', () => {
     expect(observed[1]?.options).toEqual(observed[0]?.options);
   });
 
-  it('create sets meta.cwd to process.cwd() and maps the preset into meta.agentPreset', async () => {
+  it('create maps the preset into meta.agentPreset and leaves cwd to the caller', async () => {
     const ctx = new Context();
     const agents = new AgentRegistry(ctx);
     const createdMeta: { cwd?: string; agentPreset?: string }[] = [];
@@ -138,12 +138,13 @@ describe('Harness compatibility (pinned rc.6 contract)', () => {
 
     const gateway = new HarnessAgentGateway(ctx);
     await gateway.create('s-meta', { preset: 'coding' });
-    // `{{cwd}}` reads session.header.cwd, so a fresh channel session must always
-    // carry the Harness process cwd; the preset rides along when specified.
-    expect(createdMeta).toEqual([{ cwd: process.cwd(), agentPreset: 'coding' }]);
+    // `{{cwd}}` reads session.header.cwd, but the cwd is the CALLER's concern
+    // (the bridge picks it) — the gateway only maps the route preset into
+    // meta.agentPreset and emits no cwd when none is supplied.
+    expect(createdMeta).toEqual([{ agentPreset: 'coding' }]);
   });
 
-  it('create sets meta.cwd even when the route has no preset', async () => {
+  it('create with no meta emits no cwd field', async () => {
     const ctx = new Context();
     const agents = new AgentRegistry(ctx);
     const createdMeta: { cwd?: string; agentPreset?: string }[] = [];
@@ -157,7 +158,41 @@ describe('Harness compatibility (pinned rc.6 contract)', () => {
 
     const gateway = new HarnessAgentGateway(ctx);
     await gateway.create('s-meta', {});
-    expect(createdMeta).toEqual([{ cwd: process.cwd() }]);
+    expect(createdMeta).toEqual([{}]);
+  });
+
+  it('create uses the caller-supplied cwd from meta when provided', async () => {
+    const ctx = new Context();
+    const agents = new AgentRegistry(ctx);
+    const createdMeta: { cwd?: string }[] = [];
+    agents.setFactory({
+      createAgent: async (_owner, options) => {
+        createdMeta.push(options.meta ?? {});
+        return makeHandle(options.sessionId);
+      },
+      resume: async (_owner, options) => makeHandle(options.resumeSessionId),
+    } satisfies AgentFactory);
+
+    const gateway = new HarnessAgentGateway(ctx);
+    await gateway.create('s-cwd', {}, undefined, { cwd: 'D:\\workspace\\dsh-channels' });
+    expect(createdMeta).toEqual([{ cwd: 'D:\\workspace\\dsh-channels' }]);
+  });
+
+  it('create combines a caller-supplied cwd and the route preset', async () => {
+    const ctx = new Context();
+    const agents = new AgentRegistry(ctx);
+    const createdMeta: { cwd?: string; agentPreset?: string }[] = [];
+    agents.setFactory({
+      createAgent: async (_owner, options) => {
+        createdMeta.push(options.meta ?? {});
+        return makeHandle(options.sessionId);
+      },
+      resume: async (_owner, options) => makeHandle(options.resumeSessionId),
+    } satisfies AgentFactory);
+
+    const gateway = new HarnessAgentGateway(ctx);
+    await gateway.create('s-both', { preset: 'coding' }, undefined, { cwd: 'X' });
+    expect(createdMeta).toEqual([{ cwd: 'X', agentPreset: 'coding' }]);
   });
 
   it('the AgentHandle shape the gateway wraps is { agent: { id, followup, steer, inject, whenIdle }, dispose }', async () => {

@@ -27,6 +27,7 @@ import { ChannelHarnessBridge } from '../src/bridge.ts';
 import { Config } from '../src/config.ts';
 import { ReplyRouter } from '../src/reply-router.ts';
 import { ReplyContextStore } from '../src/reply-context-store.ts';
+import type { ChannelWorkspaceResolver } from '../src/workspace-resolver.ts';
 import { SESSION_BINDING_SCHEMA_VERSION, type SessionBinding } from '../src/session-router.ts';
 
 const silentLogger = {
@@ -34,6 +35,11 @@ const silentLogger = {
   info: () => {},
   warn: () => {},
   error: () => {},
+};
+
+/** Hermetic no-op workspace resolver: no workspace, no cwd (bridge falls back to config.cwd ?? process.cwd()). */
+const noopResolver: ChannelWorkspaceResolver = {
+  resolve: async () => ({}),
 };
 
 /** Seed a channel-inbound ReplyContext (register + claim) for one turn. */
@@ -59,6 +65,7 @@ function routedConfig(): Config {
       },
     },
     bindingStore: { type: 'memory' },
+    workspace: { mode: 'disabled' },
     reply: { updateIntervalMs: 0, maxTextLength: undefined, splitParagraphs: true, splitCodeBlocks: true, finalFlush: true },
     maxConcurrency: 4,
     includeMetadataPrefix: false,
@@ -129,6 +136,7 @@ function makeBridge(gateway: FakeGateway) {
     logger: silentLogger,
     ctx: new Context(),
     commandDeps: { startNewSession: async () => {} },
+    workspaceResolver: noopResolver,
   });
   return { gateway, manager, bridge };
 }

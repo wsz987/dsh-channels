@@ -18,6 +18,7 @@ import { FileBindingStore, MemoryBindingStore } from '../src/binding-store.ts';
 import { ChannelHarnessBridge } from '../src/bridge.ts';
 import { Config } from '../src/config.ts';
 import { ReplyRouter, splitMessage } from '../src/reply-router.ts';
+import type { ChannelWorkspaceResolver } from '../src/workspace-resolver.ts';
 import { ReplyContextStore } from '../src/reply-context-store.ts';
 import { SESSION_BINDING_SCHEMA_VERSION, bindingKey, sessionKey, type SessionBinding } from '../src/session-router.ts';
 import { partsToText, toHarnessUserMessage } from '../src/message-converter.ts';
@@ -35,6 +36,7 @@ function baseConfig(): Config {
       },
     },
     bindingStore: { type: 'memory' },
+    workspace: { mode: 'disabled' },
     reply: {
       updateIntervalMs: 0,
       maxTextLength: undefined,
@@ -52,6 +54,11 @@ const silentLogger = {
   info: () => {},
   warn: () => {},
   error: () => {},
+};
+
+/** Hermetic no-op workspace resolver: no workspace, no cwd (bridge falls back to config.cwd ?? process.cwd()). */
+const noopResolver: ChannelWorkspaceResolver = {
+  resolve: async () => ({}),
 };
 
 /** Minimal in-memory gateway recording every drive call and its route. */
@@ -605,6 +612,7 @@ describe('ChannelHarnessBridge end-to-end', () => {
       logger: silentLogger,
       ctx: new Context(),
       commandDeps: { startNewSession: async () => {} },
+      workspaceResolver: noopResolver,
     });
 
     const event = makeMessageEvent();
@@ -634,6 +642,7 @@ describe('ChannelHarnessBridge end-to-end', () => {
       logger: silentLogger,
       ctx: new Context(),
       commandDeps: { startNewSession: async () => {} },
+      workspaceResolver: noopResolver,
     });
     await bridge.handleChannelEvent(makeMessageEvent({ message: { id: 'm1', content: [{ type: 'text', text: 'a' }] } }));
     await bridge.handleChannelEvent(makeMessageEvent({ message: { id: 'm2', content: [{ type: 'text', text: 'b' }] } }));
@@ -886,6 +895,7 @@ describe('bridge integration with ChannelService events', () => {
       logger: silentLogger,
       ctx: new Context(),
       commandDeps: { startNewSession: async () => {} },
+      workspaceResolver: noopResolver,
     });
 
     const stopInbound = service.on((event: ChannelEvent) => {

@@ -12,7 +12,6 @@
  */
 import Schema from '@deepseek-ai/schemastery';
 import type { AgentRouteSpec } from './agent-router.js';
-import { DEFAULT_BINDING_STORE_PATH } from './binding-store.js';
 
 /** Route for the global default agent. */
 export interface AgentConfig {
@@ -64,11 +63,39 @@ export interface BindingStoreConfig {
   path?: string;
 }
 
+/**
+ * Channel Workspace strategy (plan §5.1). Controls how a channel conversation
+ * is mapped to a Session working directory and a Harness `WorkspaceRegistry`
+ * member.
+ */
+export interface WorkspaceConfig {
+  /**
+   * `channel-account` (default): one Workspace per channel/account pair, under
+   * `<dsh-home>/workspaces/channels/<channel>/<account-key>`.
+   * `host-cwd`: keep the old Host-cwd semantics; attach if the cwd is already
+   * registered. `disabled`: no WorkspaceRegistry integration.
+   */
+  mode: 'channel-account' | 'host-cwd' | 'disabled';
+  /** Channel Workspace root; unset defaults to `<dsh-home>/workspaces/channels`. */
+  root?: string;
+  /** Whether a missing channel Workspace is auto-created. */
+  autoCreate: boolean;
+}
+
 export interface Config {
   /** Default route (and explicit per-level override dictionary). */
   agent: AgentConfig;
+  /**
+   * Working directory for NEW channel sessions. This becomes the session's
+   * `header.cwd`, which `dsh-workspace` uses to group the session under a
+   * workspace — so set it to the directory of the workspace you want channel
+   * sessions to appear in. Defaults to `process.cwd()` at runtime.
+   */
+  cwd?: string;
   routing: RoutingConfig;
   bindingStore: BindingStoreConfig;
+  /** Channel Workspace policy; defaults to { mode: 'channel-account', autoCreate: true }. */
+  workspace: WorkspaceConfig;
   reply: ReplyConfig;
   /**
    * Upper bound on concurrently live agents the bridge owns (per-session
@@ -96,6 +123,7 @@ export const Config: Schema<Config> = Schema.object({
   agent: Schema.object({
     default: routeSchema,
   }),
+  cwd: Schema.string().description('Working directory for new channel sessions (default: process.cwd())'),
   routing: Schema.object({
     mode: Schema.union(['global', 'channel', 'account', 'conversation']).default('global'),
     overrides: Schema.object({
@@ -106,9 +134,15 @@ export const Config: Schema<Config> = Schema.object({
   }),
   bindingStore: Schema.object({
     // File-backed by default so session bindings survive restarts; the file
-    // (relative to cwd) is created on demand.
+    // path is resolved at runtime (`<dsh-home>/channels/bindings.json`) so
+    // bindings no longer depend on the process cwd (plan §5.2).
     type: Schema.union(['memory', 'file']).default('file'),
-    path: Schema.string().default(DEFAULT_BINDING_STORE_PATH),
+    path: Schema.string(),
+  }),
+  workspace: Schema.object({
+    mode: Schema.union(['channel-account', 'host-cwd', 'disabled']).default('channel-account'),
+    root: Schema.string(),
+    autoCreate: Schema.boolean().default(true),
   }),
   reply: Schema.object({
     updateIntervalMs: Schema.natural().default(200),

@@ -30,6 +30,7 @@ import { ChannelHarnessBridge } from '../../channel-harness/src/bridge.ts';
 import { Config as HarnessConfig } from '../../channel-harness/src/config.ts';
 import { ReplyContextStore } from '../../channel-harness/src/reply-context-store.ts';
 import { sessionKey } from '../../channel-harness/src/session-router.ts';
+import type { ChannelWorkspaceResolver } from '../../channel-harness/src/workspace-resolver.ts';
 import { mapInbound } from '../src/mapper.ts';
 
 /** Minimal in-memory gateway recording every drive call. */
@@ -89,6 +90,11 @@ const silentLogger = {
   error: () => {},
 };
 
+/** Hermetic no-op workspace resolver: no workspace, no cwd (bridge falls back to config.cwd ?? process.cwd()). */
+const noopResolver: ChannelWorkspaceResolver = {
+  resolve: async () => ({}),
+};
+
 function harnessConfig() {
   return HarnessConfig({
     agent: { default: { preset: 'default' } },
@@ -97,6 +103,7 @@ function harnessConfig() {
       overrides: {},
     },
     bindingStore: { type: 'memory' },
+    workspace: { mode: 'disabled' },
     reply: {
       updateIntervalMs: 0,
       maxTextLength: undefined,
@@ -124,6 +131,7 @@ function makeBridge() {
     logger: silentLogger,
     ctx: new Context(),
     commandDeps: { startNewSession: async () => {} },
+    workspaceResolver: noopResolver,
   });
   return { gateway, manager, bridge, store };
 }
