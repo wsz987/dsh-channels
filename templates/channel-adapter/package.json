@@ -1,7 +1,7 @@
 {
-  "name": "@dsh/channel-testkit",
-  "version": "0.2.0",
-  "description": "Contract tests, fake adapter/upstream/harness, fixtures and E2E helpers for channel adapters",
+  "name": "@dsh/channel-<channel>",
+  "version": "0.1.0",
+  "description": "<ChannelName> channel adapter for DeepSeek Harness",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -10,14 +10,17 @@
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
-    "./fixture-loader": {
-      "types": "./lib/fixture-loader.d.ts",
-      "default": "./lib/fixture-loader.js"
-    },
     "./package.json": "./package.json"
   },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
   "files": [
-    "lib"
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -27,9 +30,11 @@
   },
   "dependencies": {
     "@dsh/channel-core": "workspace:*",
-    "@deepseek-ai/cordis": "^4.0.1"
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/schemastery": "^3.18.1"
   },
   "devDependencies": {
+    "@dsh/channel-testkit": "workspace:*",
     "rimraf": "^6.0.0"
   },
   "license": "MIT"

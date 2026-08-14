@@ -77,11 +77,6 @@ export interface ChannelAdapter {
   getHealth?(): Promise<ChannelHealth>;
 }
 
-/** Convenience factory for third-party adapters. */
-export function defineChannelAdapter(adapter: ChannelAdapter): ChannelAdapter {
-  return adapter;
-}
-
 /** Emit a message event through the adapter context helper. */
 export function isChannelAdapter(value: unknown): value is ChannelAdapter {
   return (

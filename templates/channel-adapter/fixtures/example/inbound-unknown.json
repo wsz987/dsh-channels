@@ -1,0 +1,33 @@
+{
+  "name": "inbound unknown type",
+  "channel": "example",
+  "upstreamVersion": "0.0.0",
+  "payload": {
+    "type": "sticker",
+    "msgId": "msg_unk_1",
+    "senderId": "user_123",
+    "conversationId": "conv_456",
+    "conversationType": "dm"
+  },
+  "expected": {
+    "type": "message.received",
+    "channel": "example",
+    "accountId": "main",
+    "conversation": {
+      "id": "conv_456",
+      "type": "dm"
+    },
+    "sender": {
+      "id": "user_123"
+    },
+    "message": {
+      "id": "msg_unk_1",
+      "content": [
+        {
+          "type": "unsupported",
+          "reason": "unknown example type 'sticker'"
+        }
+      ]
+    }
+  }
+}

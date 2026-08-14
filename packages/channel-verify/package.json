@@ -1,7 +1,7 @@
 {
-  "name": "@dsh/channel-testkit",
-  "version": "0.2.0",
-  "description": "Contract tests, fake adapter/upstream/harness, fixtures and E2E helpers for channel adapters",
+  "name": "@dsh/channel-verify",
+  "version": "0.1.0",
+  "description": "Offline verification CLI for third-party DeepSeek Harness channel adapters (dsh channels verify)",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -10,11 +10,10 @@
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
-    "./fixture-loader": {
-      "types": "./lib/fixture-loader.d.ts",
-      "default": "./lib/fixture-loader.js"
-    },
     "./package.json": "./package.json"
+  },
+  "bin": {
+    "dsh-channels-verify": "./lib/cli.js"
   },
   "files": [
     "lib"
@@ -23,11 +22,13 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "verify": "node lib/cli.js",
     "clean": "rimraf lib"
   },
   "dependencies": {
     "@dsh/channel-core": "workspace:*",
-    "@deepseek-ai/cordis": "^4.0.1"
+    "@dsh/channel-testkit": "workspace:*",
+    "@dsh/channel-compat": "workspace:*"
   },
   "devDependencies": {
     "rimraf": "^6.0.0"

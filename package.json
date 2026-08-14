@@ -16,6 +16,7 @@
     "check:fixtures": "pnpm --filter @dsh/channel-compat run check:fixtures",
     "check:manifests": "pnpm --filter @dsh/channel-compat run check:manifests",
     "doctor": "pnpm --filter @dsh/channel-compat run doctor",
+    "verify": "pnpm --filter @dsh/channel-verify run verify",
     "check:upstream": "node scripts/check-upstream.mjs",
     "clean": "turbo run clean",
     "changeset": "changeset",

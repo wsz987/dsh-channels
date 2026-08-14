@@ -1,0 +1,34 @@
+{
+  "name": "inbound text",
+  "channel": "example",
+  "upstreamVersion": "0.0.0",
+  "payload": {
+    "type": "text",
+    "msgId": "msg_text_1",
+    "senderId": "user_123",
+    "conversationId": "conv_456",
+    "conversationType": "dm",
+    "content": "hello harness"
+  },
+  "expected": {
+    "type": "message.received",
+    "channel": "example",
+    "accountId": "main",
+    "conversation": {
+      "id": "conv_456",
+      "type": "dm"
+    },
+    "sender": {
+      "id": "user_123"
+    },
+    "message": {
+      "id": "msg_text_1",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello harness"
+        }
+      ]
+    }
+  }
+}

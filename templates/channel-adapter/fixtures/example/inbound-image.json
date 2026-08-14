@@ -1,0 +1,36 @@
+{
+  "name": "inbound image",
+  "channel": "example",
+  "upstreamVersion": "0.0.0",
+  "payload": {
+    "type": "image",
+    "msgId": "msg_img_1",
+    "senderId": "user_123",
+    "conversationId": "conv_456",
+    "conversationType": "dm",
+    "picUrl": "https://example.com/pic.png",
+    "title": "a chart"
+  },
+  "expected": {
+    "type": "message.received",
+    "channel": "example",
+    "accountId": "main",
+    "conversation": {
+      "id": "conv_456",
+      "type": "dm"
+    },
+    "sender": {
+      "id": "user_123"
+    },
+    "message": {
+      "id": "msg_img_1",
+      "content": [
+        {
+          "type": "image",
+          "url": "https://example.com/pic.png",
+          "alt": "a chart"
+        }
+      ]
+    }
+  }
+}

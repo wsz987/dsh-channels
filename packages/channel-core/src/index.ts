@@ -11,6 +11,7 @@
 export * from './account.js';
 export * from './adapter.js';
 export * from './capabilities.js';
+export * from './define.js';
 export * from './context.js';
 export * from './errors.js';
 export * from './events.js';

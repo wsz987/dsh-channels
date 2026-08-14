@@ -1,0 +1,14 @@
+# DSH Bundle patch — @dsh/channel-<channel>
+#
+# Inserts the <ChannelName> adapter into a DeepSeek Harness profile.
+# The adapter can be disabled through its own plugin config
+# (e.g. `plugins.channel-<channel>.enabled = false`).
+#
+# `inject` names follow the Harness public service surface at bundle time;
+# adjust when the upstream service names change.
+
+- insert:
+    - id: channels-<channel>
+      name: '@dsh/channel-<channel>'
+      inject:
+        - channels
