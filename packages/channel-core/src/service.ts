@@ -12,6 +12,10 @@ import type { ChannelAdapter } from './adapter.js';
 import type { ChannelEvent } from './events.js';
 import { AdapterRegistry } from './registry.js';
 import { conversationKey, type ChannelConversationKey } from './account.js';
+import { MemorySecretStore } from './secrets.js';
+import { MemoryStorage } from './storage.js';
+import type { ChannelAdapterContext } from './context.js';
+import type { ChannelRuntimeResources } from './runtime-resources.js';
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -21,14 +25,53 @@ declare module '@deepseek-ai/cordis' {
 
 export type ChannelEventListener = (event: ChannelEvent) => void | Promise<void>;
 
+export interface ChannelServiceOptions {
+  /**
+   * Optional durable runtime resources. When omitted, the service falls back
+   * to in-memory stores (tests / no persistence configured). Production wiring
+   * resolves file-backed resources and passes them here.
+   */
+  resources?: Partial<ChannelRuntimeResources>;
+}
+
+export interface CreateAdapterContextOptions {
+  /** Adapter id, used to namespace the logger (e.g. 'weixin' -> 'channel-weixin'). */
+  channelId?: string;
+  /** Exclusive per-adapter abort signal (owns the adapter's network lifetime). */
+  signal: AbortSignal;
+}
+
 export class ChannelService extends Service {
   /** Stable registry of live adapters. */
   readonly registry = new AdapterRegistry();
 
+  /** Durable SecretStore + ChannelStorage shared by every mounted adapter. */
+  readonly resources: ChannelRuntimeResources;
+
   private readonly listeners = new Set<ChannelEventListener>();
 
-  constructor(ctx: Context) {
+  constructor(ctx: Context, options: ChannelServiceOptions = {}) {
     super(ctx, 'channels');
+    this.resources = {
+      secrets: options.resources?.secrets ?? new MemorySecretStore(),
+      storage: options.resources?.storage ?? new MemoryStorage(),
+    };
+  }
+
+  /**
+   * Build a complete ChannelAdapterContext bound to this service's shared
+   * resources. Adapters use this instead of hand-rolling emit/logger/secrets/
+   * storage/signal so every platform mounts against the same durable backend.
+   */
+  createAdapterContext(options: CreateAdapterContextOptions): ChannelAdapterContext {
+    const loggerName = options.channelId ? 'channel-' + options.channelId : 'channels';
+    return {
+      emit: (event) => this.emit(event),
+      logger: this.ctx.logger(loggerName),
+      secrets: this.resources.secrets,
+      storage: this.resources.storage,
+      signal: options.signal,
+    };
   }
 
   /** Register an adapter; returns an unregister disposer. */
