@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Context } from '@deepseek-ai/cordis';
-import { AgentRegistry } from '@deepseek-ai/dsh-agent';
+import { AgentRegistry, type Agent } from '@deepseek-ai/dsh-agent';
 import { ChannelService, type ChannelEvent, type MessageReceived } from '@wsz987/channel-core';
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
 import {
@@ -75,7 +75,7 @@ class FakeGateway implements AgentGateway {
   get(sessionId: string) {
     const agent = this.live.get(sessionId);
     if (!agent) return undefined;
-    return { id: agent.id, followup: agent.followup, whenIdle: agent.whenIdle };
+    return { id: agent.id, agent: agent.agent, followup: agent.followup, whenIdle: agent.whenIdle };
   }
 
   canResume(): boolean {
@@ -107,6 +107,7 @@ class FakeGateway implements AgentGateway {
   private makeHandle(sessionId: string): GatewayAgentHandle {
     const handle: GatewayAgentHandle = {
       id: sessionId,
+      agent: { id: sessionId } as unknown as Agent,
       followup: (message) => {
         this.followups.push({ sessionId, message });
       },
@@ -272,6 +273,7 @@ describe('AgentManager', () => {
   it('resolves live agents without owning them', async () => {
     gateway.live.set('s1', {
       id: 's1',
+      agent: { id: 's1' } as unknown as Agent,
       followup: () => {},
       whenIdle: () => Promise.resolve(),
       dispose: async () => {},
@@ -320,6 +322,7 @@ describe('AgentManager', () => {
   it('existing binding + live agent resolves via get (no create, no resume)', async () => {
     gateway.live.set('s1', {
       id: 's1',
+      agent: { id: 's1' } as unknown as Agent,
       followup: () => {},
       whenIdle: () => Promise.resolve(),
       dispose: async () => {},
@@ -600,6 +603,8 @@ describe('ChannelHarnessBridge end-to-end', () => {
       getAdapter: () => new FakeAdapter('weixin') as never,
       replyContexts: new ReplyContextStore(),
       logger: silentLogger,
+      ctx: new Context(),
+      commandDeps: { startNewSession: async () => {} },
     });
 
     const event = makeMessageEvent();
@@ -627,6 +632,8 @@ describe('ChannelHarnessBridge end-to-end', () => {
       getAdapter: () => new FakeAdapter('weixin') as never,
       replyContexts: new ReplyContextStore(),
       logger: silentLogger,
+      ctx: new Context(),
+      commandDeps: { startNewSession: async () => {} },
     });
     await bridge.handleChannelEvent(makeMessageEvent({ message: { id: 'm1', content: [{ type: 'text', text: 'a' }] } }));
     await bridge.handleChannelEvent(makeMessageEvent({ message: { id: 'm2', content: [{ type: 'text', text: 'b' }] } }));
@@ -877,6 +884,8 @@ describe('bridge integration with ChannelService events', () => {
       getAdapter: (id) => service.get(id),
       replyContexts: new ReplyContextStore(),
       logger: silentLogger,
+      ctx: new Context(),
+      commandDeps: { startNewSession: async () => {} },
     });
 
     const stopInbound = service.on((event: ChannelEvent) => {

@@ -1,35 +1,55 @@
 /**
  * ChannelHarnessBridge — the inbound half: `ChannelEvent` -> session binding
- * -> agent resolution -> `agent.followup` (doc H0.3–H0.7).
+ * -> agent resolution -> command plane / `agent.followup` (doc H0.3–H0.7,
+ * command plane plan §8–§20).
  *
  * Only `message.received` is handled in v1; every other event type is logged
  * at debug level. Conversations are isolated by their canonical key
  * (channel:account:conversation[:thread]), never by account alone.
  *
- * The create-vs-resume DECISION lives here (the bridge is the caller):
- * - new conversation -> `agentManager.create`;
- * - existing conversation -> if a sessionPersistence service is available AND
- *   the persisted session exists, `agentManager.resolve` (borrow live, else
- *   resume with the SAME route); otherwise borrow the live agent or recreate
- *   (`resolveOrCreate`). A persistence backend failure propagates loudly — it
- *   is never misread as "no persistence" and never downgraded to create.
+ * Two input planes (§30): a **human command plane** (official
+ * `@deepseek-ai/dsh-commands` `parseCommand`/`commands.execute`) and a
+ * **model message plane** (`agent.followup`). A syntactically valid command
+ * is resolved through the official registry and its `CommandResult` is
+ * rendered directly to the channel — it is never sent to the model and never
+ * creates `assistant/message` (`ReplyRouter` is bypassed). Ordinary text
+ * keeps the unchanged followup path.
+ *
+ * Per-conversation serialization (§18): all `message.received` handling for
+ * one canonical key runs through a lightweight per-key promise chain so a
+ * `/new` fully completes (Binding → B) before the next message on the SAME
+ * conversation starts, while different conversations run in parallel. Errors
+ * are caught + logged and never poison the chain.
  */
 import { randomUUID } from 'node:crypto';
+import { type Context } from '@deepseek-ai/cordis';
+import type { Agent } from '@deepseek-ai/dsh-agent';
+import { parseCommand, type CommandResult } from '@deepseek-ai/dsh-commands';
 import type {
   ChannelAdapter,
   ChannelLogger,
   ChannelEvent,
+  ChannelTarget,
   MessageReceived,
+  TextPart,
 } from '@wsz987/channel-core';
 import type { Config } from './config.js';
 import type { SessionBindingStore } from './binding-store.js';
-import type { AgentManager } from './agent-manager.js';
+import type { AgentManager, AgentRef } from './agent-manager.js';
 import type { AgentRouter, AgentRouteSpec } from './agent-router.js';
 import { routesEqual } from './agent-router.js';
-import { SESSION_BINDING_SCHEMA_VERSION, type SessionBinding } from './session-router.js';
-import { sessionKey } from './session-router.js';
+import {
+  SESSION_BINDING_SCHEMA_VERSION,
+  sessionKey,
+  type SessionBinding,
+  type SessionKeyInput,
+} from './session-router.js';
 import { toHarnessUserMessage, type SaveImageHook } from './message-converter.js';
 import { ReplyContextStore } from './reply-context-store.js';
+import {
+  installChannelCommands,
+  type ChannelCommandDependencies,
+} from './commands/index.js';
 
 export interface ChannelHarnessBridgeOptions {
   config: Config;
@@ -41,27 +61,97 @@ export interface ChannelHarnessBridgeOptions {
   logger: ChannelLogger;
   /** Optional attachment-commit seam (WX5 real image path). */
   saveImage?: SaveImageHook;
+  /**
+   * The Cordis context on which the official `commands` registry is mounted.
+   * `ctx.commands.execute` is the official command dispatcher (plan §8).
+   */
+  ctx: Context;
+  /** Bridge hook the channel commands need (the one-capability `startNewSession`). */
+  commandDeps: ChannelCommandDependencies;
+}
+
+/** A freshly-minted session + its persisted binding (plan §16/§17). */
+interface FreshSession {
+  binding: SessionBinding;
+  agentRef: AgentRef;
 }
 
 export class ChannelHarnessBridge {
   constructor(private readonly options: ChannelHarnessBridgeOptions) {}
 
-  /** Main entry point; forwards to the per-type handler. */
+  /**
+   * Per-conversation serialization (plan §18). Each canonical key has an
+   * owning promise chain; a new `message.received` is appended onto the
+   * previous entry for that key so it starts only after the prior one settles,
+   * while distinct keys run in parallel. Errors in one message are caught +
+   * logged (the chain never rejects), finished entries are removed so the map
+   * does not grow unboundedly, and the current call still resolves only after
+   * THIS event has been handled (Promise<void> semantics preserved).
+   */
   async handleChannelEvent(event: ChannelEvent): Promise<void> {
     if (event.type !== 'message.received') {
       this.options.logger.debug(`[channel-harness] ignoring channel event '${event.type}'`);
       return;
     }
-    await this.handleMessageReceived(event);
+
+    const key = this.conversationKey(event);
+    const prev = this.chains.get(key) ?? Promise.resolve();
+    // This event's actual work, chained onto the previous entry for this key.
+    const task = prev.then(() => this.handleMessageReceived(event));
+    // The chain entry absorbs errors (logged, never rethrown) so ONE failing
+    // message never poisons the conversation chain; the next event still starts.
+    const chain = task.catch((error: unknown) => {
+      this.options.logger.error(
+        `[channel-harness] message handling failed for conversation '${key}'`,
+        error,
+      );
+    });
+    this.chains.set(key, chain);
+    void chain.finally(() => {
+      if (this.chains.get(key) === chain) this.chains.delete(key);
+    });
+    // Surface THIS event's error to its await-er (preserves the prior
+    // rejection semantics), even though the chain itself never rejects.
+    await task;
   }
 
-  private async handleMessageReceived(event: MessageReceived): Promise<void> {
-    const key = sessionKey({
+  /** Per-conversation promise chains (plan §18); entries self-clean on settle. */
+  private readonly chains = new Map<string, Promise<void>>();
+
+  /**
+   * One-time Agent-scoped command setup (plan §4/§6). Installs the channel
+   * commands onto an Agent's scoped context. Passed to every
+   * create/resolve/resolveOrCreate so a fresh OR resumed session gets the
+   * /new registration before any driving happens.
+   */
+  // Bound arrow: passed to create/resolve/resolveOrCreate as the official
+  // AgentSetup (invoked as a bare setup(agentCtx)), so this must stay the
+  // bridge instance.
+  private commandSetup = (agentCtx: Context): void => {
+    installChannelCommands(agentCtx, this.options.commandDeps);
+  };
+
+  private conversationKey(event: MessageReceived): string {
+    return sessionKey({
       channelId: event.channel,
       accountId: event.accountId,
       conversationId: event.conversation.id,
       ...(event.conversation.threadId ? { threadId: event.conversation.threadId } : {}),
     });
+  }
+
+  /** Conversation identity of an inbound event, as a bindable SessionKeyInput. */
+  private conversationInput(event: MessageReceived): SessionKeyInput {
+    return {
+      channelId: event.channel,
+      accountId: event.accountId,
+      conversationId: event.conversation.id,
+      ...(event.conversation.threadId ? { threadId: event.conversation.threadId } : {}),
+    };
+  }
+
+  private async handleMessageReceived(event: MessageReceived): Promise<void> {
+    const key = this.conversationKey(event);
     const route = this.options.agentRouter.resolve({
       channelId: event.channel,
       accountId: event.accountId,
@@ -69,55 +159,88 @@ export class ChannelHarnessBridge {
     });
     const now = Date.now();
 
+    // The command parser operates on the RAW user text (the concatenated plain
+    // text blocks), never on the '[channel=.. sender=.. message=..] ' metadata
+    // prefix the model-facing converter prepends, and never after a trim (the
+    // official parseCommand requires '/' at byte zero).
+    const text = event.message.content
+      .filter((part): part is TextPart => part.type === 'text')
+      .map((part) => part.text)
+      .join('');
+    const parsed = parseCommand(text);
+    const parsedName = parsed?.name ?? null;
+
     let binding = await this.options.bindingStore.get(key);
-    let agentRef;
+    let agentRef: AgentRef | undefined;
+
     if (!binding) {
-      // New conversation: mint the session id, create the agent, and only
-      // THEN persist the binding. If the binding write fails after create,
-      // dispose the owned handle to roll back.
-      const sessionId = `ch-${randomUUID()}`;
-      agentRef = await this.options.agentManager.create(sessionId, route);
-      binding = {
-        channelId: event.channel,
-        accountId: event.accountId,
-        conversationId: event.conversation.id,
-        ...(event.conversation.threadId ? { threadId: event.conversation.threadId } : {}),
-        sessionId,
-        route,
-        schemaVersion: SESSION_BINDING_SCHEMA_VERSION,
-        createdAt: now,
-        updatedAt: now,
-      };
-      try {
-        await this.options.bindingStore.put(binding);
-      } catch (error) {
-        await this.options.agentManager.disposeSession(sessionId).catch(() => {});
-        throw error;
+      // --- Bootstrap: no receiving agent exists yet (plan §19) ------------------
+      if (parsed) {
+        if (parsedName === 'new') {
+          // First message is /new: boot a brand-new session directly — do NOT
+          // create session A and then run /new on it (no double-create). The
+          // arg contract mirrors the registered handler (用法：/new).
+          if (parsed.rawInput.trim().length > 0) {
+            await this.sendCommandNotice(event, '用法：/new');
+            return;
+          }
+          await this.createFreshSession(this.conversationInput(event), route);
+          await this.sendCommandNotice(event, '已开启新会话。');
+          return;
+        }
+        // Unknown command before any session exists.
+        await this.sendCommandNotice(event, '未知指令：/' + parsed.name);
+        return;
       }
+      // Ordinary first message: mint the session, create the agent, persist the
+      // binding (with rollback on binding-write failure), and register it.
+      const fresh = await this.createFreshSession(this.conversationInput(event), route);
+      binding = fresh.binding;
+      agentRef = fresh.agentRef;
     } else {
-      // Existing conversation: if routing changed, update the binding route
-      // snapshot (route parity uses the CURRENT route on resume).
+      // --- Existing conversation: reconcile route snapshot + create-vs-resume --
       if (!routesEqual(binding.route, route)) {
         binding = { ...binding, route, updatedAt: now };
         await this.options.bindingStore.put(binding);
       }
       // Decide create vs resume. Live agent -> borrow (both paths). Otherwise
-      // resume when persistence is present and the persisted session exists;
-      // a missing persistence (or missing persisted session) recreates.
+      // resume when persistence is present and the persisted session exists; a
+      // missing persistence (or missing persisted session) recreates.
       if (this.options.agentManager.canResume() && (await this.options.agentManager.exists(binding.sessionId))) {
-        agentRef = await this.options.agentManager.resolve(binding.sessionId, route);
+        agentRef = await this.options.agentManager.resolve(binding.sessionId, route, this.commandSetup);
       } else {
-        agentRef = await this.options.agentManager.resolveOrCreate(binding.sessionId, route);
+        agentRef = await this.options.agentManager.resolveOrCreate(binding.sessionId, route, this.commandSetup);
       }
+      this.options.agentManager.registerBinding(binding);
     }
 
-    this.options.agentManager.registerBinding(binding);
+    // --- Command admission (plan §8) -------------------------------------------
+    if (parsed) {
+      const beforeSessionId = binding.sessionId;
+      const controller = new AbortController();
+      const execution = await this.options.ctx.commands.execute(
+        agentRef!.agent,
+        text,
+        controller.signal,
+      );
+      if (!execution) {
+        // Syntactically valid but unregistered command — never sent to the model.
+        await this.sendCommandNotice(event, "未知指令：/" + parsed.name);
+        return;
+      }
+      await this.renderCommandResult(event, execution.result);
+      // Generic post-command cleanup (plan §14): whichever command switched the
+      // active binding gets its previous session retired. No command-name
+      // special-casing.
+      const currentBinding = await this.options.bindingStore.get(key);
+      if (currentBinding && currentBinding.sessionId !== beforeSessionId) {
+        await this.options.agentManager.retireSession(beforeSessionId);
+      }
+      return;
+    }
 
-    // One turn-scoped runId per inbound message: every outbound send scoped to
-    // this turn reuses it (the platform sees one correlation, not a fresh UUID
-    // per sender call).
+    // --- Ordinary message path (unchanged) ---------------------------------------
     const runId = randomUUID();
-
     const userMessage = await toHarnessUserMessage(event, {
       includeMetadataPrefix: this.options.config.includeMetadataPrefix,
       saveImage: this.options.saveImage,
@@ -132,7 +255,118 @@ export class ChannelHarnessBridge {
         runId,
       },
     });
-    agentRef.followup(userMessage);
+    agentRef!.followup(userMessage);
+  }
+
+  /**
+   * The single fresh-session implementation (plan §16/§17), shared by the
+   * first-message path and `startNewSession`. Mints a NEW session id, creates
+   * the agent (with command setup), writes the binding with rollback (on a
+   * binding-write failure the fresh owned handle is disposed and the error
+   * propagates — the pre-existing binding is never deleted first), and
+   * registers the reverse binding. Returns the persisted binding + agent ref.
+   */
+  private async createFreshSession(
+    conversation: SessionKeyInput,
+    route: AgentRouteSpec,
+  ): Promise<FreshSession> {
+    const sessionId = "ch-" + randomUUID();
+    const agentRef = await this.options.agentManager.create(sessionId, route, this.commandSetup);
+    const now = Date.now();
+    const binding: SessionBinding = {
+      channelId: conversation.channelId,
+      accountId: conversation.accountId,
+      conversationId: conversation.conversationId,
+      ...(conversation.threadId ? { threadId: conversation.threadId } : {}),
+      sessionId,
+      route,
+      schemaVersion: SESSION_BINDING_SCHEMA_VERSION,
+      createdAt: now,
+      updatedAt: now,
+    };
+    try {
+      await this.options.bindingStore.put(binding);
+    } catch (error) {
+      await this.options.agentManager.disposeSession(sessionId).catch(() => {});
+      throw error;
+    }
+    this.options.agentManager.registerBinding(binding);
+    return { binding, agentRef };
+  }
+
+  /**
+   * The `commandDeps.startNewSession` implementation (plan §12/§17).
+   * Resolves the conversation from the CURRENT binding of the invoking agent
+   * (the session id IS the agent id), then mints a fresh session via
+   * `createFreshSession` (a NEW session id — never a copy of the old one) and
+   * registers its binding. The OLD agent is NOT disposed here; the bridge's
+   * post-command retire handles that. Failure semantics: if `createFreshSession`
+   * throws, the old binding stays untouched (we never delete it before the new
+   * one is safely written; on a binding-write failure the fresh agent is
+   * disposed inside `createFreshSession`).
+   */
+  async startNewSession(agent: Agent): Promise<void> {
+    const sessionId = String(agent.id);
+    const oldBinding = this.options.agentManager.bindingFor(sessionId);
+    if (!oldBinding) {
+      throw new Error("startNewSession: no binding for session '" + sessionId + "'");
+    }
+    // Re-resolve the route through the CURRENT routing rules (plan §16:
+    // createFreshSession step 2 resolves the AgentRoute), so a /new session
+    // follows today's overrides / default rather than the old binding snapshot.
+    const route = this.options.agentRouter.resolve({
+      channelId: oldBinding.channelId,
+      accountId: oldBinding.accountId,
+      conversationId: oldBinding.conversationId,
+    });
+    await this.createFreshSession(
+      {
+        channelId: oldBinding.channelId,
+        accountId: oldBinding.accountId,
+        conversationId: oldBinding.conversationId,
+        ...(oldBinding.threadId ? { threadId: oldBinding.threadId } : {}),
+      },
+      route,
+    );
+  }
+
+  /**
+   * Deliver a command-plane notice directly through the channel adapter — never
+   * through ReplyRouter and never as an assistant/model message (plan §10).
+   */
+  private async sendCommandNotice(event: MessageReceived, text: string): Promise<void> {
+    const adapter = this.options.getAdapter(event.channel);
+    if (!adapter) {
+      this.options.logger.warn(
+        `[channel-harness] no adapter for channel '${event.channel}' — could not deliver command notice`,
+      );
+      return;
+    }
+    await adapter.send(this.targetForEvent(event), { text });
+  }
+
+  /** Render a settled CommandResult to the channel (success/error text). */
+  private async renderCommandResult(event: MessageReceived, result: CommandResult): Promise<void> {
+    if (result.kind === 'error') {
+      await this.sendCommandNotice(event, result.text);
+      return;
+    }
+    if (result.text) {
+      await this.sendCommandNotice(event, result.text);
+    }
+  }
+
+  /** Build the outbound ChannelTarget from the inbound conversation + message. */
+  private targetForEvent(event: MessageReceived): ChannelTarget {
+    const target: ChannelTarget = {
+      channelId: event.channel,
+      accountId: event.accountId,
+      conversationId: event.conversation.id,
+      conversationType: event.conversation.type,
+      ...(event.conversation.threadId
+        ? { threadId: event.conversation.threadId, replyToMessageId: event.message.id }
+        : { replyToMessageId: event.message.id }),
+    };
+    return target;
   }
 }
-

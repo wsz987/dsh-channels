@@ -16,6 +16,7 @@
  * `'lark'` appears only as event/binding data — no special-casing anywhere.
  */
 import { describe, expect, it } from 'vitest';
+import { Context } from '@deepseek-ai/cordis';
 import { loadFixture } from '@wsz987/channel-testkit';
 import type { MessageReceived } from '@wsz987/channel-core';
 import {
@@ -41,7 +42,7 @@ class FakeGateway implements AgentGateway {
   get(sessionId: string) {
     const agent = this.live.get(sessionId);
     if (!agent) return undefined;
-    return { id: agent.id, followup: agent.followup, whenIdle: agent.whenIdle };
+    return { id: agent.id, agent: agent.agent, followup: agent.followup, whenIdle: agent.whenIdle };
   }
 
   canResume(): boolean {
@@ -65,6 +66,9 @@ class FakeGateway implements AgentGateway {
   private makeHandle(sessionId: string): GatewayAgentHandle {
     const handle: GatewayAgentHandle = {
       id: sessionId,
+      // The raw Agent is only used as the dsh-scope key for command
+      // registration; these e2e tests never exercise the command plane.
+      agent: { id: sessionId } as never,
       followup: () => {
         this.followups.push({ sessionId });
       },
@@ -118,6 +122,8 @@ function makeBridge() {
     getAdapter: () => undefined,
     replyContexts: new ReplyContextStore(),
     logger: silentLogger,
+    ctx: new Context(),
+    commandDeps: { startNewSession: async () => {} },
   });
   return { gateway, manager, bridge, store };
 }

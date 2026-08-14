@@ -11,6 +11,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Context } from '@deepseek-ai/cordis';
+import type { Agent } from '@deepseek-ai/dsh-agent';
 import { ChannelService, type MessageReceived } from '@wsz987/channel-core';
 import type { SessionEvent } from '@deepseek-ai/dsh-session';
 import {
@@ -76,7 +77,7 @@ class FakeGateway implements AgentGateway {
   get(sessionId: string) {
     const agent = this.live.get(sessionId);
     if (!agent) return undefined;
-    return { id: agent.id, followup: agent.followup, whenIdle: agent.whenIdle };
+    return { id: agent.id, agent: agent.agent, followup: agent.followup, whenIdle: agent.whenIdle };
   }
   canResume(): boolean { return this.canResumeValue; }
   async exists(_sessionId: string): Promise<boolean> {
@@ -94,6 +95,7 @@ class FakeGateway implements AgentGateway {
   private makeHandle(sessionId: string): GatewayAgentHandle {
     const h: GatewayAgentHandle = {
       id: sessionId,
+      agent: { id: sessionId } as unknown as Agent,
       followup: () => {},
       whenIdle: () => Promise.resolve(),
       dispose: async () => { this.live.delete(sessionId); },
@@ -125,6 +127,8 @@ function makeBridge(gateway: FakeGateway) {
     getAdapter: () => undefined,
     replyContexts: seededContext(new ReplyContextStore()),
     logger: silentLogger,
+    ctx: new Context(),
+    commandDeps: { startNewSession: async () => {} },
   });
   return { gateway, manager, bridge };
 }

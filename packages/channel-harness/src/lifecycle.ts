@@ -33,6 +33,7 @@ import { AgentRouter } from './agent-router.js';
 import { ReplyRouter } from './reply-router.js';
 import { ChannelHarnessBridge } from './bridge.js';
 import { ReplyContextStore } from './reply-context-store.js';
+import type { ChannelCommandDependencies } from './commands/index.js';
 import type { SaveImageHook } from './message-converter.js';
 
 export interface BridgeLifecycle {
@@ -110,7 +111,15 @@ export function startBridge(
   });
   const stopListening = replyRouter.attach(ctx);
 
-  const bridge = new ChannelHarnessBridge({
+  // Deferred bridge reference: `commandDeps` routes the /new command backed by
+  // the bridge back to the bridge's own fresh-session bootstrap. The arrow only
+  // calls `bridge.startNewSession` at runtime (when a command actually runs), by
+  // which point the bridge is assigned (definite-assignment assertion below).
+  let bridge!: ChannelHarnessBridge;
+  const commandDeps: ChannelCommandDependencies = {
+    startNewSession: (agent) => bridge.startNewSession(agent),
+  };
+  bridge = new ChannelHarnessBridge({
     config,
     bindingStore,
     agentManager,
@@ -119,6 +128,8 @@ export function startBridge(
     replyContexts,
     logger,
     saveImage,
+    ctx,
+    commandDeps,
   });
   const stopInbound = ctx.channels.on((event) => bridge.handleChannelEvent(event));
 

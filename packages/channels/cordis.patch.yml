@@ -19,6 +19,7 @@
         - channels
         - agents
         - agentDefaultModel
+        - commands
 
     - id: channels-weixin
       name: '@wsz987/channel-weixin'

@@ -28,15 +28,17 @@
 import { SessionId } from '@deepseek-ai/dsh-session';
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence';
 import type { Context } from '@deepseek-ai/cordis';
-import type { AgentHandle, AgentOptions } from '@deepseek-ai/dsh-agent';
+import type { Agent, AgentHandle, AgentOptions, AgentSetup } from '@deepseek-ai/dsh-agent';
 import type { UserMessage } from '@deepseek-ai/dsh-llm';
 import type { ChannelLogger } from '@wsz987/channel-core';
 import type { AgentRouteSpec } from './agent-router.js';
 import type { SessionBinding } from './session-router.js';
 
-/** A live agent as seen through the gateway (id + drive surface). */
+/** A live agent as seen through the gateway (id + raw Agent + drive surface). */
 export interface GatewayAgent {
   id: string;
+  /** The raw Harness Agent — the dsh-scope key used to install Agent-scoped commands. */
+  agent: Agent;
   followup(message: unknown): void;
   whenIdle(): Promise<void>;
 }
@@ -58,8 +60,8 @@ export interface PersistenceProbe {
 /** Minimal port the bridge needs from the Harness agent runtime. */
 export interface AgentGateway {
   get(sessionId: string): GatewayAgent | undefined;
-  create(sessionId: string, route: AgentRouteSpec): Promise<GatewayAgentHandle>;
-  resume(sessionId: string, route: AgentRouteSpec): Promise<GatewayAgentHandle>;
+  create(sessionId: string, route: AgentRouteSpec, setup?: AgentSetup): Promise<GatewayAgentHandle>;
+  resume(sessionId: string, route: AgentRouteSpec, setup?: AgentSetup): Promise<GatewayAgentHandle>;
   /** Whether a sessionPersistence service is available (enables resume). */
   canResume(): boolean;
   /** Probe whether a persisted session exists. */
@@ -70,6 +72,8 @@ export interface AgentGateway {
 export interface AgentRef {
   sessionId: string;
   route: AgentRouteSpec;
+  /** The raw Harness Agent — the dsh-scope key used to install Agent-scoped commands. */
+  agent: Agent;
   followup(message: unknown): void;
   whenIdle(): Promise<void>;
   /**
@@ -172,6 +176,7 @@ export class HarnessAgentGateway implements AgentGateway {
     if (!agent) return undefined;
     return {
       id: agent.id,
+      agent,
       followup: (message) => agent.followup(message as UserMessage),
       whenIdle: () => agent.whenIdle(),
     };
@@ -192,7 +197,7 @@ export class HarnessAgentGateway implements AgentGateway {
     return service?.currentSelection();
   }
 
-  async create(sessionId: string, route: AgentRouteSpec): Promise<GatewayAgentHandle> {
+  async create(sessionId: string, route: AgentRouteSpec, setup?: AgentSetup): Promise<GatewayAgentHandle> {
     const resolved = resolveRoute(route, this.defaultSelection());
     const handle = await this.ctx.agents.create({
       sessionId: SessionId(sessionId),
@@ -205,17 +210,19 @@ export class HarnessAgentGateway implements AgentGateway {
         ...(resolved.preset ? { agentPreset: resolved.preset } : {}),
       },
       agentOptions: optionsFor(resolved),
+      setup,
     });
     return this.wrap(handle);
   }
 
-  async resume(sessionId: string, route: AgentRouteSpec): Promise<GatewayAgentHandle> {
+  async resume(sessionId: string, route: AgentRouteSpec, setup?: AgentSetup): Promise<GatewayAgentHandle> {
     // Route parity (doc H0.5): resume uses the SAME optionsFor(resolveRoute(...))
     // as create. NEVER `model ?? agentId`.
     const resolved = resolveRoute(route, this.defaultSelection());
     const handle = await this.ctx.agents.resume({
       resumeSessionId: SessionId(sessionId),
       agentOptions: optionsFor(resolved),
+      setup,
     });
     return this.wrap(handle);
   }
@@ -223,6 +230,7 @@ export class HarnessAgentGateway implements AgentGateway {
   private wrap(handle: AgentHandle): GatewayAgentHandle {
     return {
       id: handle.agent.id,
+      agent: handle.agent,
       followup: (message) => handle.agent.followup(message as UserMessage),
       whenIdle: () => handle.agent.whenIdle(),
       dispose: () => handle.dispose(),
@@ -236,6 +244,8 @@ export class AgentManager {
   private readonly owned = new Map<string, GatewayAgentHandle>();
   /** Resolved refs, kept for drain (`whenIdle`) lookups. */
   private readonly refs = new Map<string, AgentRef>();
+  /** Agents that already received the one-time channel-command setup. */
+  private readonly configuredAgents = new WeakSet<Agent>();
   /** sessionId -> binding, the reverse lookup used by the ReplyRouter. */
   private readonly bindings = new Map<string, SessionBinding>();
   private readonly maxConcurrency: number;
@@ -268,13 +278,13 @@ export class AgentManager {
    * and returns the ref. Never resumes — the caller already decided this is a
    * fresh conversation. Single-flight per session id.
    */
-  create(sessionId: string, route: AgentRouteSpec): Promise<AgentRef> {
+  create(sessionId: string, route: AgentRouteSpec, setup?: AgentSetup): Promise<AgentRef> {
     if (this.closed) {
       return Promise.reject(new Error(`AgentManager is closed; cannot create '${sessionId}'`));
     }
     const pending = this.inFlight.get(sessionId);
     if (pending) return pending;
-    const run = this.doCreate(sessionId, route);
+    const run = this.doCreate(sessionId, route, setup);
     this.inFlight.set(sessionId, run);
     void run.then(
       () => {
@@ -293,13 +303,13 @@ export class AgentManager {
    * (throws) — never falls back to create and never sniffs error messages.
    * Single-flight per session id.
    */
-  resolve(sessionId: string, route: AgentRouteSpec): Promise<AgentRef> {
+  resolve(sessionId: string, route: AgentRouteSpec, setup?: AgentSetup): Promise<AgentRef> {
     if (this.closed) {
       return Promise.reject(new Error(`AgentManager is closed; cannot resolve '${sessionId}'`));
     }
     const pending = this.inFlight.get(sessionId);
     if (pending) return pending;
-    const run = this.doResolve(sessionId, route);
+    const run = this.doResolve(sessionId, route, setup);
     this.inFlight.set(sessionId, run);
     void run.then(
       () => {
@@ -317,13 +327,13 @@ export class AgentManager {
    * when resume is not possible (no persistence): borrow the live agent when
    * present, otherwise open a fresh agent on the recorded session id.
    */
-  resolveOrCreate(sessionId: string, route: AgentRouteSpec): Promise<AgentRef> {
+  resolveOrCreate(sessionId: string, route: AgentRouteSpec, setup?: AgentSetup): Promise<AgentRef> {
     if (this.closed) {
       return Promise.reject(new Error(`AgentManager is closed; cannot resolve '${sessionId}'`));
     }
     const pending = this.inFlight.get(sessionId);
     if (pending) return pending;
-    const run = this.doResolveOrCreate(sessionId, route);
+    const run = this.doResolveOrCreate(sessionId, route, setup);
     this.inFlight.set(sessionId, run);
     void run.then(
       () => {
@@ -393,34 +403,73 @@ export class AgentManager {
     }
   }
 
-  private async doCreate(sessionId: string, route: AgentRouteSpec): Promise<AgentRef> {
+  /**
+   * Retire a session's reference and reverse binding and dispose it ONLY if the
+   * manager owns the handle (plan §15). Borrowed / unknown agents are released
+   * from local tracking but NEVER disposed. Retiring never touches persisted
+   * history — the old session keeps its durable log.
+   */
+  async retireSession(sessionId: string): Promise<void> {
+    this.refs.delete(sessionId);
+    this.bindings.delete(sessionId);
+    const handle = this.owned.get(sessionId);
+    if (!handle) return;
+    this.owned.delete(sessionId);
+    try {
+      await handle.dispose();
+    } catch (error) {
+      this.logger.error(`failed to dispose owned agent handle for '${sessionId}'`, error);
+    }
+  }
+
+  /**
+   * One-time channel-command setup for a BORROWED live agent (plan §7.1). A
+   * borrowed agent never went through create/resume, so its setup could not
+   * have run at publication; run it here exactly once against the agent's
+   * scoped context. Setup failure propagates to the caller. The borrowed
+   * agent is never disposed here.
+   */
+  private async ensureBorrowedSetup(agent: GatewayAgent, setup: AgentSetup | undefined): Promise<void> {
+    if (!setup) return;
+    if (this.configuredAgents.has(agent.agent)) return;
+    const commit = await setup(agent.agent.ctx);
+    commit?.commit();
+    this.configuredAgents.add(agent.agent);
+  }
+
+  private async doCreate(sessionId: string, route: AgentRouteSpec, setup?: AgentSetup): Promise<AgentRef> {
     return this.withSlot(async () => {
-      const handle = await this.gateway.create(sessionId, route);
+      const handle = await this.gateway.create(sessionId, route, setup);
       this.owned.set(sessionId, handle);
+      if (setup) this.configuredAgents.add(handle.agent);
       return this.makeRef(sessionId, route, handle);
     });
   }
 
-  private async doResolve(sessionId: string, route: AgentRouteSpec): Promise<AgentRef> {
+  private async doResolve(sessionId: string, route: AgentRouteSpec, setup?: AgentSetup): Promise<AgentRef> {
     const live = this.gateway.get(sessionId);
     if (live) {
+      await this.ensureBorrowedSetup(live, setup);
       return this.makeRef(sessionId, route, live);
     }
     return this.withSlot(async () => {
-      const handle = await this.gateway.resume(sessionId, route);
+      const handle = await this.gateway.resume(sessionId, route, setup);
       this.owned.set(sessionId, handle);
+      if (setup) this.configuredAgents.add(handle.agent);
       return this.makeRef(sessionId, route, handle);
     });
   }
 
-  private async doResolveOrCreate(sessionId: string, route: AgentRouteSpec): Promise<AgentRef> {
+  private async doResolveOrCreate(sessionId: string, route: AgentRouteSpec, setup?: AgentSetup): Promise<AgentRef> {
     const live = this.gateway.get(sessionId);
     if (live) {
+      await this.ensureBorrowedSetup(live, setup);
       return this.makeRef(sessionId, route, live);
     }
     return this.withSlot(async () => {
-      const handle = await this.gateway.create(sessionId, route);
+      const handle = await this.gateway.create(sessionId, route, setup);
       this.owned.set(sessionId, handle);
+      if (setup) this.configuredAgents.add(handle.agent);
       return this.makeRef(sessionId, route, handle);
     });
   }
@@ -457,6 +506,7 @@ export class AgentManager {
     const ref: AgentRef = {
       sessionId,
       route,
+      agent: agent.agent,
       followup: (message) => agent.followup(message),
       whenIdle: () => agent.whenIdle(),
       release: () => {

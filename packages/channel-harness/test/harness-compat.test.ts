@@ -10,6 +10,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import { Context } from '@deepseek-ai/cordis';
+import CommandRuntime, { parseCommand, type CommandResult } from '@deepseek-ai/dsh-commands';
+import { createScope } from '@deepseek-ai/dsh-scope';
+import type { Agent } from '@deepseek-ai/dsh-agent';
 import {
   AgentRegistry,
   type AgentFactory,
@@ -253,3 +256,88 @@ describe('HarnessAgentGateway default-model wiring', () => {
     expect(observed[0]).toEqual({ provider: 'deepseek', model: 'deepseek-chat' });
   });
 });
+
+describe('dsh-commands pinned contract (rc.6)', () => {
+  it('parseCommand returns the official ParsedCommand shape and honors rawInput', () => {
+    const parsed = parseCommand('/compact --deep');
+    expect(parsed).toEqual({ name: 'compact', rawInput: ' --deep' });
+    expect(Object.isFrozen(parsed)).toBe(true);
+    expect(parseCommand('plain text')).toBeUndefined();
+    expect(parseCommand('/UPPER')).toBeUndefined();
+  });
+
+  it('CommandRuntime registers, lists, finds and executes the lifecycle', async () => {
+    const ctx = new Context();
+    new CommandRuntime(ctx);
+    const registry = ctx.commands;
+    const agent = scopedAgentFor(ctx, 's-commands');
+    const disposer = registry.register({
+      name: 'compact',
+      description: 'Collect the session',
+      handler: () => ({ kind: 'success', text: 'compacted' } as CommandResult),
+    });
+    expect(registry.find(agent, 'compact')).toBeDefined();
+    expect(registry.list(agent).some((d) => d.name === 'compact')).toBe(true);
+    const execution = await registry.execute(agent, '/compact', new AbortController().signal);
+    expect(execution?.result).toEqual({ kind: 'success', text: 'compacted' });
+    expect(execution?.commandId).toBeTruthy();
+    expect(agentSessionEvents(agent)).toEqual(['command/run', 'command/done']);
+    disposer();
+  });
+
+  it('execute resolves undefined for an unknown command and appends no lifecycle', async () => {
+    const ctx = new Context();
+    new CommandRuntime(ctx);
+    const agent = scopedAgentFor(ctx, 's-unknown');
+    const execution = await ctx.commands.execute(agent, '/missing', new AbortController().signal);
+    expect(execution).toBeUndefined();
+    expect(agentSessionEvents(agent)).toEqual([]);
+  });
+
+  it('normalizes success and error CommandResults at the registry boundary', async () => {
+    const ctx = new Context();
+    new CommandRuntime(ctx);
+    const agent = scopedAgentFor(ctx, 's-norm');
+    ctx.commands.register({ name: 'ok', description: 'x', handler: () => ({ kind: 'success' }) });
+    ctx.commands.register({ name: 'fail', description: 'y', handler: () => ({ kind: 'error', text: 'nope' }) });
+    const ok = await ctx.commands.execute(agent, '/ok', new AbortController().signal);
+    const fail = await ctx.commands.execute(agent, '/fail', new AbortController().signal);
+    expect(ok?.result).toEqual({ kind: 'success' });
+    expect(fail?.result).toEqual({ kind: 'error', text: 'nope' });
+  });
+
+  it('AgentRegistry create/resume option shapes accept the setup field', () => {
+    const ctx = new Context();
+    new AgentRegistry(ctx);
+    type SetupSpan = { setup?: (agentCtx: Context) => void | { commit(): void } };
+    const createOptions = { sessionId: SessionId('s-setup'), setup: () => {} } as CreateAgentOptions & SetupSpan;
+    const resumeOptions = { resumeSessionId: SessionId('s-setup'), setup: () => {} } as ResumeAgentOptions & SetupSpan;
+    expect(typeof createOptions.setup).toBe('function');
+    expect(typeof resumeOptions.setup).toBe('function');
+  });
+});
+
+/** Mint an agent under a real scoped context so scoped command sighting works. */
+function scopedAgentFor(ctx: Context, id: string) {
+  const events: { type: string; data: unknown }[] = [];
+  const agent = {
+    id: SessionId(id),
+    session: { id, append(type: string, data: unknown) { const e = { type, data }; events.push(e); return e; } },
+    status: 'idle',
+    ctx,
+    followup: () => {},
+    steer: () => {},
+    inject: () => {},
+    cancel: () => {},
+    send: () => {},
+    whenIdle: async () => {},
+    options: {},
+  } as unknown as Agent;
+  const scoped = createScope(ctx, agent);
+  agent.ctx = scoped.ctx;
+  return Object.assign(agent, { __events: events });
+}
+
+function agentSessionEvents(agent: Agent): string[] {
+  return (agent as unknown as { __events: { type: string }[] }).__events.map((e) => e.type);
+}

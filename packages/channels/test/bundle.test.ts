@@ -87,7 +87,9 @@ const PATCH_URL = new URL('../cordis.patch.yml', import.meta.url);
 // Expected bundle result — the exact plugins cordis.patch.yml inserts.
 const EXPECTED_ITEMS: PatchItem[] = [
   { id: 'channels-service', name: '@wsz987/channel-core/plugin' },
-  { id: 'channels-harness', name: '@wsz987/channel-harness', inject: ['channels', 'agents'] },
+  // channel-harness injects the command-plane capabilities: the Harness
+  // `commands` registry plus the default-model selection it resolves routes against.
+  { id: 'channels-harness', name: '@wsz987/channel-harness', inject: ['channels', 'agents', 'agentDefaultModel', 'commands'] },
   { id: 'channels-weixin', name: '@wsz987/channel-weixin', inject: ['channels'] },
   { id: 'channels-qq', name: '@wsz987/channel-qq', inject: ['channels', 'credentials'] },
   { id: 'channels-dingtalk', name: '@wsz987/channel-dingtalk', inject: ['channels'] },
