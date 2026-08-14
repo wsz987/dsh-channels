@@ -1,6 +1,13 @@
 {
   "name": "@dsh/channel-telegram",
   "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wsz987/dsh-channels.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Telegram Bot API channel adapter for DeepSeek Harness (M5 extensibility proof — third-party channel on the public Channel Contract)",
   "type": "module",
   "main": "./lib/index.js",

@@ -18,6 +18,7 @@
     "doctor": "pnpm --filter @dsh/channel-compat run doctor",
     "verify": "pnpm --filter @dsh/channel-verify run verify",
     "check:upstream": "node scripts/check-upstream.mjs",
+    "check:bundle": "pnpm --filter @dsh/channels run test",
     "clean": "turbo run clean",
     "changeset": "changeset",
     "version": "changeset version",

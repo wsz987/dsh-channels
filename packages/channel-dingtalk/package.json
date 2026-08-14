@@ -1,6 +1,13 @@
 {
   "name": "@dsh/channel-dingtalk",
   "version": "0.7.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wsz987/dsh-channels.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "DingTalk channel adapter for DeepSeek Harness (AI Card streaming, edit strategy)",
   "type": "module",
   "main": "./lib/index.js",

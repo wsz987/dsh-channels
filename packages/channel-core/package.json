@@ -1,6 +1,13 @@
 {
   "name": "@dsh/channel-core",
   "version": "0.3.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wsz987/dsh-channels.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Stable cross-channel contract and Cordis ChannelService for DeepSeek Harness Channels",
   "type": "module",
   "main": "./lib/index.js",
@@ -9,6 +16,10 @@
     ".": {
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
+    },
+    "./plugin": {
+      "types": "./lib/plugin.d.ts",
+      "default": "./lib/plugin.js"
     },
     "./package.json": "./package.json"
   },

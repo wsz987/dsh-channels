@@ -1,6 +1,13 @@
 {
   "name": "@dsh/channel-compat",
   "version": "0.2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wsz987/dsh-channels.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Upstream compatibility manifests, version policy and channels doctor",
   "type": "module",
   "main": "./lib/index.js",

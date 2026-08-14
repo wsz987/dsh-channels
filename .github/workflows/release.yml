@@ -1,0 +1,53 @@
+# Phase 16 release automation (docs/release.md).
+#
+# On every push to `main`, changesets/action@v1:
+#   - version: `pnpm changeset version` — when .changeset/*.md files exist the
+#     action opens/updates a "Version Packages" PR;
+#   - publish: `pnpm release` (`changeset publish`) — after the version PR
+#     merges, publishes every package whose version is not yet on npm.
+#
+# The publish half of this workflow stays INERT until the `NPM_TOKEN` repository
+# secret is configured (no registry credentials to publish with). Set NPM_TOKEN
+# to an npm automation token with publish rights for the @dsh scope to activate
+# releases. Version PRs are created regardless.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    name: Version + publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.3
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      # lib/ is gitignored — build before publishing so the tarball ships the
+      # prebuilt JS + types described in docs/release.md.
+      - name: Build packages
+        run: pnpm build
+      - name: Create Release Pull Request or Publish to npm
+        uses: changesets/action@v1
+        with:
+          version: pnpm changeset version
+          publish: pnpm release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -1,6 +1,13 @@
 {
   "name": "@dsh/channel-testkit",
   "version": "0.2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wsz987/dsh-channels.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Contract tests, fake adapter/upstream/harness, fixtures and E2E helpers for channel adapters",
   "type": "module",
   "main": "./lib/index.js",

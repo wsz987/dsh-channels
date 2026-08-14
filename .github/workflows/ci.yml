@@ -104,5 +104,9 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      # Phase 16 (Task 16.3): bundle validation needs the built packages
+      # (lib/ is gitignored), so build the bundle's dependency graph first.
+      - name: Build (for bundle validation)
+        run: pnpm build --filter=@dsh/channels...
       - name: Compatibility governance
-        run: pnpm check:fixtures && pnpm check:manifests && pnpm doctor
+        run: pnpm check:fixtures && pnpm check:manifests && pnpm doctor && pnpm check:bundle

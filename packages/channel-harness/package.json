@@ -1,6 +1,13 @@
 {
   "name": "@dsh/channel-harness",
   "version": "0.4.2",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wsz987/dsh-channels.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Thin Harness-native bridge: SessionBinding, AgentManager and the session/event reply pipeline",
   "type": "module",
   "main": "./lib/index.js",

@@ -1,6 +1,13 @@
 {
   "name": "@dsh/channel-verify",
   "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wsz987/dsh-channels.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Offline verification CLI for third-party DeepSeek Harness channel adapters (dsh channels verify)",
   "type": "module",
   "main": "./lib/index.js",

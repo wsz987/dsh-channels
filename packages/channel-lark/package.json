@@ -1,6 +1,13 @@
 {
   "name": "@dsh/channel-lark",
   "version": "0.6.3",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wsz987/dsh-channels.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Lark / Feishu channel adapter for DeepSeek Harness (threads, editable card streaming, edit strategy)",
   "type": "module",
   "main": "./lib/index.js",

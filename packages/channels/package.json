@@ -1,6 +1,13 @@
 {
   "name": "@dsh/channels",
   "version": "0.9.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wsz987/dsh-channels.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "DeepSeek Harness DSH Bundle: official messaging channels (Weixin, QQ, DingTalk, Lark)",
   "type": "module",
   "main": "./lib/index.js",
