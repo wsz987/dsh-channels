@@ -79,6 +79,13 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Test
         run: pnpm test
+      # M5 (Task 17.3 / Task 18): verify the Telegram extensibility proof and an
+      # official adapter with the channel-verify CLI (lib/ exists after pnpm test
+      # because turbo builds each package's dependencies first).
+      - name: Verify Telegram adapter (M5 extensibility proof)
+        run: pnpm verify ./packages/channel-telegram --test
+      - name: Verify Weixin adapter (M5 verify CLI on an official adapter)
+        run: pnpm verify ./packages/channel-weixin --test
 
   governance:
     name: Governance (fixtures / manifests / doctor)

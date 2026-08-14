@@ -50,7 +50,7 @@ channels doctor（Task 13.2，上游兼容性诊断）
 fixtures/qq/ + fixtures/lark/
 ```
 
-**M4 — 兼容性治理 ✅**（当前，本变更）
+**M4 — 兼容性治理 ✅**
 
 ```text
 checkAdapterCompatibility 聚合检查（Task 13.1–13.3）
@@ -58,6 +58,16 @@ manifest 同步校验：adapterVersion ↔ package.json、upstream 字段（chec
 fixtures 全量 sweep（check:fixtures）
 四渠道 doctor 表面（pnpm doctor）
 Renovate + CI 升级闸门（check:upstream）
+```
+
+**M5 — 公共 Channel SDK ✅**（当前，本变更）
+
+```text
+defineChannelAdapter（channel-core 公开辅助函数，Task 17.1）
+templates/channel-adapter/ 第三方适配器脚手架（Task 17.2）
+channel-verify CLI（Task 17.3：package/manifest/capabilities/fixtures/credentials/contract 检查）
+docs/adapter-authoring.md 第三方开发指南
+Telegram 扩展性证明（Task 18：零修改 core/harness/官方四渠道接入）
 ```
 
 ## 结构
@@ -68,7 +78,9 @@ Renovate + CI 升级闸门（check:upstream）
 | `@dsh/channel-harness` | **唯一** Harness API boundary：SessionBinding、AgentManager（AgentHandle ownership）、`session/event` → ReplyRouter |
 | `@dsh/channel-testkit` | `runChannelAdapterContract`、FakeAdapter/FakeUpstream/FakeHarness、fixture loader、E2E |
 | `@dsh/channel-compat` | 上游兼容性治理（manifest 同步校验 / fixture sweep / doctor / checkAdapterCompatibility） |
+| `@dsh/channel-verify` | 第三方适配器验证 CLI（`pnpm verify <dir> [--test]`，Task 17.3） |
 | `@dsh/channel-weixin/qq/dingtalk/lark` | 四个官方渠道 adapter（M1–M3 实现，M4 纳入治理） |
+| `@dsh/channel-telegram` | Telegram 扩展性证明（Task 18，仅依赖公开 Contract，不入 bundle） |
 | `@dsh/channels` | DSH Bundle（`cordis.patch.yml`） |
 | `apps/fake-channel` | M0 E2E 演示 |
 
@@ -128,8 +140,30 @@ CI：build + typecheck + contract tests + check:fixtures + check:manifests + doc
 
 `checkAdapterCompatibility(adapter, { targetVersion, allowUnsupported })` 是治理层的单一入口：读取结构性 manifest → `validateManifest` → `versionState`/`manifestVerdict`，返回 `{ manifest, validationErrors, state, verdict, reason }`。
 
-## 后续 Milestones
+## M5 公共 Channel SDK
 
-- M5 公开 SDK（defineChannelAdapter/testkit/template/verify/Telegram proof）
+第三方渠道接入只依赖公开 Contract，无需修改 core / harness：
+
+```ts
+import { defineChannelAdapter } from '@dsh/channel-core';
+
+export default defineChannelAdapter({
+  id: 'my-channel',
+  capabilities: { text: true, /* ... */ streaming: 'buffered' },
+  async start(ctx) { /* ... */ },
+  async stop() { /* ... */ },
+  async send(target, message) { /* ... */ },
+});
+```
+
+- 脚手架：`templates/channel-adapter/`（package.json / cordis.patch.yml / src/{config,transport,upstream,adapter,mapper,index}.ts / test / fixtures/example/）
+- 验证：`pnpm verify <dir> [--test]` —— package / adapter surface / manifest / capabilities / fixtures / credentials / contract 七项检查，离线可用
+- 指南：`docs/adapter-authoring.md`（含成熟度 Experimental → Verified 标准）
+
+**Telegram 扩展性证明（Task 18）**：`@dsh/channel-telegram` 仅依赖 `@dsh/channel-core` + `@dsh/channel-testkit` 公开 API，零修改 `channel-core` / `channel-harness` / 官方四渠道 / `@dsh/channels` bundle——证明 Channel Contract 无平台泄漏。Telegram 刻意不加入官方 bundle，作为第三方接入范式。
+
+## 后续
+
+- M0–M5 全部里程碑已完成；后续为发布与生态：Phase 16 Release Pipeline（Changesets / 预构建产物 / clean-profile DSH Bundle 验证）、第三方渠道生态（Wave 1：Discord / Slack / Teams 等）。
 
 详见 `docs/deepseek-harness-channels-architecture.md` 与 `docs/deepseek-harness-channels-execution-plan.md`。
