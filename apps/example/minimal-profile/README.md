@@ -17,13 +17,13 @@ Example DSH profile using the official v1.1 **bundle / profile / patch** model
 ```bash
 # 1. add the bundle to the profile (DSH installs the bundle into
 #    dsh.profile.bundles and applies the bundle's cordis.patch.yml)
-dsh plugin --profile minimal add @wsz987/dsh-channels
+npx @deepseek-ai/dsh plugin --profile minimal add @wsz987/dsh-channels
 
 # 2. inspect the merged config
-dsh --profile minimal --dump-config
+npx @deepseek-ai/dsh --profile minimal --dump-config
 
 # 3. run the profile
-dsh --profile minimal
+npx @deepseek-ai/dsh --profile minimal
 ```
 
 ## Profile override semantics (v1.1 §41)

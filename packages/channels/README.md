@@ -10,7 +10,7 @@ DeepSeek Harness **DSH Bundle** — built-in messaging channels:
 ## Install
 
 ```bash
-dsh plugin --profile default add @wsz987/dsh-channels
+npx @deepseek-ai/dsh plugin --profile default add @wsz987/dsh-channels
 ```
 
 The bundle patch (`cordis.patch.yml`) inserts the `ChannelService`
@@ -23,7 +23,7 @@ config.
 Advanced users may install a single adapter:
 
 ```bash
-dsh plugin --profile minimal add @wsz987/channel-weixin
+npx @deepseek-ai/dsh plugin --profile minimal add @wsz987/channel-weixin
 ```
 
 ## Architecture

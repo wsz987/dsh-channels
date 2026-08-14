@@ -145,7 +145,7 @@ Harness breaking change
 最终用户：
 
 ```bash
-dsh plugin --profile default add @wsz987/dsh-channels
+npx @deepseek-ai/dsh plugin --profile default add @wsz987/dsh-channels
 ```
 
 一次安装首批官方渠道。
@@ -1262,13 +1262,13 @@ Harness latest-compatible
 正式：
 
 ```bash
-dsh plugin --profile default add @wsz987/dsh-channels
+npx @deepseek-ai/dsh plugin --profile default add @wsz987/dsh-channels
 ```
 
 也允许第三方：
 
 ```bash
-dsh plugin --profile default add @foo/dsh-channel-telegram
+npx @deepseek-ai/dsh plugin --profile default add @foo/dsh-channel-telegram
 ```
 
 如果直接从 GitHub 安装 TypeScript package，需要遵守 Harness 官方 bundle/profile 和 prepare/build 安全模型。
@@ -1282,7 +1282,7 @@ dsh plugin --profile default add @foo/dsh-channel-telegram
 高级用户可以：
 
 ```bash
-dsh plugin --profile minimal add @wsz987/channel-weixin
+npx @deepseek-ai/dsh plugin --profile minimal add @wsz987/channel-weixin
 ```
 
 前提：

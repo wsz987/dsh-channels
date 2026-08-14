@@ -16,20 +16,20 @@
 
 ## 安装
 
-前提：已安装 DeepSeek Harness CLI（`dsh`），安装方式见 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)。
+前提：能运行 DeepSeek Harness CLI。官方推荐 `npx @deepseek-ai/dsh`（无需全局安装；若已把 `dsh` 装进 PATH，可省去 `npx @deepseek-ai/` 前缀），详见 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)。
 
 ```bash
 # 1. 把 channels bundle 装进 Harness 的 web profile
-#    （`dsh plugin` 首次使用会自动初始化 profile；bundle 声明了 dsh.bundle，
+#    （`plugin` 子命令首次使用会自动初始化 profile；bundle 声明了 dsh.bundle，
 #      装完自动加入该 profile 的 dsh.profile.bundles 层并应用其 cordis.patch.yml）
-dsh plugin --profile web add @wsz987/dsh-channels
+npx @deepseek-ai/dsh plugin --profile web add @wsz987/dsh-channels
 
 # 2. 确认 bundle 已合并：dump-config 里应能看到 channels-service /
 #    channels-harness / channels-weixin / channels-qq / channels-dingtalk / channels-lark
-dsh --profile web --dump-config
+npx @deepseek-ai/dsh --profile web --dump-config
 
-# 3. 启动 Harness（`dsh web` 等价于 `dsh --profile web`）
-dsh web
+# 3. 启动 Harness（`npx @deepseek-ai/dsh web` 等价于 `... --profile web`）
+npx @deepseek-ai/dsh web
 ```
 
 装这一个包即挂上完整链路：
@@ -48,11 +48,36 @@ Weixin / QQ / DingTalk / Lark Adapter
 
 不配置也能启动；完成对应渠道的登录后即可收发消息（见下）。
 
-> 说明：`dsh plugin --profile <name> add <pkg>` 就是在该 profile 内执行 pnpm 安装，
+> 说明：`npx @deepseek-ai/dsh plugin --profile <name> add <pkg>` 就是在该 profile 内执行 pnpm 安装，
 > 首次使用自动初始化 profile——**没有 `dsh profile create` 这一步**。
 > 装到哪个 profile 由 `--profile` 决定（`web` 为 Harness 内置模板，也可用其他名称）。
 
-按需也可只装某个渠道（同样通过 `dsh plugin --profile <name> add`）：`@wsz987/channel-weixin`、`@wsz987/channel-qq`、`@wsz987/channel-dingtalk`、`@wsz987/channel-lark`。
+按需也可只装某个渠道（同样通过 `npx @deepseek-ai/dsh plugin --profile <name> add`）：`@wsz987/channel-weixin`、`@wsz987/channel-qq`、`@wsz987/channel-dingtalk`、`@wsz987/channel-lark`。
+
+### 本机开发（bundle 未发布到 npm 时）
+
+`npx @deepseek-ai/dsh plugin ... add @wsz987/dsh-channels` 按包名安装的前提是包已发布。未发布时在**仓库根目录**用自带的 dev 脚本链接本地构建产物：
+
+```bash
+# 0. 构建所有包（turbo 按依赖顺序产出 lib/）
+pnpm build
+
+# 1. 安装渠道（profile 默认 web；不带渠道参数 = 全部）
+pnpm channels                     # 全部渠道
+pnpm channels weixin              # 只装微信，其余渠道自动禁用
+pnpm channels qq dingtalk         # 多选
+pnpm channels --profile dev qq    # 装到其他 profile
+
+# 2. 验证：dump-config 里应看到 channels-service / channels-harness / 所选渠道
+npx @deepseek-ai/dsh --profile web --dump-config
+
+# 3. 启动
+npx @deepseek-ai/dsh web
+```
+
+- **渠道名自动发现**：来自 `packages/channels/cordis.patch.yml` 的行 id（`channels-weixin` → `weixin`…），在 patch 里加新渠道行即可被脚本自动识别；别名 `wx` → weixin、`feishu` → lark。
+- **单装语义**：只 link 所选渠道（bundle + channel-core + channel-harness 始终 link），脚本会在 profile 的 `cordis.patch.yml` 中 `GENERATED` 标记之后生成 `disabled: true` 禁用其余渠道——禁用行不要求模块存在，profile 照常启动；不带参数重跑即恢复全部。手写配置请放在标记之前（不会被覆盖）。
+- link 是 symlink 直连源码目录：改完代码只需重新 `pnpm build` 再重启 Harness，无需重新安装。安装时 `declares no dsh.bundle` 的警告是预期的——只有 `@wsz987/dsh-channels` 会进入 `dsh.profile.bundles` 层。
 
 ## 渠道配置与登录
 

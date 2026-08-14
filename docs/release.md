@@ -95,26 +95,27 @@ consumes it via the `dsh.profile.bundles` list, not a hand-written
 ### Manual release validation (requires the dsh CLI)
 
 The automated gate runs against the workspace packages; the final release
-validation installs the bundle into a **clean profile** with the real dsh CLI:
+validation installs the bundle into a **clean profile** with the real dsh CLI
+(`dsh` below is `npx @deepseek-ai/dsh` when the CLI is not installed globally):
 
 ```bash
-# 1. add the bundle to a clean profile — `dsh plugin` auto-initializes the
+# 1. add the bundle to a clean profile — `plugin` auto-initializes the
 #    profile on first use (never reuse a dirty profile for release validation;
 #    there is no `dsh profile create` step)
-dsh plugin --profile release-validation add @wsz987/dsh-channels
+npx @deepseek-ai/dsh plugin --profile release-validation add @wsz987/dsh-channels
 
 # 2. dump the merged config — verify the six plugins were inserted
-dsh --profile release-validation --dump-config
+npx @deepseek-ai/dsh --profile release-validation --dump-config
 
 # 3. start the profile — all plugins load (channels-service, channels-harness,
 #    channels-weixin, channels-qq, channels-dingtalk, channels-lark)
-dsh --profile release-validation
+npx @deepseek-ai/dsh --profile release-validation
 
 # 4. override channels via a profile patch (apps/example/minimal-profile/
 #    cordis.patch.yml shows a QQ-only override). A patch REPLACES the whole
 #    target config (not a deep merge). QQ config uses `appSecretRef` (a
 #    credential reference — the real AppSecret lives in ctx.credentials).
-dsh --profile release-validation
+npx @deepseek-ai/dsh --profile release-validation
 ```
 
 See `apps/example/minimal-profile/` for a reference profile (`package.json`

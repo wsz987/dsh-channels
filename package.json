@@ -17,6 +17,7 @@
     "check:manifests": "pnpm --filter @wsz987/channel-compat run check:manifests",
     "doctor": "pnpm --filter @wsz987/channel-compat run doctor",
     "verify": "pnpm --filter @wsz987/channel-verify run verify",
+    "channels": "node scripts/dev-channels.mjs",
     "check:upstream": "node scripts/check-upstream.mjs",
     "check:bundle": "pnpm --filter @wsz987/dsh-channels run test",
     "clean": "turbo run clean",
