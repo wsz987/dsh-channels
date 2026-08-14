@@ -53,6 +53,7 @@ function makeConfig(overrides: Partial<QQConfig> = {}): QQConfig {
     baseUrl: 'http://fake',
     timeoutMs: 1000,
     longPollTimeoutMs: 1000,
+    upstream: { mode: 'gateway' },
     auth: {
       statePath: undefined,
       qrPollIntervalMs: 100,
