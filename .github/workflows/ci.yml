@@ -86,15 +86,18 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Test
         run: pnpm test
-      # The verify CLI imports each target adapter's BUILT entry
-      # (`exports["."].default` = lib/index.js). `turbo run test` only builds
-      # each package's workspace dependencies (`^build`) — not the packages
-      # themselves — so the verify CLI and BOTH verify targets must be built
-      # explicitly. Without lib/, the CLI falls back to importing src/index.ts,
-      # whose ESM `.js` specifiers (e.g. `./config.js`) cannot resolve against
-      # the .ts sources and the verify fails with a confusing import error.
-      - name: Build verify CLI and adapter targets
-        run: pnpm build --filter=@wsz987/channel-verify... --filter=@wsz987/channel-telegram... --filter=@wsz987/channel-weixin...
+      # The verify CLI validates each target adapter's RELEASE artifact
+      # (`exports["."].default` = lib/index.js) — the exact entry a published
+      # npm package would load. `turbo run test` only builds each package's
+      # workspace dependencies (`^build`), not the packages themselves, so the
+      # verify CLI and BOTH verify targets must be built explicitly first;
+      # otherwise the declared lib/ entry is missing and the verify fails with
+      # adapter-build-missing.
+      - name: Build verify CLI and verification targets
+        run: |
+          pnpm build --filter=@wsz987/channel-verify...
+          pnpm build --filter=@wsz987/channel-telegram...
+          pnpm build --filter=@wsz987/channel-weixin...
       # Verify the Telegram extensibility proof and an
       # official adapter with the channel-verify CLI.
       - name: Verify Telegram adapter (extensibility proof)

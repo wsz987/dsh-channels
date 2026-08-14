@@ -200,6 +200,26 @@ describe('adapter surface check', () => {
       },
     );
   });
+
+  it('reports adapter-build-missing when the declared lib entry is not built', async () => {
+    // VALID_PACKAGE declares exports["."].default = lib/index.js, but no lib/
+    // is provided — exactly the CI case before the verification targets are
+    // built. The verifier must NOT fall back to src/index.ts (a release
+    // verifier validates the artifact a published package would load).
+    await withDir(
+      {
+        'package.json': VALID_PACKAGE,
+      },
+      async (dir) => {
+        const report = await verifyAdapter(dir);
+        const surface = check(report, 'adapter-surface');
+        expect(codes(report, 'adapter-surface')).toContain('adapter-build-missing');
+        // Path separator is platform-dependent (lib\\index.js on Windows).
+        expect(surface.items[0]?.message).toMatch(/lib[\\/]index\.js/);
+        expect(surface.items[0]?.message).toContain('not built');
+      },
+    );
+  });
 });
 
 describe('manifest check', () => {

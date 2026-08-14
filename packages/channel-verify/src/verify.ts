@@ -228,26 +228,35 @@ interface AdapterSurfaceResult {
 
 async function inspectAdapterSurface(dir: string, pkg: PackageInfo | undefined): Promise<AdapterSurfaceResult> {
   const items: VerifyItem[] = [];
-  const entry = resolveEntryPoint(dir, pkg);
-  if (!entry) {
+  const resolved = resolveEntryPoint(dir, pkg);
+  if (!resolved) {
     return {
       check: {
         id: 'adapter-surface',
         items: [
           fail(
             'adapter-entry-missing',
-            'could not resolve the package entry (exports["."].default or main; also tried lib/index.js and src/index.ts)',
+            'could not resolve the package entry (exports["."].default or main; also tried lib/index.js)',
           ),
         ],
       },
       adapter: undefined,
     };
   }
-  if (!existsSync(entry)) {
+  if (resolved.notBuilt) {
+    // The package declares a release artifact (lib/index.js via exports/main)
+    // but it is missing — the adapter is not built. A release verifier must
+    // validate the artifact a published npm package would load, never the
+    // TypeScript sources, so fail loudly instead of falling back to src/.
     return {
       check: {
         id: 'adapter-surface',
-        items: [fail('adapter-entry-missing', `declared entry '${relative(dir, entry)}' does not exist`)],
+        items: [
+          fail(
+            'adapter-build-missing',
+            `declared entry '${relative(dir, resolved.entry)}' does not exist — the package is not built; run pnpm build for this package first`,
+          ),
+        ],
       },
       adapter: undefined,
     };
@@ -255,20 +264,13 @@ async function inspectAdapterSurface(dir: string, pkg: PackageInfo | undefined):
 
   let mod: Record<string, unknown>;
   try {
-    const imported = (await import(pathToFileURL(entry).href)) as Record<string, unknown>;
+    const imported = (await import(pathToFileURL(resolved.entry).href)) as Record<string, unknown>;
     mod = imported;
   } catch (error) {
-    // A source (.ts) entry means the package was not built: lib/ is missing and
-    // the ESM `.js` specifiers inside the TypeScript sources cannot resolve
-    // under plain Node. Hint the maintainer instead of leaving a cryptic
-    // 'Cannot find module .../src/config.js' error.
-    const hint = entry.endsWith('.ts')
-      ? ' (source entry: the adapter is not built — run `pnpm build` for this package first so lib/index.js exists)'
-      : '';
     return {
       check: {
         id: 'adapter-surface',
-        items: [fail('adapter-import-failed', `could not import '${relative(dir, entry)}': ${errorMessage(error)}${hint}`)],
+        items: [fail('adapter-import-failed', `could not import '${relative(dir, resolved.entry)}': ${errorMessage(error)}`)],
       },
       adapter: undefined,
     };
@@ -293,31 +295,39 @@ async function inspectAdapterSurface(dir: string, pkg: PackageInfo | undefined):
   return { check: { id: 'adapter-surface', items }, adapter: found.adapter };
 }
 
+/** Result of resolving a package's runtime entry. */
+interface EntryResolution {
+  /** Absolute path of the entry to import (exists on disk). */
+  entry: string;
+  /** True when the declared artifact is missing — the package is not built. */
+  notBuilt: boolean;
+}
+
 /**
- * Resolve the package entry file: exports["."].default → main →
- * lib/index.js → src/index.ts (best-effort fallbacks when the built output
- * is missing).
+ * Resolve the package's RUNTIME entry — the artifact a published npm package
+ * would actually load: `exports["."].default` → `main`. When the declared
+ * artifact is missing the package is simply not built; the verifier reports
+ * that instead of falling back to the TypeScript sources (release
+ * verification must validate the real artifact, not `src/`).
  */
-function resolveEntryPoint(dir: string, pkg: PackageInfo | undefined): string | undefined {
+function resolveEntryPoint(dir: string, pkg: PackageInfo | undefined): EntryResolution | undefined {
   if (pkg) {
     const exports = pkg.record.exports as Record<string, unknown> | undefined;
     const dot = exports && typeof exports === 'object' ? (exports['.'] as Record<string, unknown> | undefined) : undefined;
     const candidates: unknown[] = [];
     // The runtime entry is the .default (or main); .types is a declaration
-    // file and cannot be imported. The fallback loop below covers a missing
-    // lib/ by trying src/index.ts.
+    // file and cannot be imported.
     if (dot && typeof dot === 'object') candidates.push(dot.default);
     candidates.push(pkg.record.main);
     for (const candidate of candidates) {
       if (typeof candidate !== 'string' || candidate.length === 0) continue;
       const abs = resolve(dir, candidate);
-      if (existsSync(abs)) return abs;
+      return existsSync(abs) ? { entry: abs, notBuilt: false } : { entry: abs, notBuilt: true };
     }
   }
-  for (const candidate of ['lib/index.js', 'src/index.ts', 'src/index.js']) {
-    const abs = join(dir, candidate);
-    if (existsSync(abs)) return abs;
-  }
+  // No declared entry: fall back to the conventional build output only.
+  const lib = join(dir, 'lib/index.js');
+  if (existsSync(lib)) return { entry: lib, notBuilt: false };
   return undefined;
 }
 
