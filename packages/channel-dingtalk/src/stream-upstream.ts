@@ -20,9 +20,11 @@
  * step — the offline tests inject a fake stream client.
  *
  * Ack note: the stream server may retry a callback after ~60s without a
- * response. The SDK's `registerCallbackListener` path has no ack hook, so
- * this driver does not ack; retries carry the same `msgId`, which the inbound
- * dedup window collapses.
+ * response. The SDK's `DWClient` exposes `socketCallBackResponse(messageId,
+ * result)` for exactly this purpose; this driver ACKs each successfully
+ * parsed + submitted robot message (message "reliably received", NOT "LLM
+ * turn finished") so the platform does not redeliver it. Malformed payloads
+ * are deliberately NOT acked, so the platform can retry / surface the error.
  */
 import { TOPIC_ROBOT } from 'dingtalk-stream';
 import type { CardCreateResult, DingTalkUpstream } from './upstream.js';
@@ -55,7 +57,13 @@ export interface DingTalkStreamClient {
   /** Close the stream WebSocket (sync in the real SDK). */
   disconnect(): void;
   /** Subscribe to one downstream topic (robot messages by default). */
-  registerCallbackListener(topic: string, callback: (message: DingTalkStreamMessage) => void): unknown;
+  registerCallbackListener(topic: string, callback: (message: DingTalkStreamMessage) => void | Promise<void>): unknown;
+  /**
+   * Acknowledge one downstream frame so the stream server does not retry it
+   * (~60s retry window). The real SDK's `DWClient` implements this as
+   * `socketCallBackResponse(messageId, result)`.
+   */
+  socketCallBackResponse(messageId: string, response: unknown): void;
 }
 
 export interface DingTalkStreamUpstreamOptions {
@@ -136,6 +144,20 @@ export function toGatewayRaw(message: DingTalkStreamMessage): Record<string, unk
   return raw;
 }
 
+/**
+ * Acknowledge one robot callback frame. ACK means "the message was reliably
+ * received and submitted to the inbound pipeline" — not "the LLM finished
+ * answering". A frame without a server `messageId` cannot be acked.
+ */
+export function ackRobotMessage(
+  client: DingTalkStreamClient,
+  message: DingTalkStreamMessage,
+): void {
+  const messageId = message.headers?.messageId;
+  if (!messageId) return;
+  client.socketCallBackResponse(messageId, { success: true });
+}
+
 /** Stream-mode implementation of `DingTalkUpstream` (inbound via SDK). */
 export class DingTalkStreamUpstream implements DingTalkUpstream {
   /** The listener is registered once per client; reconnect reuses it. */
@@ -176,7 +198,11 @@ export class DingTalkStreamUpstream implements DingTalkUpstream {
     this.options.client.registerCallbackListener(TOPIC_ROBOT, (message) => {
       if (!this.onMessage) return;
       const raw = toGatewayRaw(message);
-      if (raw !== undefined) this.onMessage(raw);
+      if (raw === undefined) return; // malformed payload: do not ack (platform retries / error observation)
+      this.onMessage(raw);
+      // ACK after submitting to the inbound pipeline ("reliably received"),
+      // never after the LLM turn completes.
+      ackRobotMessage(this.options.client, message);
     });
     this.listenerRegistered = true;
   }

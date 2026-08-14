@@ -98,16 +98,20 @@ class FakeStreamClient implements DingTalkStreamClient {
     this.disconnects += 1;
   }
 
-  registerCallbackListener(topic: string, callback: (message: DingTalkStreamMessage) => void): this {
+  registerCallbackListener(topic: string, callback: (message: DingTalkStreamMessage) => void | Promise<void>): this {
     this.calls.push(['registerCallbackListener', topic]);
     this.registered.push(topic);
     this.listeners.set(topic, callback);
     return this;
   }
 
+  socketCallBackResponse(messageId: string, response: unknown): void {
+    this.calls.push(['socketCallBackResponse', messageId, response]);
+  }
+
   /** Simulate the stream server delivering a CALLBACK message on a topic. */
   emit(topic: string, message: DingTalkStreamMessage): void {
-    this.listeners.get(topic)?.(message);
+    void this.listeners.get(topic)?.(message);
   }
 }
 

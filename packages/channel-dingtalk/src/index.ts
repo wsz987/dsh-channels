@@ -28,6 +28,7 @@ export { OutboundSender } from './outbound.js';
 export { HttpDingTalkUpstream, type CardCreateResult, type DingTalkUpstream } from './upstream.js';
 export {
   DingTalkStreamUpstream,
+  ackRobotMessage,
   toGatewayRaw,
   type DingTalkStreamClient,
   type DingTalkStreamMessage,

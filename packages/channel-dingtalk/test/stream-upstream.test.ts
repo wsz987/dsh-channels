@@ -16,6 +16,7 @@ import {
   DingTalkStreamUpstream,
   HttpDingTalkUpstream,
   InboundProcessor,
+  ackRobotMessage,
   toGatewayRaw,
 } from '../src/index.ts';
 import type { DingTalkStreamClient, DingTalkStreamMessage } from '../src/index.ts';
@@ -80,8 +81,10 @@ class FakeStreamClient implements DingTalkStreamClient {
   disconnects = 0;
   readonly registered: string[] = [];
   readonly calls: unknown[] = [];
+  /** Recorded `socketCallBackResponse` invocations: `{ messageId, response }`. */
+  readonly acks: { messageId: string; response: unknown }[] = [];
   failConnect?: Error;
-  private readonly listeners = new Map<string, (message: DingTalkStreamMessage) => void>();
+  private readonly listeners = new Map<string, (message: DingTalkStreamMessage) => void | Promise<void>>();
 
   connect(): Promise<void> {
     this.calls.push(['connect']);
@@ -99,16 +102,21 @@ class FakeStreamClient implements DingTalkStreamClient {
     this.disconnects += 1;
   }
 
-  registerCallbackListener(topic: string, callback: (message: DingTalkStreamMessage) => void): this {
+  registerCallbackListener(topic: string, callback: (message: DingTalkStreamMessage) => void | Promise<void>): this {
     this.calls.push(['registerCallbackListener', topic]);
     this.registered.push(topic);
     this.listeners.set(topic, callback);
     return this;
   }
 
+  socketCallBackResponse(messageId: string, response: unknown): void {
+    this.calls.push(['socketCallBackResponse', messageId]);
+    this.acks.push({ messageId, response });
+  }
+
   /** Simulate the stream server delivering a CALLBACK message on a topic. */
   emit(topic: string, message: DingTalkStreamMessage): void {
-    this.listeners.get(topic)?.(message);
+    void this.listeners.get(topic)?.(message);
   }
 }
 
@@ -288,6 +296,69 @@ describe('DingTalkStreamUpstream.receive', () => {
     second.abort();
     await loop;
     expect(client.disconnects).toBe(2);
+  });
+});
+
+describe('DingTalkStreamUpstream ACK (socketCallBackResponse)', () => {
+  it('acks a valid robot message exactly once after submission', async () => {
+    const client = new FakeStreamClient();
+    const upstream = streamUpstream(client, new FakeOutbound());
+    const controller = new AbortController();
+    const received: unknown[] = [];
+    const loop = upstream.receive(controller.signal, (raw) => received.push(raw));
+
+    await vi.waitFor(() => expect(client.connects).toBe(1), { timeout: 2000 });
+    client.emit(TOPIC_ROBOT, robotDownstream());
+    await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: 2000 });
+
+    expect(received).toHaveLength(1);
+    expect(client.acks).toEqual([{ messageId: 'mid-1', response: { success: true } }]);
+    expect(client.calls.filter((c) => c[0] === 'socketCallBackResponse')).toHaveLength(1);
+
+    controller.abort();
+    await loop;
+  });
+
+  it('does not ack a malformed (non-JSON) payload', async () => {
+    const client = new FakeStreamClient();
+    const upstream = streamUpstream(client, new FakeOutbound());
+    const controller = new AbortController();
+    const received: unknown[] = [];
+    const loop = upstream.receive(controller.signal, (raw) => received.push(raw));
+
+    await vi.waitFor(() => expect(client.connects).toBe(1), { timeout: 2000 });
+    client.emit(TOPIC_ROBOT, { headers: { topic: TOPIC_ROBOT, messageId: 'mid-bad' }, data: 'not-json' });
+    await vi.waitFor(() => expect(client.calls.some((c) => c[0] === 'socketCallBackResponse')).toBe(false), { timeout: 2000 });
+
+    expect(received).toHaveLength(0);
+    expect(client.acks).toHaveLength(0);
+
+    controller.abort();
+    await loop;
+  });
+
+  it('does not ack a frame without a server messageId', () => {
+    const client = new FakeStreamClient();
+    ackRobotMessage(client, { headers: { topic: TOPIC_ROBOT }, data: '{}' });
+    expect(client.acks).toHaveLength(0);
+  });
+
+  it('acks each redelivery independently (dedup is a separate inbound layer)', async () => {
+    const client = new FakeStreamClient();
+    const upstream = streamUpstream(client, new FakeOutbound());
+    const controller = new AbortController();
+    const received: unknown[] = [];
+    const loop = upstream.receive(controller.signal, (raw) => received.push(raw));
+
+    await vi.waitFor(() => expect(client.connects).toBe(1), { timeout: 2000 });
+    client.emit(TOPIC_ROBOT, robotDownstream());
+    client.emit(TOPIC_ROBOT, robotDownstream());
+    await vi.waitFor(() => expect(received).toHaveLength(2), { timeout: 2000 });
+
+    expect(client.acks.map((a) => a.messageId)).toEqual(['mid-1', 'mid-1']);
+
+    controller.abort();
+    await loop;
   });
 });
 
