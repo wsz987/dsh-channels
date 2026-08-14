@@ -60,7 +60,7 @@ fixtures 全量 sweep（check:fixtures）
 Renovate + CI 升级闸门（check:upstream）
 ```
 
-**M5 — 公共 Channel SDK ✅**（当前，本变更）
+**M5 — 公共 Channel SDK ✅**
 
 ```text
 defineChannelAdapter（channel-core 公开辅助函数，Task 17.1）
@@ -68,6 +68,17 @@ templates/channel-adapter/ 第三方适配器脚手架（Task 17.2）
 channel-verify CLI（Task 17.3：package/manifest/capabilities/fixtures/credentials/contract 检查）
 docs/adapter-authoring.md 第三方开发指南
 Telegram 扩展性证明（Task 18：零修改 core/harness/官方四渠道接入）
+```
+
+**Phase 16 — Release Pipeline ✅**（当前，本变更）
+
+```text
+Changesets 独立版本 + 发布流程（release.yml，配置 NPM_TOKEN 后自动 version + publish）
+预构建产物（lib/ + exports，发布无需消费者编译 TS）
+DSH Bundle 校验（check:bundle：cordis.patch.yml → 插件 shape / exports 子路径 / 渠道 enabled 配置）
+apps/example/minimal-profile 示例 profile
+发布元数据（repository / publishConfig.access: public）
+docs/release.md 发布指南
 ```
 
 ## 结构
@@ -83,6 +94,7 @@ Telegram 扩展性证明（Task 18：零修改 core/harness/官方四渠道接�
 | `@dsh/channel-telegram` | Telegram 扩展性证明（Task 18，仅依赖公开 Contract，不入 bundle） |
 | `@dsh/channels` | DSH Bundle（`cordis.patch.yml`） |
 | `apps/fake-channel` | M0 E2E 演示 |
+| `apps/example/minimal-profile` | 示例 DSH profile（Phase 16，clean-profile 安装演示） |
 
 ## 快速开始
 
@@ -162,8 +174,15 @@ export default defineChannelAdapter({
 
 **Telegram 扩展性证明（Task 18）**：`@dsh/channel-telegram` 仅依赖 `@dsh/channel-core` + `@dsh/channel-testkit` 公开 API，零修改 `channel-core` / `channel-harness` / 官方四渠道 / `@dsh/channels` bundle——证明 Channel Contract 无平台泄漏。Telegram 刻意不加入官方 bundle，作为第三方接入范式。
 
+## 发布（Phase 16）
+
+- Bundle 校验：`pnpm check:bundle` —— 解析 `cordis.patch.yml`，校验插件 shape / exports 子路径 / 各渠道 `enabled` 配置（Task 16.3）
+- 示例 profile：`apps/example/minimal-profile/`（`dsh plugin --profile minimal add ./packages/channels` → `--dump-config` → start）
+- 发布指南：`docs/release.md`（Changesets 流程 / 独立版本策略 / clean-profile 验证 / Release DoD 清单）
+- 发布 CI：`.github/workflows/release.yml`（main push 时 changesets version + publish；配置 `NPM_TOKEN` 后生效）
+
 ## 后续
 
-- M0–M5 全部里程碑已完成；后续为发布与生态：Phase 16 Release Pipeline（Changesets / 预构建产物 / clean-profile DSH Bundle 验证）、第三方渠道生态（Wave 1：Discord / Slack / Teams 等）。
+- 执行计划 Phase 0–18 全部完成（M0–M5 + Release Pipeline）；剩余为发布执行（配置 `NPM_TOKEN` 后由 release.yml 触发 npm publish）与生态扩展（第三方渠道 Wave 1：Discord / Slack / Teams 等）。
 
 详见 `docs/deepseek-harness-channels-architecture.md` 与 `docs/deepseek-harness-channels-execution-plan.md`。
