@@ -1,21 +1,26 @@
 # Phase 16 release automation (docs/release.md).
 #
-# On every push to `main`, changesets/action@v1:
-#   - version: `pnpm changeset version` — when .changeset/*.md files exist the
-#     action opens/updates a "Version Packages" PR;
-#   - publish: `pnpm release` (`changeset publish`) — after the version PR
-#     merges, publishes every package whose version is not yet on npm.
+# Tag-driven publish: this workflow runs ONLY when a `v*` release tag is pushed
+# (or manually via workflow_dispatch). Normal commits and pull requests do NOT
+# trigger it.
 #
-# The publish half of this workflow stays INERT until the `NPM_TOKEN` repository
-# secret is configured (no registry credentials to publish with). Set NPM_TOKEN
-# to an npm automation token with publish rights for the @dsh scope to activate
-# releases. Version PRs are created regardless.
+# Release flow (manual, before tagging):
+#   1. `pnpm changeset version`  — bump versions + write changelogs locally.
+#   2. commit the version bump.
+#   3. `git tag vX.Y.Z && git push origin vX.Y.Z`
+# The tag push runs this workflow, which publishes every package whose current
+# version is not yet on npm (`pnpm release` = `changeset publish`).
+#
+# The publish stays INERT until the `NPM_TOKEN` repository secret is configured
+# (an npm automation token with publish rights for the @dsh scope). Without it the
+# publish step fails — configure the secret to activate releases.
 
 name: Release
 
 on:
   push:
-    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -23,7 +28,7 @@ concurrency:
 
 jobs:
   release:
-    name: Version + publish
+    name: Publish to npm
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -43,11 +48,13 @@ jobs:
       # prebuilt JS + types described in docs/release.md.
       - name: Build packages
         run: pnpm build
-      - name: Create Release Pull Request or Publish to npm
-        uses: changesets/action@v1
-        with:
-          version: pnpm changeset version
-          publish: pnpm release
+      - name: Configure npm registry auth
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish packages
+        run: pnpm release
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

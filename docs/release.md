@@ -40,11 +40,13 @@ the published version by `changeset version` at release time.
 3. **Version** — run `pnpm changeset version`: consumes pending changesets,
    bumps the version fields, rewrites internal `workspace:*` dependencies
    and updates changelogs.
-4. **Publish** — run `pnpm release` (`changeset publish`): publishes every
+4. **Tag** — commit the version bump, then push a release tag:
+   `git tag vX.Y.Z && git push origin vX.Y.Z`.
+5. **Publish** — the tag push runs `.github/workflows/release.yml`, which
+   executes `pnpm release` (`changeset publish`) and publishes every
    package whose version is not yet on the npm registry.
 
-Steps 3–4 are automated by `.github/workflows/release.yml` on every push to
-`main` (see below).
+Steps 3–5 are the tag-driven release flow (see the workflow section below).
 
 ## Prebuilt artifacts
 
@@ -145,15 +147,18 @@ without an org token; the repository field links npm back to the source.
 
 ## `.github/workflows/release.yml`
 
-On every push to `main` the workflow runs `changesets/action@v1`:
+Tag-driven publish — it runs **only when a `v*` release tag is pushed** (or via
+`workflow_dispatch`); normal commits and PRs do not trigger it:
 
-- **`version`** — `pnpm changeset version`; when `.changeset/*.md` files
-  exist the action opens/updates a **"Version Packages"** PR;
-- **`publish`** — `pnpm release`; after the version PR merges, the bumped
-  packages are published to npm.
+1. checkout + pnpm 9.15.3 + Node 22 (cache pnpm);
+2. `pnpm install --frozen-lockfile`;
+3. `pnpm build` — `lib/` is gitignored, so packages are built before
+   publishing (the tarball ships prebuilt JS + types);
+4. writes `~/.npmrc` from `NPM_TOKEN`;
+5. `pnpm release` (`changeset publish`) — publishes every package whose
+   current version is not yet on npm.
 
 The workflow **stays inert until the `NPM_TOKEN` repository secret is
-configured**: without registry credentials the publish half cannot run (the
-action only ever publishes packages whose version is not yet on npm, so a repo
-with no pending releases is unaffected either way). Set `NPM_TOKEN` to an npm
-automation token with publish rights for the `@dsh` scope to activate it.
+configured**: without registry credentials the publish step cannot run (it only
+ever publishes packages whose version is not yet on npm). Set `NPM_TOKEN` to an
+npm automation token with publish rights for the `@dsh` scope to activate it.

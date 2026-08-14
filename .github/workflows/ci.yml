@@ -1,4 +1,7 @@
-# M4 — Compatibility Governance: CI gate for every push to `main` and every pull request.
+# M4 — Compatibility Governance: CI gate for every release tag (`v*`) and manual dispatch.
+#
+# Normal commits and pull requests do NOT trigger this workflow — only tag
+# pushes (and the manual workflow_dispatch button).
 #
 # Task 14.3 CI matrix design (docs/deepseek-harness-channels-execution-plan.md):
 #
@@ -7,12 +10,12 @@
 #                               dependency set stays green: build, typecheck, the full
 #                               offline test suite, and the governance checks.
 #
-#   "harness latest-compatible" Renovate dependency PRs. Every Renovate dep PR runs
-#                               this SAME ci.yml against the UPDATED deps — Renovate
-#                               commits its own lockfile changes, so the frozen
-#                               install exercises the proposed versions. All jobs
-#                               must be green before maintainers bump the manifest
-#                               `testedVersion` (plan §32 gate below).
+#   "harness latest-compatible" Run this workflow manually (workflow_dispatch) against
+#                               an updated lockfile (e.g. after a Renovate dep PR is
+#                               merged, or before a release) — the frozen install
+#                               exercises the proposed versions. All jobs must be green
+#                               before maintainers bump the manifest `testedVersion`
+#                               (plan §32 gate below).
 #
 # Upgrade gate (plan §32 / Phase 15): new dependency -> PR -> build / typecheck /
 # contract tests / fixtures / adapter tests / Harness compat / E2E all pass ->
@@ -30,8 +33,8 @@ name: CI
 
 on:
   push:
-    branches: [main]
-  pull_request:
+    tags: ['v*']
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
