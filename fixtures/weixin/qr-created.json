@@ -1,0 +1,14 @@
+{
+  "name": "qr created",
+  "channel": "weixin",
+  "upstreamVersion": "ilink",
+  "payload": {
+    "qrcode": "qr-value-1",
+    "qrcode_img_content": "https://weixin.qq.com/q/abc"
+  },
+  "expected": {
+    "id": "weixin-qr-1",
+    "qrUrl": "https://weixin.qq.com/q/abc",
+    "expiresAt": 1700000060000
+  }
+}

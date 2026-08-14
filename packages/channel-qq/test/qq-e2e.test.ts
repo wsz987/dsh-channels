@@ -17,6 +17,7 @@ import type { SessionBinding } from '../../channel-harness/src/session-router.ts
 import { Config, QQAdapter } from '../src/index.ts';
 import { FakeQQSdkClient } from '../src/sdk-client.ts';
 import type { QQConfig } from '../src/config.ts';
+import { SESSION_BINDING_SCHEMA_VERSION } from '../../channel-harness/src/session-router.ts';
 
 function makeConfig(overrides: Partial<QQConfig> = {}): QQConfig {
   return Config({
@@ -49,6 +50,8 @@ function makeBinding(overrides: Partial<SessionBinding> = {}): SessionBinding {
     accountId: 'main',
     conversationId: 'conv_1',
     sessionId: 's1',
+    route: { preset: 'default' },
+    schemaVersion: SESSION_BINDING_SCHEMA_VERSION,
     createdAt: 1,
     updatedAt: 1,
     ...overrides,

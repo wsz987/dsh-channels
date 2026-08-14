@@ -1,0 +1,12 @@
+{
+  "name": "qr scanned",
+  "channel": "weixin",
+  "upstreamVersion": "ilink",
+  "payload": {
+    "status": "scaned"
+  },
+  "expected": {
+    "state": "pending",
+    "detail": "weixin QR scanned; waiting for confirmation"
+  }
+}

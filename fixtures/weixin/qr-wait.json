@@ -1,0 +1,12 @@
+{
+  "name": "qr wait",
+  "channel": "weixin",
+  "upstreamVersion": "ilink",
+  "payload": {
+    "status": "wait"
+  },
+  "expected": {
+    "state": "pending",
+    "detail": "awaiting WeChat scan"
+  }
+}

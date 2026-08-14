@@ -10,6 +10,7 @@ import {
   AgentManager,
   HarnessAgentGateway,
   type AgentGateway,
+  type AgentRouteSpec,
   type GatewayAgentHandle,
 } from '../src/agent-manager.ts';
 import { AgentRouter } from '../src/agent-router.ts';
@@ -18,17 +19,19 @@ import { ChannelHarnessBridge } from '../src/bridge.ts';
 import { Config } from '../src/config.ts';
 import { ReplyRouter, splitMessage } from '../src/reply-router.ts';
 import { ReplyContextStore } from '../src/reply-context-store.ts';
-import { bindingKey, sessionKey, type SessionBinding } from '../src/session-router.ts';
+import { SESSION_BINDING_SCHEMA_VERSION, bindingKey, sessionKey, type SessionBinding } from '../src/session-router.ts';
 import { partsToText, toHarnessUserMessage } from '../src/message-converter.ts';
 import { startBridge } from '../src/lifecycle.ts';
 
+const defaultRoute: AgentRouteSpec = { preset: 'default' };
+
 function baseConfig(): Config {
   return Config({
-    defaultAgentId: 'default',
+    agent: { default: defaultRoute },
     routing: {
       mode: 'global',
       overrides: {
-        channel: { 'weixin': 'weixin-agent' },
+        channel: { weixin: { model: 'weixin-agent' } },
       },
     },
     bindingStore: { type: 'memory' },
@@ -41,7 +44,6 @@ function baseConfig(): Config {
     },
     maxConcurrency: 4,
     includeMetadataPrefix: true,
-    agentOptions: undefined,
   });
 }
 
@@ -52,20 +54,21 @@ const silentLogger = {
   error: () => {},
 };
 
-/** Minimal in-memory gateway recording every drive call. */
+/** Minimal in-memory gateway recording every drive call and its route. */
 class FakeGateway implements AgentGateway {
-  supportsResume = true;
+  canResumeValue = true;
+  existsValue = false;
+  failsPersistenceWith?: Error;
   live = new Map<string, GatewayAgentHandle>();
   createCalls: string[] = [];
   resumeCalls: string[] = [];
-  /** Gateway entry markers, recorded BEFORE any gate, so tests can observe
-   *  that a call started (and is waiting) independently of completion. */
+  createRoutes: (AgentRouteSpec | undefined)[] = [];
+  resumeRoutes: (AgentRouteSpec | undefined)[] = [];
   createStarts: string[] = [];
   resumeStarts: string[] = [];
   disposed: string[] = [];
   followups: { sessionId: string; message: unknown }[] = [];
   failResumeWith?: Error;
-  /** Optional hooks that block create/resume until released (concurrency tests). */
   createGate?: () => Promise<void>;
   resumeGate?: () => Promise<void>;
 
@@ -75,18 +78,29 @@ class FakeGateway implements AgentGateway {
     return { id: agent.id, followup: agent.followup, whenIdle: agent.whenIdle };
   }
 
-  async create(sessionId: string, agentId: string) {
+  canResume(): boolean {
+    return this.canResumeValue;
+  }
+
+  async exists(_sessionId: string): Promise<boolean> {
+    if (this.failsPersistenceWith) throw this.failsPersistenceWith;
+    return this.existsValue;
+  }
+
+  async create(sessionId: string, route: AgentRouteSpec) {
     this.createStarts.push(sessionId);
     if (this.createGate) await this.createGate();
     this.createCalls.push(sessionId);
+    this.createRoutes.push(route);
     return this.makeHandle(sessionId);
   }
 
-  async resume(sessionId: string) {
+  async resume(sessionId: string, route: AgentRouteSpec) {
     if (this.failResumeWith) throw this.failResumeWith;
     this.resumeStarts.push(sessionId);
     if (this.resumeGate) await this.resumeGate();
     this.resumeCalls.push(sessionId);
+    this.resumeRoutes.push(route);
     return this.makeHandle(sessionId);
   }
 
@@ -159,12 +173,7 @@ function fakeSession(id: string): Session {
 }
 
 function turnStartEvent(turn: number): SessionEvent<'turn/start'> {
-  return {
-    type: 'turn/start',
-    seq: 0,
-    time: Date.now(),
-    data: { turn },
-  };
+  return { type: 'turn/start', seq: 0, time: Date.now(), data: { turn } };
 }
 
 function chunkEvent(turn: number, text: string): SessionEvent<'assistant/chunk'> {
@@ -185,6 +194,21 @@ function turnEndEvent(turn: number): SessionEvent<'turn/end'> {
   };
 }
 
+function makeBinding(overrides: Partial<SessionBinding> = {}): SessionBinding {
+  return {
+    channelId: 'weixin',
+    accountId: 'main',
+    conversationId: 'user_123',
+    sessionId: 's1',
+    route: defaultRoute,
+    schemaVersion: SESSION_BINDING_SCHEMA_VERSION,
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
+  };
+}
+
+
 describe('session binding', () => {
   it('builds canonical channel:account:conversation[:thread] keys', () => {
     expect(sessionKey({ channelId: 'weixin', accountId: 'main', conversationId: 'u1' })).toBe(
@@ -198,25 +222,18 @@ describe('session binding', () => {
         threadId: 'th1',
       }),
     ).toBe('lark:t1:c1:th1');
-    expect(bindingKey({ channelId: 'qq', accountId: 'a', conversationId: 'g' } as SessionBinding)).toBe(
+    expect(bindingKey(makeBinding({ channelId: 'qq', accountId: 'a', conversationId: 'g' }))).toBe(
       'qq:a:g',
     );
   });
 
   it('MemoryBindingStore round-trips', async () => {
     const store = new MemoryBindingStore();
-    const binding: SessionBinding = {
-      channelId: 'weixin',
-      accountId: 'main',
-      conversationId: 'u1',
-      sessionId: 'ch-1',
-      createdAt: 1,
-      updatedAt: 1,
-    };
+    const binding = makeBinding();
     await store.put(binding);
-    expect(await store.get('weixin:main:u1')).toEqual(binding);
-    await store.delete('weixin:main:u1');
-    expect(await store.get('weixin:main:u1')).toBeUndefined();
+    expect(await store.get('weixin:main:user_123')).toEqual(binding);
+    await store.delete('weixin:main:user_123');
+    expect(await store.get('weixin:main:user_123')).toBeUndefined();
   });
 
   it('FileBindingStore persists across instances', async () => {
@@ -224,18 +241,11 @@ describe('session binding', () => {
     try {
       const file = join(dir, 'bindings.json');
       const store = new FileBindingStore(file);
-      const binding: SessionBinding = {
-        channelId: 'weixin',
-        accountId: 'main',
-        conversationId: 'u1',
-        sessionId: 'ch-1',
-        createdAt: 1,
-        updatedAt: 1,
-      };
+      const binding = makeBinding();
       await store.put(binding);
 
       const reopened = new FileBindingStore(file);
-      expect(await reopened.get('weixin:main:u1')).toEqual(binding);
+      expect(await reopened.get('weixin:main:user_123')).toEqual(binding);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -257,7 +267,7 @@ describe('AgentManager', () => {
       dispose: async () => {},
     });
     const manager = new AgentManager(gateway, silentLogger, 4);
-    const ref = await manager.resolve('s1', 'default');
+    const ref = await manager.resolve('s1', defaultRoute);
     expect(ref.sessionId).toBe('s1');
     expect(gateway.createCalls).toEqual([]);
     expect(gateway.resumeCalls).toEqual([]);
@@ -268,11 +278,9 @@ describe('AgentManager', () => {
   it('single-flights concurrent resolve for the same session', async () => {
     const manager = new AgentManager(gateway, silentLogger, 4);
     const [a, b] = await Promise.all([
-      manager.resolve('s1', 'default'),
-      manager.resolve('s1', 'default'),
+      manager.resolve('s1', defaultRoute),
+      manager.resolve('s1', defaultRoute),
     ]);
-    // resolve = live get → resume; both miss the live agent and share one
-    // in-flight resume.
     expect(gateway.resumeCalls).toEqual(['s1']);
     expect(gateway.createCalls).toEqual([]);
     expect(a.sessionId).toBe(b.sessionId);
@@ -280,14 +288,14 @@ describe('AgentManager', () => {
 
   it('resumes persisted sessions via resolve (existing conversation)', async () => {
     const manager = new AgentManager(gateway, silentLogger, 4);
-    await manager.resolve('s1', 'default');
+    await manager.resolve('s1', defaultRoute);
     expect(gateway.resumeCalls).toEqual(['s1']);
     expect(gateway.createCalls).toEqual([]);
   });
 
   it('create opens a NEW session directly (no resume)', async () => {
     const manager = new AgentManager(gateway, silentLogger, 4);
-    await manager.create('s1', 'default');
+    await manager.create('s1', defaultRoute);
     expect(gateway.createCalls).toEqual(['s1']);
     expect(gateway.resumeCalls).toEqual([]);
   });
@@ -295,8 +303,7 @@ describe('AgentManager', () => {
   it('existing binding + resume failure rejects loudly (no create fallback)', async () => {
     const manager = new AgentManager(gateway, silentLogger, 4);
     gateway.failResumeWith = new Error('session corruption: unsupported format');
-    await expect(manager.resolve('s1', 'default')).rejects.toThrow(/unsupported format/);
-    // Never silently downgrades to create.
+    await expect(manager.resolve('s1', defaultRoute)).rejects.toThrow(/unsupported format/);
     expect(gateway.createCalls).toEqual([]);
   });
 
@@ -308,7 +315,7 @@ describe('AgentManager', () => {
       dispose: async () => {},
     });
     const manager = new AgentManager(gateway, silentLogger, 4);
-    const ref = await manager.resolve('s1', 'default');
+    const ref = await manager.resolve('s1', defaultRoute);
     expect(ref.sessionId).toBe('s1');
     expect(gateway.createCalls).toEqual([]);
     expect(gateway.resumeCalls).toEqual([]);
@@ -316,8 +323,8 @@ describe('AgentManager', () => {
 
   it('disposes owned handles exactly once on disposeAll', async () => {
     const manager = new AgentManager(gateway, silentLogger, 4);
-    await manager.resolve('s1', 'default');
-    await manager.resolve('s2', 'default');
+    await manager.resolve('s1', defaultRoute);
+    await manager.resolve('s2', defaultRoute);
     await manager.disposeAll();
     expect(gateway.disposed.sort()).toEqual(['s1', 's2']);
     await manager.disposeAll();
@@ -327,21 +334,17 @@ describe('AgentManager', () => {
   it('rejects resolution after close', async () => {
     const manager = new AgentManager(gateway, silentLogger, 4);
     await manager.disposeAll();
-    await expect(manager.resolve('s1', 'default')).rejects.toThrow(/closed/);
+    await expect(manager.resolve('s1', defaultRoute)).rejects.toThrow(/closed/);
   });
 
   it('serializes gateway create/resume across sessions with maxConcurrency: 1', async () => {
     let release!: () => void;
-    // One shared gate: every gateway call awaits the same promise so a single
-    // release() unblocks them in FIFO order.
     const gate = new Promise<void>((resolve) => (release = resolve));
     gateway.resumeGate = () => gate;
     const manager = new AgentManager(gateway, silentLogger, 1);
 
-    const first = manager.resolve('s1', 'default');
-    const second = manager.resolve('s2', 'default');
-    // The first resolve holds the only slot; the second queues and must not
-    // reach the gateway until the first completes.
+    const first = manager.resolve('s1', defaultRoute);
+    const second = manager.resolve('s2', defaultRoute);
     await vi.waitFor(() => {
       expect(gateway.resumeStarts).toEqual(['s1']);
     });
@@ -362,41 +365,31 @@ describe('AgentManager', () => {
     gateway.resumeGate = () => gate;
     const manager = new AgentManager(gateway, silentLogger, 1);
 
-    const first = manager.resolve('s1', 'default');
-    const second = manager.resolve('s2', 'default');
+    const first = manager.resolve('s1', defaultRoute);
+    const second = manager.resolve('s2', defaultRoute);
     await vi.waitFor(() => {
       expect(gateway.resumeStarts).toEqual(['s1']);
     });
 
-    // disposeAll wakes the queued waiter; it re-checks `closed` and rejects.
     await manager.disposeAll();
     await expect(second).rejects.toThrow(/closed/);
 
-    release(); // let the in-flight resume settle so the test does not leak
+    release();
     await expect(first).resolves.toBeDefined();
   });
 });
 
 describe('AgentRouter', () => {
-  it('prioritizes binding > overrides > default', () => {
+  it('resolves to AgentRouteSpec with priority overrides > default, no agentId', () => {
     const router = new AgentRouter(baseConfig());
     expect(
       router.resolve({ channelId: 'weixin', accountId: 'main', conversationId: 'u1' }),
-    ).toBe('weixin-agent');
-    expect(
-      router.resolve({
-        channelId: 'weixin',
-        accountId: 'main',
-        conversationId: 'u1',
-        bindingAgentId: 'bound-agent',
-      }),
-    ).toBe('bound-agent');
+    ).toEqual({ model: 'weixin-agent' });
     expect(
       router.resolve({ channelId: 'lark', accountId: 'main', conversationId: 'u1' }),
-    ).toBe('default');
+    ).toEqual(defaultRoute);
   });
 });
-
 describe('message conversion', () => {
   it('converts structured parts to text and folds metadata', () => {
     const event = makeMessageEvent({
@@ -433,14 +426,7 @@ describe('message conversion', () => {
 describe('ReplyRouter', () => {
   it('buffers text-delta chunks and delivers once at turn/end', async () => {
     const adapter = new FakeAdapter('fake');
-    const binding: SessionBinding = {
-      channelId: 'fake',
-      accountId: 'main',
-      conversationId: 'u1',
-      sessionId: 's1',
-      createdAt: 1,
-      updatedAt: 1,
-    };
+    const binding = makeBinding({ channelId: 'fake' });
     const router = new ReplyRouter({
       config: baseConfig().reply,
       getAdapter: () => adapter as never,
@@ -496,14 +482,7 @@ describe('ReplyRouter', () => {
         };
       },
     };
-    const binding: SessionBinding = {
-      channelId: 'native',
-      accountId: 'main',
-      conversationId: 'u1',
-      sessionId: 's1',
-      createdAt: 1,
-      updatedAt: 1,
-    };
+    const binding = makeBinding({ channelId: 'native' });
     const router = new ReplyRouter({
       config: { ...baseConfig().reply, updateIntervalMs: 0 },
       getAdapter: () => adapter as never,
@@ -526,14 +505,7 @@ describe('ReplyRouter', () => {
 
   it('splits oversized messages across sends', async () => {
     const adapter = new FakeAdapter('fake');
-    const binding: SessionBinding = {
-      channelId: 'fake',
-      accountId: 'main',
-      conversationId: 'u1',
-      sessionId: 's1',
-      createdAt: 1,
-      updatedAt: 1,
-    };
+    const binding = makeBinding({ channelId: 'fake' });
     const router = new ReplyRouter({
       config: { ...baseConfig().reply, maxTextLength: 10 },
       getAdapter: () => adapter as never,
@@ -569,7 +541,6 @@ describe('ReplyRouter', () => {
     expect(pieces.every((p) => p.length <= 20)).toBe(true);
     expect(pieces.join('')).toBe('a'.repeat(100));
 
-    // A fence that fits within maxLength stays whole.
     const fenced = splitMessage(
       'para one.\n\n```js\nlet x = 1;\n```\n\npara two with padding',
       40,
@@ -577,7 +548,6 @@ describe('ReplyRouter', () => {
     );
     expect(fenced.some((p) => p.startsWith('```js') && p.endsWith('```'))).toBe(true);
 
-    // finalFlush: false drops a trailing partial piece.
     const trimmed = splitMessage('a'.repeat(30), 20, {
       ...cfg,
       finalFlush: false,
@@ -585,7 +555,6 @@ describe('ReplyRouter', () => {
     expect(trimmed.join('')).toBe('a'.repeat(20));
   });
 });
-
 describe('ChannelHarnessBridge end-to-end', () => {
   it('routes message.received to followup and registers a binding', async () => {
     const gateway = new FakeGateway();
@@ -605,13 +574,14 @@ describe('ChannelHarnessBridge end-to-end', () => {
     const event = makeMessageEvent();
     await bridge.handleChannelEvent(event);
 
-    // New conversation (no binding) → create, then persist the binding.
+    // New conversation (no binding) -> create, then persist the binding.
     expect(gateway.createCalls).toHaveLength(1);
     expect(gateway.resumeCalls).toHaveLength(0);
     expect(gateway.followups).toHaveLength(1);
     const binding = await bindingStore.get('weixin:main:user_123');
     expect(binding?.sessionId).toBe(gateway.createCalls[0]);
-    expect(binding?.agentId).toBe('weixin-agent');
+    expect(binding?.route).toEqual({ model: 'weixin-agent' });
+    expect(binding?.schemaVersion).toBe(2);
     expect(manager.bindingFor(binding!.sessionId)).toEqual(binding);
   });
 
@@ -636,8 +606,6 @@ describe('ChannelHarnessBridge end-to-end', () => {
   it('startBridge wires a Cordis context and drains on dispose', async () => {
     const ctx = new Context();
     new ChannelService(ctx);
-    // A real AgentRegistry with a stub factory makes `ctx.agents` usable
-    // without a full Harness loop.
     const agents = new AgentRegistry(ctx);
     agents.setFactory({
       createAgent: async (_owner, options) => ({
@@ -672,16 +640,7 @@ describe('ChannelHarnessBridge end-to-end', () => {
     try {
       const file = join(dir, 'bindings.json');
       const seed = new FileBindingStore(file);
-      const binding: SessionBinding = {
-        channelId: 'weixin',
-        accountId: 'main',
-        conversationId: 'user_123',
-        sessionId: 'seed-session',
-        agentId: 'weixin-agent',
-        createdAt: 1,
-        updatedAt: 1,
-      };
-      await seed.put(binding);
+      await seed.put(makeBinding({ conversationId: 'user_123', sessionId: 'seed-session' }));
 
       const ctx = new Context();
       new ChannelService(ctx);
@@ -716,15 +675,11 @@ describe('ChannelHarnessBridge end-to-end', () => {
       });
       await lifecycle.handleChannelEvent(makeMessageEvent());
 
-      // The turn starts streaming but has not ended when unload begins.
       const session = fakeSession('seed-session');
       ctx.emit('session/event', session, turnStartEvent(0));
       ctx.emit('session/event', session, chunkEvent(0, 'hello '));
 
       const disposePromise = lifecycle.dispose();
-      // Drain is now waiting on the agent whenIdle with the session/event
-      // listener still attached — a turn/end arriving now must finalize the
-      // reply instead of being dropped.
       await vi.waitFor(() => {
         expect(idleResolvers).toHaveLength(1);
       });
@@ -746,15 +701,7 @@ describe('ChannelHarnessBridge end-to-end', () => {
     try {
       const file = join(dir, 'bindings.json');
       const seed = new FileBindingStore(file);
-      await seed.put({
-        channelId: 'weixin',
-        accountId: 'main',
-        conversationId: 'user_123',
-        sessionId: 'seed-session',
-        agentId: 'weixin-agent',
-        createdAt: 1,
-        updatedAt: 1,
-      } satisfies SessionBinding);
+      await seed.put(makeBinding({ conversationId: 'user_123', sessionId: 'seed-session' }) satisfies SessionBinding);
 
       const ctx = new Context();
       new ChannelService(ctx);
@@ -786,8 +733,6 @@ describe('ChannelHarnessBridge end-to-end', () => {
       });
       await lifecycle.handleChannelEvent(makeMessageEvent());
 
-      // The turn streams a chunk but never emits turn/end; dispose must still
-      // flush the buffered content through flushAll.
       const session = fakeSession('seed-session');
       ctx.emit('session/event', session, turnStartEvent(0));
       ctx.emit('session/event', session, chunkEvent(0, 'partial reply'));
@@ -843,7 +788,6 @@ describe('ChannelHarnessBridge end-to-end', () => {
       const secondSessionId = await runBridge();
 
       expect(firstSessionId).toBeTruthy();
-      // The same conversation maps to the same sessionId across bridge restarts.
       expect(secondSessionId).toBe(firstSessionId);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -855,9 +799,8 @@ describe('HarnessAgentGateway against real dsh types', () => {
   it('maps agent methods onto the gateway surface (compile + basic shape)', () => {
     const ctx = new Context();
     new AgentRegistry(ctx);
-    const gateway = new HarnessAgentGateway(ctx, { model: 'deepseek-chat' });
-    expect(gateway.supportsResume).toBe(true);
-    // No live agents in a bare registry — get returns undefined.
+    const gateway = new HarnessAgentGateway(ctx);
+    expect(gateway.canResume()).toBe(false); // no persistence service mounted
     expect(gateway.get('s1')).toBeUndefined();
   });
 });
@@ -885,7 +828,6 @@ describe('bridge integration with ChannelService events', () => {
       void bridge.handleChannelEvent(event);
     });
 
-    // Simulate the platform delivering a message through the adapter context.
     const event = makeMessageEvent();
     await service.emit(event);
     await vi.waitFor(() => {

@@ -1,53 +1,90 @@
+/**
+ * Channel-weixin tests for the direct Tencent iLink client (WX0-WX6).
+ *
+ * Covers doc §34.3 unit cases (headers/X-WECHAT-UIN, base_info, QR state
+ * machine, redirect, verify code, credential store, cursor + crash replay,
+ * context token, mapper, dedup, send payload, AbortSignal, token redaction)
+ * plus adapter integration and the public ChannelAdapter contract suite.
+ */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { Context } from '@deepseek-ai/cordis';
-import { ChannelService, ChannelError, type MessageReceived } from '@dsh/channel-core';
+import { ChannelService, MemoryStorage, ChannelError } from '@dsh/channel-core';
+import type { ChannelAdapterContext, ChannelTarget } from '@dsh/channel-core';
 import {
   runChannelAdapterContract,
   createTestContext,
-  loadFixture,
-  makeChannelTarget,
   makeOutboundMessage,
 } from '@dsh/channel-testkit';
 import {
   Config,
   WeixinAdapter,
-  WeixinAuthManager,
-  InboundProcessor,
-  HttpWeixinUpstream,
-  mapInbound,
-  toTextPayload,
+  ILinkClient,
+  buildHeaders,
+  buildWechatUin,
+  clientVersionFromString,
+  buildBaseInfo,
+  WeixinQrAuth,
+  AccountCredentialStore,
+  SyncCursorStore,
+  ContextTokenStore,
+  DedupWindow,
   dedupKey,
-  apply,
-} from '../src/index.ts';
-import type { HttpTransport, HttpRequestInit } from '../src/index.ts';
-import type { WeixinUpstream } from '../src/index.ts';
-import type { WeixinConfig } from '../src/config.ts';
+  mapInbound,
+  OutboundSender,
+  buildSendTextPayload,
+  aes128Decrypt,
+  aes128Encrypt,
+  redactMessage,
+  type HttpTransport,
+} from '../src/index.js';
+import type { WeixinConfig } from '../src/config.js';
+import { loadFixture } from '@dsh/channel-testkit';
 
-/** Deterministic fake transport: routes keyed by path, records calls. */
-class FakeTransport implements HttpTransport {
-  routes = new Map<string, (init?: HttpRequestInit, signal?: AbortSignal) => unknown>();
-  calls: { path: string; init?: HttpRequestInit }[] = [];
+/* ------------------------------------------------------------------ */
+/* Fake transport routed by URL path                                   */
+/* ------------------------------------------------------------------ */
 
-  route(path: string, handler: (init?: HttpRequestInit, signal?: AbortSignal) => unknown): this {
-    this.routes.set(path, handler);
+interface FakeHandlerInit {
+  body?: unknown;
+  headers?: Record<string, string>;
+}
+
+export class FakeTransport implements HttpTransport {
+  routeByPath = new Map<string, (init?: FakeHandlerInit, signal?: AbortSignal) => unknown>();
+  calls: { url: string; init?: FakeHandlerInit; signal?: AbortSignal }[] = [];
+
+  route(path: string, handler: (init?: FakeHandlerInit, signal?: AbortSignal) => unknown): this {
+    this.routeByPath.set(path, handler);
     return this;
   }
 
-  request(path: string, init: HttpRequestInit = {}, signal?: AbortSignal): Promise<unknown> {
-    this.calls.push({ path, init });
+  async request(url: string, init?: FakeHandlerInit, signal?: AbortSignal): Promise<unknown> {
+    this.calls.push({ url, init, signal });
     if (signal?.aborted) {
-      return Promise.reject(new DOMException('Aborted', 'AbortError'));
+      throw new DOMException('Aborted', 'AbortError');
     }
-    const handler = this.routes.get(path);
-    if (!handler) return Promise.reject(new ChannelError('CHANNEL_ERROR', `no route for ${path}`));
-    try {
-      return Promise.resolve(handler(init, signal));
-    } catch (error) {
-      return Promise.reject(error);
+    const path = pathOf(url);
+    const handler = this.routeByPath.get(path);
+    if (!handler) {
+      throw new ChannelError('CHANNEL_ERROR', `no route for ${path}`);
     }
+    return handler(init, signal);
+  }
+
+  lastBody(path: string): any {
+    for (let i = this.calls.length - 1; i >= 0; i--) {
+      if (pathOf(this.calls[i]!.url).includes(path)) return (this.calls[i]!.init as any)?.body;
+    }
+    return undefined;
+  }
+}
+
+function pathOf(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.pathname + (u.search ? u.search : '');
+  } catch {
+    return url;
   }
 }
 
@@ -55,283 +92,314 @@ function makeConfig(overrides: Partial<WeixinConfig> = {}): WeixinConfig {
   return Config({
     enabled: true,
     accountId: 'main',
-    baseUrl: 'http://fake',
-    timeoutMs: 1000,
-    longPollTimeoutMs: 1000,
-    auth: {
-      statePath: undefined,
-      qrPollIntervalMs: 100,
-      qrExpireMs: 10000,
-    },
-    reconnect: {
-      enabled: false, // tests must not spin backoff retries
-      baseDelayMs: 1,
-      maxDelayMs: 10,
-      maxRetries: 2,
-    },
-    dedup: {
-      enabled: true,
-      windowMs: 5000,
-    },
+    ilink: { baseUrl: 'https://fake.ilink.test', cdnBaseUrl: 'https://fake.cdn.test', botAgent: 'DeepSeekHarness/0.8.1' },
+    network: { timeoutMs: 1000, longPollTimeoutMs: 1000 },
+    reconnect: { enabled: false, baseDelayMs: 1, maxDelayMs: 10 },
     ...overrides,
-  });
+  } as unknown as WeixinConfig);
 }
 
-/** Minimal upstream stub for auth-manager tests. */
-class StubUpstream implements WeixinUpstream {
-  loginResult = { qrUrl: 'https://qr.example/1', expiresAt: Date.now() + 60000 };
-  pollResult = { state: 'pending' as const };
-  pollError: Error | undefined;
-  receiveCalls = 0;
-
-  async login() {
-    return this.loginResult;
-  }
-  async pollAuth() {
-    if (this.pollError) throw this.pollError;
-    return this.pollResult;
-  }
-  async receive() {
-    this.receiveCalls += 1;
-  }
-  async sendText() {
-    return { ok: true };
-  }
+function target(conversationId: string): ChannelTarget {
+  return { channelId: 'weixin' as never, accountId: 'main' as never, conversationId: conversationId as never };
 }
 
-describe('mapper (fixture-driven)', () => {
-  it('maps inbound text fixture', async () => {
-    const fixture = await loadFixture('weixin', 'inbound-text');
-    const event = mapInbound(fixture.payload, { channel: 'weixin' as never, accountId: 'main' as never });
-    const expected = fixture.expected as MessageReceived;
-    expect(event.conversation).toEqual(expected.conversation);
-    expect(event.sender).toEqual(expected.sender);
-    expect(event.message.content).toEqual(expected.message.content);
-    // The text fixture carries no msgId, so the adapter synthesizes one.
-    expect(event.message.id).toMatch(/^wx-/);
-    expect(event.raw).toBe(fixture.payload);
+/* ------------------------------------------------------------------ */
+/* Unit: headers + X-WECHAT-UIN + base_info + clientVersion            */
+/* ------------------------------------------------------------------ */
+
+describe('iLink headers', () => {
+  it('builds the full shared header set', () => {
+    const headers = buildHeaders({ token: 'secret-token', routeTag: 'rt1', uin: 1234 });
+    expect(headers['Content-Type']).toBe('application/json');
+    expect(headers['AuthorizationType']).toBe('ilink_bot_token');
+    expect(headers['Authorization']).toBe('Bearer secret-token');
+    expect(headers['iLink-App-Id']).toBe('bot');
+    expect(headers['SKRouteTag']).toBe('rt1');
+    expect(headers['iLink-App-ClientVersion']).toMatch(/^\d+$/);
   });
 
-  it('maps inbound image fixture', async () => {
-    const fixture = await loadFixture('weixin', 'inbound-image');
-    const event = mapInbound(fixture.payload, { channel: 'weixin' as never, accountId: 'main' as never });
-    const expected = fixture.expected as MessageReceived;
-    expect(event.conversation).toEqual(expected.conversation);
-    expect(event.message.content).toEqual(expected.message.content);
+  it('omits Authorization when no token is supplied', () => {
+    const headers = buildHeaders({});
+    expect(headers['Authorization']).toBeUndefined();
+    expect(headers['AuthorizationType']).toBe('ilink_bot_token');
   });
 
-  it('maps inbound audio fixture', async () => {
-    const fixture = await loadFixture('weixin', 'inbound-audio');
-    const event = mapInbound(fixture.payload, { channel: 'weixin' as never, accountId: 'main' as never });
-    expect(event.message.content).toEqual((fixture.expected as MessageReceived).message.content);
+  it('X-WECHAT-UIN is decimal uint32 -> base64', () => {
+    const uin = buildWechatUin(1234);
+    expect(Buffer.from(uin, 'base64').toString('utf-8')).toBe('1234');
   });
 
-  it('maps unknown types to unsupported parts', async () => {
-    const fixture = await loadFixture('weixin', 'inbound-unknown');
-    const event = mapInbound(fixture.payload, { channel: 'weixin' as never, accountId: 'main' as never });
-    expect(event.message.content).toEqual((fixture.expected as MessageReceived).message.content);
-    expect(event.message.id).toMatch(/^wx-/);
+  it('clientVersion encodes 0x00MMNNPP', () => {
+    expect(clientVersionFromString('1.0.11')).toBe((1 << 16) | 11);
+    expect(clientVersionFromString('0.8.1')).toBe((8 << 8) | 1);
   });
 
-  it('toTextPayload joins text and non-text placeholders', () => {
-    const payload = toTextPayload(
-      { conversationId: 'u1' },
-      {
-        text: 'look ',
-        parts: [
-          { type: 'image', alt: 'chart' },
-          { type: 'audio' },
-          { type: 'location', latitude: 1, longitude: 2 },
-        ],
-      },
-    );
-    expect(payload).toEqual({
-      to: 'u1',
-      type: 'text',
-      content: 'look [image: chart][audio][location: 1,2]',
-    });
-  });
-
-  it('dedupKey is stable per msgId and falls back to a content hash', () => {
-    const raw = { type: 'text', fromUserName: 'u1', msgId: 'm1', content: 'x' };
-    expect(dedupKey(raw)).toBe('m1');
-    const noId = { type: 'text', fromUserName: 'u1', content: 'x' };
-    expect(dedupKey(noId)).toBe(dedupKey({ ...noId }));
+  it('buildBaseInfo sets bot_agent and channel_version', () => {
+    const info = buildBaseInfo({ channelVersion: '1.2.3', botAgent: 'DeepSeekHarness/2.0' });
+    expect(info.bot_agent).toBe('DeepSeekHarness/2.0');
+    expect(info.channel_version).toBe('1.2.3');
+    const fallback = buildBaseInfo({});
+    expect(fallback.bot_agent).toBe('DeepSeekHarness');
   });
 });
 
-describe('WeixinAuthManager', () => {
-  let upstream: StubUpstream;
-  let onChange: ReturnType<typeof vi.fn>;
+/* ------------------------------------------------------------------ */
+/* Unit: QR state machine (redirect, verify code, binded)              */
+/* ------------------------------------------------------------------ */
 
-  beforeEach(() => {
-    upstream = new StubUpstream();
-    onChange = vi.fn();
-  });
-
-  function manager(statePath?: string): WeixinAuthManager {
-    return new WeixinAuthManager({
-      upstream,
-      statePath,
-      now: () => 1000,
-      onAuthChange: onChange,
-    });
+describe('WeixinQrAuth', () => {
+  function makeAuth(transport: FakeTransport, baseUrl = 'https://fake.ilink.test') {
+    const client = new ILinkClient({ baseUrl, transport, timeoutMs: 1000, longPollTimeoutMs: 1000, now: () => 1000 });
+    return new WeixinQrAuth({ client, now: () => 1000 });
   }
 
-  it('beginAuth moves to pending and exposes a challenge', async () => {
-    const auth = manager();
+  it('beginAuth surfaces an AuthChallenge with qrUrl', async () => {
+    const transport = new FakeTransport();
+    transport.route('/ilink/bot/get_bot_qrcode?bot_type=3', () => ({ qrcode: 'qr1', qrcode_img_content: 'https://weixin.qq.com/q/xx' }));
+    const auth = makeAuth(transport);
     const challenge = await auth.beginAuth();
-    expect(challenge.qrUrl).toBe('https://qr.example/1');
-    expect(auth.getState().status).toBe('pending');
-    expect(onChange).toHaveBeenCalled();
+    expect(challenge.qrUrl).toBe('https://weixin.qq.com/q/xx');
+    expect(challenge.id).toBeTypeOf('string');
+    expect(challenge.expiresAt).toBeTypeOf('number');
   });
 
-  it('pollAuth transitions to authenticated and records the user', async () => {
-    const auth = manager();
-    upstream.pollResult = { state: 'authenticated', userId: 'wxid_main' };
+  it('pollAuth walk wait -> confirmed and keeps credentials', async () => {
+    const transport = new FakeTransport();
+    transport.route('/ilink/bot/get_bot_qrcode?bot_type=3', () => ({ qrcode: 'qr1', qrcode_img_content: 'u' }));
+    transport.route('/ilink/bot/get_qrcode_status?qrcode=qr1', () => ({
+      status: 'confirmed',
+      bot_token: 'tok-secret',
+      ilink_bot_id: 'bot-1',
+      baseurl: 'https://final.ilink.test',
+      ilink_user_id: 'wx-user',
+    }));
+    const auth = makeAuth(transport);
     const challenge = await auth.beginAuth();
-    const result = await auth.pollAuth(challenge);
-    expect(result.state).toBe('authenticated');
-    expect(auth.isAuthenticated).toBe(true);
-    expect(auth.getState().userId).toBe('wxid_main');
+    const poll = await auth.pollAuth(challenge);
+    expect(poll.state).toBe('authenticated');
+    const cred = auth.confirmedCredential;
+    expect(cred?.ilinkBotId).toBe('bot-1');
+    expect(cred?.baseUrl).toBe('https://final.ilink.test');
+    expect(cred?.token).toBe('tok-secret');
   });
 
-  it('pollAuth failure maps to failed', async () => {
-    const auth = manager();
-    upstream.pollError = new Error('boom');
+  it('updates the client baseUrl on scaned_but_redirect', async () => {
+    const transport = new FakeTransport();
+    transport.route('/ilink/bot/get_bot_qrcode?bot_type=3', () => ({ qrcode: 'qr1', qrcode_img_content: 'u' }));
+    transport.route('/ilink/bot/get_qrcode_status?qrcode=qr1', () => ({ status: 'scaned_but_redirect', redirect_host: 'ilink-idc.weixin.qq.com' }));
+    const client = new ILinkClient({ baseUrl: 'https://fake.ilink.test', transport, now: () => 1000 });
+    const auth = new WeixinQrAuth({ client, now: () => 1000 });
     const challenge = await auth.beginAuth();
-    const result = await auth.pollAuth(challenge);
-    expect(result.state).toBe('failed');
-    expect(result.detail).toBe('boom');
+    await auth.pollAuth(challenge);
+    expect(client.baseUrl).toBe('https://ilink-idc.weixin.qq.com');
+  });
+
+  it('need_verifycode surfaces pending; submitVerifyCode resumes', async () => {
+    const transport = new FakeTransport();
+    transport.route('/ilink/bot/get_bot_qrcode?bot_type=3', () => ({ qrcode: 'qr1', qrcode_img_content: 'u' }));
+    transport.route('/ilink/bot/get_qrcode_status?qrcode=qr1', () => ({ status: 'need_verifycode' }));
+    const auth = makeAuth(transport);
+    const challenge = await auth.beginAuth();
+    const poll = await auth.pollAuth(challenge);
+    expect(poll.state).toBe('pending');
+    auth.submitVerifyCode('123456');
+    transport.route('/ilink/bot/get_qrcode_status?qrcode=qr1&verify_code=123456', () => ({ status: 'confirmed', bot_token: 't', ilink_bot_id: 'b', baseurl: 'u' }));
+    const poll2 = await auth.pollAuth(challenge);
+    expect(poll2.state).toBe('authenticated');
+  });
+
+  it('binded_redirect reports authenticated alreadyBound', async () => {
+    const transport = new FakeTransport();
+    transport.route('/ilink/bot/get_bot_qrcode?bot_type=3', () => ({ qrcode: 'qr1', qrcode_img_content: 'u' }));
+    transport.route('/ilink/bot/get_qrcode_status?qrcode=qr1', () => ({ status: 'binded_redirect', redirect_host: 'h.example' }));
+    const auth = makeAuth(transport);
+    const challenge = await auth.beginAuth();
+    const poll = await auth.pollAuth(challenge);
+    expect(poll.state).toBe('authenticated');
+    expect(auth.getState().alreadyBound).toBe(true);
   });
 
   it('honors challenge expiry', async () => {
-    const auth = manager();
+    const transport = new FakeTransport();
+    transport.route('/ilink/bot/get_bot_qrcode?bot_type=3', () => ({ qrcode: 'qr1', qrcode_img_content: 'u' }));
+    const auth = makeAuth(transport);
     const challenge = await auth.beginAuth();
     const expired = await auth.pollAuth({ ...challenge, expiresAt: 0 });
     expect(expired.state).toBe('expired');
   });
+});
 
-  it('persists and restores authenticated state', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'wx-auth-'));
-    try {
-      const file = join(dir, 'state.json');
-      const auth = manager(file);
-      upstream.pollResult = { state: 'authenticated', userId: 'wxid_main' };
-      const challenge = await auth.beginAuth();
-      await auth.pollAuth(challenge);
-      await auth.save();
+/* ------------------------------------------------------------------ */
+/* Unit: credential store                                              */
+/* ------------------------------------------------------------------ */
 
-      const restored = new WeixinAuthManager({
-        upstream,
-        statePath: file,
-        onAuthChange: vi.fn(),
-      });
-      await restored.load();
-      expect(restored.isAuthenticated).toBe(true);
-      expect(restored.getState().userId).toBe('wxid_main');
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+describe('AccountCredentialStore', () => {
+  it('saves and loads a credential; token in secrets, meta in storage', async () => {
+    const secrets = new (await import('@dsh/channel-core')).MemorySecretStore();
+    const storage = new MemoryStorage();
+    const store = new AccountCredentialStore({ secrets, storage, accountId: 'main', now: () => 1700000000000 });
+    await store.save({ token: 'tok', ilinkBotId: 'bot-1', userId: 'u1', baseUrl: 'https://x' });
+    const loaded = await store.load();
+    expect(loaded?.token).toBe('tok');
+    expect(loaded?.ilinkBotId).toBe('bot-1');
+    expect(loaded?.baseUrl).toBe('https://x');
+    expect(loaded?.savedAt).toBeDefined();
+  });
+
+  it('returns undefined when corrupt meta', async () => {
+    const secrets = new (await import('@dsh/channel-core')).MemorySecretStore();
+    const storage = new MemoryStorage();
+    const store = new AccountCredentialStore({ secrets, storage, accountId: 'main', now: () => 1700000000000 });
+    await store.save({ token: 't', ilinkBotId: 'b', baseUrl: 'u' });
+    await storage.set('weixin:credential:main', 'not-json');
+    expect(await store.load()).toBeUndefined();
   });
 });
 
-describe('HttpWeixinUpstream (fake transport)', () => {
+/* ------------------------------------------------------------------ */
+/* Unit: cursor / context token / dedup / mapper                       */
+/* ------------------------------------------------------------------ */
+
+describe('SyncCursorStore', () => {
+  it('persists, loads, clears', async () => {
+    const storage = new MemoryStorage();
+    const c = new SyncCursorStore({ storage, accountId: 'main' });
+    await c.set('buf-42');
+    expect(await c.load()).toBe('buf-42');
+    await c.clear();
+    expect(await c.load()).toBe('');
+  });
+});
+
+describe('ContextTokenStore', () => {
+  it('stores/reads per-peer context tokens', async () => {
+    const storage = new MemoryStorage();
+    const s = new ContextTokenStore({ storage, accountId: 'main' });
+    await s.set('user_1', 'ctx-111');
+    expect(await s.get('user_1')).toBe('ctx-111');
+    expect(await s.get('other')).toBeUndefined();
+  });
+});
+
+describe('dedup', () => {
+  it('identical texts MUST NOT dedup (distinct seq/message_id)', () => {
+    const w = new DedupWindow({ windowMs: 60_000, now: () => 1000 });
+    const a = { seq: 1, message_id: 1, from_user_id: 'u', item_list: [{ type: 1, text_item: { text: '你好' } }] };
+    const b = { seq: 2, message_id: 2, from_user_id: 'u', item_list: [{ type: 1, text_item: { text: '你好' } }] };
+    expect(dedupKey(a)).not.toBe(dedupKey(b));
+    expect(w.check(dedupKey(a))).toBe(true);
+    expect(w.check(dedupKey(b))).toBe(true); // second identical-text message NOT dropped
+  });
+
+  it('same message_id MUST dedup', () => {
+    const w = new DedupWindow({ windowMs: 60_000, now: () => 1000 });
+    const a = { seq: 1, message_id: 7, from_user_id: 'u' };
+    const b = { seq: 1, message_id: 7, from_user_id: 'u' };
+    expect(dedupKey(a)).toBe(dedupKey(b));
+    expect(w.check(dedupKey(a))).toBe(true);
+    expect(w.check(dedupKey(b))).toBe(false);
+  });
+});
+
+describe('mapper', () => {
+  it('maps fixture-driven inbound text', async () => {
+    const fixture = await loadFixture('weixin', 'inbound-text');
+    const event = mapInbound(fixture.payload as any, { channel: 'weixin' as never, accountId: 'main' });
+    expect(event.message.id).toBe('wx-1001');
+    expect(event.message.content).toEqual([{ type: 'text', text: 'hello harness' }]);
+    expect(event.message.createdAt).toBe(1700000000000);
+    expect(event.conversation).toEqual({ id: 'user_123', type: 'dm' });
+    expect(event.sender).toEqual({ id: 'user_123' });
+  });
+
+  it('maps media items to CDN parts or unsupported placeholders', () => {
+    const img = mapInbound({ message_id: 1, from_user_id: 'u', item_list: [{ type: 2, image_item: { media: { full_url: 'x://c/img' } } }] } as any, { channel: 'weixin' as never, accountId: 'main' });
+    expect(img.message.content[0]!.type).toBe('image');
+    expect((img.message.content[0] as any).url).toBe('x://c/img');
+    const noCdn = mapInbound({ message_id: 2, from_user_id: 'u', item_list: [{ type: 2, image_item: {} }] } as any, { channel: 'weixin' as never, accountId: 'main' });
+    expect(noCdn.message.content[0]!.type).toBe('unsupported');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Unit: send payload + token redaction + AES                          */
+/* ------------------------------------------------------------------ */
+
+describe('send payload', () => {
+  it('builds a real iLink sendmessage payload', () => {
+    const payload = buildSendTextPayload({ to: 'user_1', text: 'hi', contextToken: 'ctx-9', runId: 'run-1' }) as any;
+    expect(payload.msg.to_user_id).toBe('user_1');
+    expect(payload.msg.message_type).toBe(2);
+    expect(payload.msg.message_state).toBe(2);
+    expect(payload.msg.item_list).toEqual([{ type: 1, text_item: { text: 'hi' } }]);
+    expect(payload.msg.client_id).toBeTypeOf('string');
+    expect(payload.msg.context_token).toBe('ctx-9');
+    expect(payload.msg.run_id).toBe('run-1');
+  });
+
+  it('OutboundSender sends through the client with context_token', async () => {
+    const transport = new FakeTransport();
+    transport.route('/ilink/bot/sendmessage', () => ({ ret: 0 }));
+    const client = new ILinkClient({ baseUrl: 'https://fake.ilink.test', transport, now: () => 1000 });
+    const storage = new MemoryStorage();
+    const ct = new ContextTokenStore({ storage, accountId: 'main' });
+    await ct.set('user_1', 'ctx-7');
+    const sender = new OutboundSender({ client, contextTokens: ct });
+    const result = await sender.send(target('user_1'), { text: 'hi' });
+    expect(result.delivered).toBe(true);
+    const body = transport.lastBody('sendmessage');
+    expect(body.msg.context_token).toBe('ctx-7');
+    expect(body.msg.to_user_id).toBe('user_1');
+  });
+});
+
+describe('token redaction', () => {
+  it('redacts tokens and context tokens from messages', () => {
+    expect(redactMessage('Authorization: Bearer secret=123')).toContain('<redacted>');
+    expect(redactMessage('context_token: abc')).toContain('<redacted>');
+    // redactMessage walks sensitive keywords; plain text preserved unless token-adjacent.
+    expect(redactMessage('no secret here')).not.toContain('\u003credacted\u003e');
+  });
+});
+
+describe('AES-128-ECB helpers', () => {
+  it('round-trips encrypt/decrypt with a 16-byte key', () => {
+    const key = Buffer.from('0123456789abcdef', 'utf-8');
+    const plain = Buffer.from('hello weixin cdn', 'utf-8');
+    const cipher = aes128Encrypt(plain, key);
+    expect(aes128Decrypt(cipher, key).toString('utf-8')).toBe('hello weixin cdn');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Adapter integration + contract suite                                */
+/* ------------------------------------------------------------------ */
+
+describe('WeixinAdapter integration', () => {
   let transport: FakeTransport;
 
   beforeEach(() => {
     transport = new FakeTransport();
   });
 
-  function upstream(): HttpWeixinUpstream {
-    return new HttpWeixinUpstream({ transport, longPollTimeoutMs: 500 });
+  function adapter(): WeixinAdapter {
+    return new WeixinAdapter(makeConfig(), { transport, now: () => 1700000000000, rand: () => 0.5 });
   }
 
-  it('login hits /qrcode', async () => {
-    transport.route('/qrcode', () => ({ qrUrl: 'q', expiresAt: 123 }));
-    const result = await upstream().login();
-    expect(result).toEqual({ qrUrl: 'q', expiresAt: 123 });
-    expect(transport.calls[0]?.path).toBe('/qrcode');
-  });
+  const credential = {
+    token: 'bot-token-secret',
+    ilinkBotId: 'bot-1',
+    userId: 'wx-user',
+    baseUrl: 'https://fake.ilink.test',
+    savedAt: new Date(1700000000000).toISOString(),
+  };
 
-  it('sendText posts to /message/send with the text payload', async () => {
-    transport.route('/message/send', (_init, _signal) => ({ id: 'out-1' }));
-    const result = await upstream().sendText('u1', 'hello');
-    expect(result).toEqual({ id: 'out-1' });
-    const call = transport.calls[0];
-    expect(call?.path).toBe('/message/send');
-    expect(call?.init?.body).toEqual({ to: 'u1', type: 'text', content: 'hello' });
-  });
-
-  it('receive loops, forwards messages, and exits on abort', async () => {
-    const controller = new AbortController();
-    let calls = 0;
-    transport.route('/messages/long-poll', (_init, signal) => {
-      calls += 1;
-      if (calls === 1) {
-        return { msgId: 'm1', fromUserName: 'u1', type: 'text', content: 'hi' };
-      }
-      controller.abort();
-      throw new ChannelError('CHANNEL_ERROR', 'abort loop');
-    });
-
-    const received: unknown[] = [];
-    await upstream().receive(controller.signal, (raw) => received.push(raw));
-    expect(received).toEqual([{ msgId: 'm1', fromUserName: 'u1', type: 'text', content: 'hi' }]);
-    expect(calls).toBeGreaterThanOrEqual(2);
-  });
-});
-
-describe('InboundProcessor dedup', () => {
-  it('forwards a repeated msgId only once within the window', async () => {
-    const service = new ChannelService(new Context());
-    const ctx = createTestContext(service);
-    const processor = new InboundProcessor({
-      ctx,
-      meta: { channel: 'weixin' as never, accountId: 'main' as never },
-      dedupEnabled: true,
-      dedupWindowMs: 5000,
-      now: () => 1000,
-    });
-    const listener = vi.fn();
-    service.on(listener);
-
-    const raw = { type: 'text', fromUserName: 'u1', msgId: 'dup-1', content: 'hi' };
-    await processor.handle(raw);
-    await processor.handle(raw);
-    expect(listener).toHaveBeenCalledTimes(1);
-    expect((listener.mock.calls[0]?.[0] as MessageReceived).message.id).toBe('dup-1');
-  });
-
-  it('forwards distinct messages', async () => {
-    const service = new ChannelService(new Context());
-    const ctx = createTestContext(service);
-    const processor = new InboundProcessor({
-      ctx,
-      meta: { channel: 'weixin' as never, accountId: 'main' as never },
-      dedupEnabled: true,
-      dedupWindowMs: 5000,
-    });
-    const listener = vi.fn();
-    service.on(listener);
-    await processor.handle({ type: 'text', fromUserName: 'u1', msgId: 'a', content: '1' });
-    await processor.handle({ type: 'text', fromUserName: 'u1', msgId: 'b', content: '2' });
-    expect(listener).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe('WeixinAdapter lifecycle', () => {
-  let transport: FakeTransport;
-
-  beforeEach(() => {
-    transport = new FakeTransport();
-  });
-
-  function adapter(overrides: Partial<WeixinConfig> = {}): WeixinAdapter {
-    return new WeixinAdapter(makeConfig(overrides), { transport, now: () => 1000 });
+  async function seedCredential(ctx: ChannelAdapterContext) {
+    const store = new AccountCredentialStore({ secrets: ctx.secrets, storage: ctx.storage, accountId: 'main', now: () => 1700000000000 });
+    await store.save(credential);
   }
 
-  it('reports down health until authenticated', async () => {
+  it('reports down/not-authenticated until a credential exists', async () => {
     const service = new ChannelService(new Context());
     const ctx = createTestContext(service);
     const a = adapter();
@@ -342,94 +410,105 @@ describe('WeixinAdapter lifecycle', () => {
     await a.stop();
   });
 
-  it('drives auth → connection → receive and forwards inbound messages', async () => {
+  it('starts with a stored credential and drives the monitor', async () => {
     const service = new ChannelService(new Context());
     const ctx = createTestContext(service);
-    const a = adapter();
-    await a.start(ctx);
-
-    transport.route('/qrcode', () => ({ qrUrl: 'q', expiresAt: Date.now() + 60000 }));
-    transport.route('/auth/status', () => ({ state: 'authenticated', userId: 'wxid_main' }));
-
-    const challenge = await a.beginAuth();
-    const poll = await a.pollAuth(challenge);
-    expect(poll.state).toBe('authenticated');
-    expect((await a.getHealth()).status).toBe('ok');
-
-    // Receive loop is live: first long-poll returns a message, then abort.
-    const controller = new AbortController();
+    await seedCredential(ctx);
     let calls = 0;
-    transport.route('/messages/long-poll', (_init, signal) => {
+    transport.route('/ilink/bot/msg/notifystart', () => ({ ret: 0 }));
+    transport.route('/ilink/bot/msg/notifystop', () => ({ ret: 0 }));
+    transport.route('/ilink/bot/getupdates', (init?: FakeHandlerInit) => {
       calls += 1;
       if (calls === 1) {
-        return { msgId: 'm1', fromUserName: 'user_123', type: 'text', content: 'hi' };
+        return {
+          ret: 0,
+          msgs: [{ message_id: 123, from_user_id: 'user_1', create_time_ms: 1700000000000, context_token: 'ctx-1', item_list: [{ type: 1, text_item: { text: 'hi' } }] }],
+          get_updates_buf: 'buf-next',
+        };
       }
-      controller.abort();
-      // ctx dispose aborts the loop signal as well.
-      void ctx.dispose();
-      throw new ChannelError('CHANNEL_ERROR', 'stop loop');
+      return new Promise(() => { /* hold long-poll open until abort */ });
     });
 
     const listener = vi.fn();
     service.on(listener);
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    await vi.waitFor(() => {
-      expect(listener.mock.calls.length).toBeGreaterThan(0);
-    }, { timeout: 2000 });
-    const event = listener.mock.calls.find(
-      (call) => (call[0] as MessageReceived).type === 'message.received',
-    )?.[0] as MessageReceived;
-    expect(event.message.id).toBe('m1');
-    expect(event.message.content).toEqual([{ type: 'text', text: 'hi' }]);
 
-    // Loop exits on abort without hanging.
-    await a.stop();
-    await a.stop(); // idempotent
-  }, 8000);
-
-  it('send resolves a SendResult through the driver', async () => {
-    const service = new ChannelService(new Context());
-    const ctx = createTestContext(service);
     const a = adapter();
     await a.start(ctx);
-    transport.route('/message/send', (_init, _signal) => ({ id: 'out-9' }));
-    const result = await a.send(makeChannelTarget(), makeOutboundMessage());
+    const health = await a.getHealth();
+    expect(health.status).toBe('ok');
+
+    await vi.waitFor(() => {
+      expect(listener.mock.calls.some((c) => (c[0] as any).type === 'message.received')).toBe(true);
+    }, { timeout: 3000 });
+
+    const event = listener.mock.calls.map((c) => c[0]).find((e) => (e as any).type === 'message.received') as any;
+    expect(event.message.id).toBe('wx-123');
+    expect(event.message.content).toEqual([{ type: 'text', text: 'hi' }]);
+
+    const ct = new ContextTokenStore({ storage: ctx.storage, accountId: 'main' });
+    expect(await ct.get('user_1')).toBe('ctx-1');
+
+    const cursor = new SyncCursorStore({ storage: ctx.storage, accountId: 'main' });
+    expect(await cursor.load()).toBe('buf-next');
+
+    await ctx.dispose();
+    await a.stop();
+  });
+
+  it('send reads context_token and builds a real sendmessage payload', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    await seedCredential(ctx);
+    const ct = new ContextTokenStore({ storage: ctx.storage, accountId: 'main' });
+    await ct.set('user_1', 'ctx-7');
+    transport.route('/ilink/bot/msg/notifystart', () => ({ ret: 0 }));
+    transport.route('/ilink/bot/getupdates', () => new Promise(() => {}));
+    transport.route('/ilink/bot/sendmessage', () => ({ ret: 0 }));
+
+    const a = adapter();
+    await a.start(ctx);
+    const result = await a.send(target('user_1'), { text: 'hi' });
     expect(result.delivered).toBe(true);
-    const call = transport.calls.find((c) => c.path === '/message/send');
-    expect(call?.init?.body).toMatchObject({ type: 'text', content: 'hi there' });
+    const body = transport.lastBody('sendmessage');
+    expect(body.msg.to_user_id).toBe('user_1');
+    expect(body.msg.context_token).toBe('ctx-7');
+    expect(body.msg.client_id).toBeTypeOf('string');
+    expect(body.msg.message_type).toBe(2);
+    expect(body.msg.item_list[0].type).toBe(1);
+    await ctx.dispose();
     await a.stop();
   });
 
   it('maps a failing send to a ChannelError', async () => {
     const service = new ChannelService(new Context());
     const ctx = createTestContext(service);
+    await seedCredential(ctx);
+    transport.route('/ilink/bot/msg/notifystart', () => ({ ret: 0 }));
+    transport.route('/ilink/bot/getupdates', () => new Promise(() => {}));
+    transport.route('/ilink/bot/sendmessage', () => ({ ret: 100, errmsg: 'boom' }));
     const a = adapter();
     await a.start(ctx);
-    transport.route('/message/send', () => {
-      throw new Error('gateway down');
-    });
-    await expect(a.send(makeChannelTarget(), makeOutboundMessage())).rejects.toMatchObject({
-      code: 'CHANNEL_SEND_FAILED',
-    });
+    await expect(a.send(target('user_1'), { text: 'hi' })).rejects.toMatchObject({ code: 'CHANNEL_SEND_FAILED' });
+    await ctx.dispose();
     await a.stop();
   });
 
   it('rejects send before start', async () => {
     const a = adapter();
-    await expect(a.send(makeChannelTarget(), makeOutboundMessage())).rejects.toMatchObject({
-      code: 'CHANNEL_NOT_STARTED',
-    });
+    await expect(a.send(target('u'), { text: 'hi' })).rejects.toMatchObject({ code: 'CHANNEL_NOT_STARTED' });
   });
 });
 
-describe('channel-weixin plugin', () => {
-  it('exports the cordis plugin shape', () => {
-    expect(apply).toBeTypeOf('function');
+describe('channel-weixin plugin + contract', () => {
+  it('exports the cordis plugin shape', async () => {
+    const mod = await import('../src/index.js');
+    expect(mod.apply).toBeTypeOf('function');
+    expect(mod.name).toBe('channel-weixin');
   });
 
   it('adapter contract suite passes', () => {
     const transport = new FakeTransport();
-    transport.route('/message/send', () => ({ id: 'out-x' }));
-    runChannelAdapterContract(new WeixinAdapter(makeConfig(), { transport }));
+    transport.route('/ilink/bot/sendmessage', () => ({ ret: 0 }));
+    runChannelAdapterContract(new WeixinAdapter(makeConfig(), { transport, now: () => 1700000000000 }));
   });
 });

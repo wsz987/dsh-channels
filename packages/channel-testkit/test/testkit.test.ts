@@ -288,10 +288,12 @@ describe('fixture loader', () => {
   it('loads and validates the repo weixin inbound-text fixture', async () => {
     const fixture = await loadFixture('weixin', 'inbound-text');
 
-    expect(fixture.name).toBe('inbound text');
+    expect(fixture.name).toBe('inbound text (iLink)');
     expect(fixture.channel).toBe('weixin');
-    expect(fixture.upstreamVersion).toBe('0.0.0-m0');
-    expect((fixture.payload as { content?: unknown }).content).toBe('hello harness');
+    expect(fixture.upstreamVersion).toBe('ilink');
+    // iLink text item shape: item_list[0].text_item.text
+    const itemList = (fixture.payload as { item_list?: { text_item?: { text?: string } }[] }).item_list;
+    expect(itemList?.[0]?.text_item?.text).toBe('hello harness');
     expect((fixture.expected as { type?: unknown }).type).toBe('message.received');
 
     validateFixture(fixture);
@@ -299,7 +301,7 @@ describe('fixture loader', () => {
 
   it('loads synchronously and tolerates the .json suffix', () => {
     const fixture: FixtureCase = loadFixtureSync('weixin', 'inbound-text.json');
-    expect(fixture.upstreamVersion).toBe('0.0.0-m0');
+    expect(fixture.upstreamVersion).toBe('ilink');
     expect(fixture.expected).toBeDefined();
   });
 

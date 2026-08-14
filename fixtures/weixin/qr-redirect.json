@@ -1,0 +1,13 @@
+{
+  "name": "qr scaned_but_redirect",
+  "channel": "weixin",
+  "upstreamVersion": "ilink",
+  "payload": {
+    "status": "scaned_but_redirect",
+    "redirect_host": "ilink-idc.weixin.qq.com"
+  },
+  "expected": {
+    "state": "pending",
+    "redirectHost": "ilink-idc.weixin.qq.com"
+  }
+}

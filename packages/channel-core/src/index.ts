@@ -17,6 +17,7 @@ export * from './errors.js';
 export * from './events.js';
 export * from './health.js';
 export * from './messages.js';
+export * from './mount.js';
 export * from './registry.js';
 export * from './reply.js';
 export * from './secrets.js';

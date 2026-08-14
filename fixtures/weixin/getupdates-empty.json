@@ -1,0 +1,17 @@
+{
+  "name": "getupdates empty",
+  "channel": "weixin",
+  "upstreamVersion": "ilink",
+  "payload": {
+    "ret": 0,
+    "msgs": [],
+    "get_updates_buf": "buf-0",
+    "longpolling_timeout_ms": 35000
+  },
+  "expected": {
+    "ret": 0,
+    "msgs": [],
+    "get_updates_buf": "buf-0",
+    "longpolling_timeout_ms": 35000
+  }
+}

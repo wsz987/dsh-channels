@@ -1,0 +1,14 @@
+{
+  "name": "stale token protocol error (-14)",
+  "channel": "weixin",
+  "upstreamVersion": "ilink",
+  "payload": {
+    "ret": -14,
+    "errcode": -14,
+    "errmsg": "session timeout"
+  },
+  "expected": {
+    "ret": -14,
+    "errcode": -14
+  }
+}

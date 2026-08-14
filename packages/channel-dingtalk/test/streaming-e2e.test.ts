@@ -14,7 +14,7 @@ import { ChannelService, ChannelError, type MessageReceived } from '@dsh/channel
 import { createTestContext } from '@dsh/channel-testkit';
 import { ReplyRouter } from '../../channel-harness/src/reply-router.ts';
 import { ReplyContextStore } from '../../channel-harness/src/reply-context-store.ts';
-import type { SessionBinding } from '../../channel-harness/src/session-router.ts';
+import { SESSION_BINDING_SCHEMA_VERSION, type SessionBinding } from '../../channel-harness/src/session-router.ts';
 import {
   Config,
   DingTalkAdapter,
@@ -95,6 +95,8 @@ function makeBinding(): SessionBinding {
     accountId: 'main',
     conversationId: 'conv_1',
     sessionId: 's1',
+    route: { preset: 'default' },
+    schemaVersion: SESSION_BINDING_SCHEMA_VERSION,
     createdAt: 1,
     updatedAt: 1,
   };

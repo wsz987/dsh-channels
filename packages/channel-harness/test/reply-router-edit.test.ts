@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
 import type { ChannelAdapter } from '@dsh/channel-core';
 import { ReplyRouter } from '../src/reply-router.ts';
-import type { SessionBinding } from '../src/session-router.ts';
+import { SESSION_BINDING_SCHEMA_VERSION, type SessionBinding } from '../src/session-router.ts';
 import { ReplyContextStore } from '../src/reply-context-store.ts';
 
 const silentLogger = {
@@ -123,6 +123,8 @@ function makeBinding(sessionId = 's1'): SessionBinding {
     accountId: 'main',
     conversationId: 'u1',
     sessionId,
+    route: { preset: 'default' },
+    schemaVersion: SESSION_BINDING_SCHEMA_VERSION,
     createdAt: 1,
     updatedAt: 1,
   };

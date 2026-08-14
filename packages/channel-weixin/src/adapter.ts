@@ -1,10 +1,15 @@
 /**
- * Weixin channel adapter.
+ * WeixinChannelAdapter — direct Tencent Weixin iLink client.
  *
- * Maps the weixin platform (through the upstream driver) to the Channel
- * Contract. All network/lifecycle resources live behind the upstream driver
- * and are aborted via the adapter context signal. The adapter never touches
- * Harness Agent APIs.
+ * Maps the iLink protocol to the stable Channel Contract:
+ * - start(): load credential -> unauthenticated if missing; else restore sync
+ *   cursor + context tokens -> notifyStart (best effort) -> start monitor.
+ * - send(): build the real sendmessage payload via OutboundSender.
+ * - beginAuth/pollAuth/submitVerifyCode: QR login.
+ * - stop(): abort monitor -> notifyStop (best effort).
+ *
+ * Endpoint knowledge lives behind the {@link ILinkClient}; this adapter owns
+ * lifecycle and credential wiring only.
  */
 import type {
   AuthChallenge,
@@ -19,17 +24,24 @@ import type {
 } from '@dsh/channel-core';
 import { ChannelError } from '@dsh/channel-core';
 import type { WeixinConfig } from './config.js';
-import { FetchTransport, type HttpTransport } from './transport.js';
-import { HttpWeixinUpstream, type WeixinUpstream } from './upstream.js';
-import { InboundProcessor } from './inbound.js';
-import { OutboundSender } from './outbound.js';
-import { WeixinAuthManager } from './auth.js';
+import { ILinkClient } from './ilink/client.js';
+import type { HttpTransport } from './transport.js';
+import { FetchTransport } from './transport.js';
+import { AccountCredentialStore } from './auth/account-store.js';
+import { WeixinQrAuth } from './auth/login.js';
+import { SyncCursorStore } from './storage/sync-cursor.js';
+import { ContextTokenStore } from './storage/context-token.js';
+import { WeixinMonitor } from './messaging/monitor.js';
+import { OutboundSender } from './messaging/send.js';
 import { manifest as weixinManifest, type WeixinManifest } from './manifest.js';
 
 export interface WeixinAdapterDeps {
+  /** Injectable transport (tests); defaults to FetchTransport. */
   transport?: HttpTransport;
   /** Injectable clock (tests). */
   now?: () => number;
+  /** Injectable random source for X-WECHAT-UIN (tests). */
+  rand?: () => number;
 }
 
 export class WeixinAdapter implements ChannelAdapter {
@@ -40,9 +52,9 @@ export class WeixinAdapter implements ChannelAdapter {
 
   readonly capabilities: ChannelCapabilities = {
     text: true,
-    image: true,
+    image: false,
     file: false,
-    audio: true,
+    audio: false,
     video: false,
     markdown: false,
     cards: false,
@@ -51,175 +63,210 @@ export class WeixinAdapter implements ChannelAdapter {
     streaming: 'buffered',
   };
 
-  private ctx?: ChannelAdapterContext;
-  private upstream: WeixinUpstream;
-  private auth!: WeixinAuthManager;
-  private inbound!: InboundProcessor;
-  private outbound!: OutboundSender;
-  private started = false;
-  private stopped = false;
-  private receiveLoop?: Promise<void>;
-  private connected = false;
+  private readonly config: WeixinConfig;
   private readonly now: () => number;
+  private readonly rand: () => number;
+  private readonly transport: HttpTransport;
 
-  constructor(private readonly config: WeixinConfig, deps: WeixinAdapterDeps = {}) {
+  private client?: ILinkClient;
+  private qrAuth?: WeixinQrAuth;
+  private credentialStore?: AccountCredentialStore;
+  private cursorStore?: SyncCursorStore;
+  private contextTokens?: ContextTokenStore;
+  private sender?: OutboundSender;
+  private monitor?: WeixinMonitor;
+
+  private ctx?: ChannelAdapterContext;
+  private started = false;
+  private connected = false;
+  private readonly startedAt: number;
+
+  constructor(config: WeixinConfig, deps: WeixinAdapterDeps = {}) {
+    this.config = config;
     this.now = deps.now ?? Date.now;
-    const transport = deps.transport ?? new FetchTransport(config.baseUrl, { timeoutMs: config.timeoutMs });
-    this.upstream = new HttpWeixinUpstream({ transport, longPollTimeoutMs: config.longPollTimeoutMs });
+    this.rand = deps.rand ?? Math.random;
+    this.transport = deps.transport ?? new FetchTransport({ timeoutMs: config.network?.timeoutMs ?? 15000 });
+    this.startedAt = this.now();
+  }
+
+  private requireStarted(): void {
+    if (!this.started || !this.client || !this.ctx) {
+      throw new ChannelError('CHANNEL_NOT_STARTED', 'weixin adapter is not started');
+    }
   }
 
   async start(ctx: ChannelAdapterContext): Promise<void> {
     if (this.started) return;
     this.ctx = ctx;
-    this.stopped = false;
-    this.auth = new WeixinAuthManager({
-      upstream: this.upstream,
-      statePath: this.config.auth.statePath,
-      now: this.now,
-      onAuthChange: (state) => {
-        if (state.status === 'authenticated') {
-          this.emitAuth('authenticated');
-        } else if (state.status === 'expired') {
-          this.emitAuth('expired');
-        }
-      },
-    });
-    this.inbound = new InboundProcessor({
-      ctx,
-      meta: { channel: this.id as never, accountId: this.config.accountId as never },
-      dedupEnabled: this.config.dedup.enabled,
-      dedupWindowMs: this.config.dedup.windowMs,
-      now: this.now,
-    });
-    this.outbound = new OutboundSender(this.upstream, ctx.logger);
 
-    await this.auth.load();
-    this.emitAuth(this.auth.getState().status);
-    if (this.auth.isAuthenticated) {
-      this.connected = true;
-      this.emitConnection('connected');
-      this.startReceiveLoop();
+    const ilink = this.config.ilink ?? { baseUrl: 'https://ilinkai.weixin.qq.com' };
+    this.client = new ILinkClient(
+      {
+        baseUrl: ilink.baseUrl,
+        cdnBaseUrl: ilink.cdnBaseUrl,
+        timeoutMs: this.config.network?.timeoutMs ?? 15000,
+        longPollTimeoutMs: this.config.network?.longPollTimeoutMs ?? 35000,
+        botAgent: ilink.botAgent ?? 'DeepSeekHarness/0.8.1',
+        transport: this.transport,
+        now: this.now,
+        rand: this.rand,
+      },
+      this.config.accountId,
+    );
+
+    this.credentialStore = new AccountCredentialStore({
+      secrets: ctx.secrets,
+      storage: ctx.storage,
+      accountId: this.config.accountId,
+      now: this.now,
+    });
+    this.cursorStore = new SyncCursorStore({ storage: ctx.storage, accountId: this.config.accountId });
+    this.contextTokens = new ContextTokenStore({ storage: ctx.storage, accountId: this.config.accountId });
+
+    // The outbound path is always wired so `send()` can work even before a
+    // credential is configured (the protocol omits the Authorization header).
+    this.sender = new OutboundSender({ client: this.client, contextTokens: this.contextTokens });
+
+    const credential = await this.credentialStore.load();
+    if (!credential) {
+      // Unauthenticated: allow beginAuth/pollAuth flow to configure later.
+      this.started = true;
+      this.emitConnection('disconnected');
+      return;
     }
+
+    this.client.setToken(credential.token);
+    if (credential.baseUrl) this.client.setBaseUrl(credential.baseUrl);
+
+    // notifyStart best effort, then start the monitor.
+    await this.startMonitor(ctx);
+
     this.started = true;
   }
 
+  /** Start the getUpdates monitor with the currently-wired credential. */
+  private async startMonitor(ctx: ChannelAdapterContext): Promise<void> {
+    if (this.monitor) return;
+    const monitor = new WeixinMonitor({
+      client: this.client!,
+      cursor: this.cursorStore!,
+      contextTokens: this.contextTokens!,
+      ctx,
+      meta: { channel: this.id as never, accountId: this.config.accountId },
+      reconnect: this.config.reconnect ?? { enabled: true, baseDelayMs: 2000, maxDelayMs: 30000 },
+      longPollTimeoutMs: this.config.network?.longPollTimeoutMs ?? 35000,
+      dedupWindowMs: 30_000,
+      now: this.now,
+      onConnectionChange: (state) => this.onConnectionChange(state),
+    });
+    this.monitor = monitor;
+    this.connected = true;
+    await monitor.start();
+  }
+
   async stop(): Promise<void> {
-    if (!this.started || this.stopped) return;
-    this.stopped = true;
+    if (!this.started) return;
+    const monitor = this.monitor;
+    if (monitor) {
+      try {
+        await monitor.stop();
+      } catch {
+        // best effort
+      }
+    }
+    this.monitor = undefined;
     this.started = false;
     this.connected = false;
-    // The owning fiber aborts the context signal first; the loop exits on it.
-    const loop = this.receiveLoop;
-    this.receiveLoop = undefined;
-    if (loop) await loop.catch(() => undefined);
-    this.emitConnection('closed');
   }
 
   async send(target: ChannelTarget, message: OutboundMessage): Promise<SendResult> {
-    if (!this.started || !this.outbound) {
-      throw new ChannelError('CHANNEL_NOT_STARTED', 'weixin adapter is not started');
+    this.requireStarted();
+    if (!this.sender) {
+      throw new ChannelError('CHANNEL_SEND_FAILED', 'weixin adapter is not authenticated');
     }
-    return this.outbound.send(target, message);
+    return this.sender.send(target, message);
   }
 
+  /** Begin QR login and return the Channel Contract AuthChallenge. */
   async beginAuth(): Promise<AuthChallenge> {
-    if (!this.auth) {
-      throw new ChannelError('CHANNEL_NOT_STARTED', 'weixin adapter is not started');
-    }
-    return this.auth.beginAuth();
+    this.requireStartedForAuth();
+    return this.qrAuth!.beginAuth();
   }
 
+  /** Poll the active QR challenge. */
   async pollAuth(challenge: AuthChallenge): Promise<AuthStatePoll> {
-    if (!this.auth) {
-      throw new ChannelError('CHANNEL_NOT_STARTED', 'weixin adapter is not started');
-    }
-    const result = await this.auth.pollAuth(challenge);
+    this.requireStartedForAuth();
+    const result = await this.qrAuth!.pollAuth(challenge);
     if (result.state === 'authenticated') {
-      this.connected = true;
-      this.emitConnection('connected');
-      this.startReceiveLoop();
-    } else if (result.state === 'expired' || result.state === 'failed') {
-      this.connected = false;
-      this.emitConnection('disconnected');
+      await this.persistCredentialFromAuth();
     }
     return result;
+  }
+
+  /** Submit a phone-verify code for the active QR challenge (adapter-specific). */
+  submitVerifyCode(code: string): void {
+    this.requireStartedForAuth();
+    this.qrAuth!.submitVerifyCode(code);
   }
 
   async getHealth(): Promise<ChannelHealth> {
     if (!this.started) {
       return { status: 'down', detail: 'weixin adapter is not started', authenticated: false };
     }
-    if (this.auth.isAuthenticated && this.connected) {
-      return { status: 'ok', detail: 'connected', connection: 'connected', authenticated: true };
+    if (!this.credentialStore) {
+      return { status: 'down', detail: 'weixin adapter is not initialized', authenticated: false };
     }
-    if (this.auth.isAuthenticated) {
-      return {
-        status: 'degraded',
-        detail: 'authenticated but receive loop down',
-        connection: 'disconnected',
-        authenticated: true,
-      };
+    const credential = await this.credentialStore.load().catch(() => undefined);
+    const authenticated = Boolean(credential?.token);
+    if (!authenticated) {
+      return { status: 'down', detail: 'weixin not authenticated', connection: 'disconnected', authenticated: false };
     }
-    return { status: 'down', detail: 'not authenticated', authenticated: false };
+    return {
+      status: this.connected ? 'ok' : 'degraded',
+      detail: this.connected ? 'connected' : 'authenticated but receive loop down',
+      connection: this.connected ? 'connected' : 'disconnected',
+      authenticated: true,
+    };
   }
 
-  /** Long-poll receive loop with exponential backoff on failure. */
-  startReceiveLoop(): void {
-    if (this.receiveLoop) return;
-    this.receiveLoop = this.runReceiveLoop();
+  /** Expose the underlying client (tests introspection). */
+  get_iLinkClient(): ILinkClient | undefined {
+    return this.client;
   }
 
-  private async runReceiveLoop(): Promise<void> {
-    let attempt = 0;
-    while (!this.stopped && !this.aborted()) {
-      try {
-        await this.upstream.receive(this.ctx!.signal, (raw) => {
-          void this.inbound.handle(raw).catch((error) => {
-            this.ctx!.logger.error('[channel-weixin] inbound handling failed', error);
-          });
-        });
-        attempt = 0;
-      } catch (error) {
-        if (this.stopped || this.aborted()) break;
-        attempt += 1;
-        this.connected = false;
-        this.emitConnection('reconnecting');
-        if (this.config.reconnect.enabled && attempt > this.config.reconnect.maxRetries) {
-          this.ctx!.logger.warn('[channel-weixin] reconnect budget exhausted');
-          this.emitConnection('disconnected');
-          break;
-        }
-        const delay = Math.min(
-          this.config.reconnect.baseDelayMs * 2 ** Math.min(attempt - 1, 8),
-          this.config.reconnect.maxDelayMs,
-        );
-        this.ctx!.logger.warn(`[channel-weixin] receive loop error; retry in ${delay}ms`, error);
-        await sleep(delay, this.ctx!.signal);
-      }
+  /** Persist the QR-confirmed credential into the store. */
+  private async persistCredentialFromAuth(): Promise<void> {
+    const credential = this.qrAuth!.confirmedCredential;
+    if (!credential || !this.credentialStore) return;
+    await this.credentialStore.save({
+      token: credential.token,
+      ilinkBotId: credential.ilinkBotId,
+      userId: credential.userId,
+      baseUrl: credential.baseUrl || this.client!.baseUrl,
+      savedAt: new Date(this.now()).toISOString(),
+    });
+    this.client!.setToken(credential.token);
+    this.client!.setBaseUrl(credential.baseUrl || this.client!.baseUrl);
+    // (Re)wire the send path now that we have a token.
+    if (!this.sender && this.contextTokens) {
+      this.sender = new OutboundSender({ client: this.client!, contextTokens: this.contextTokens, runId: undefined });
     }
-    this.connected = false;
-    if (!this.stopped && !this.aborted()) {
-      this.emitConnection('disconnected');
+    // Start the monitor after a fresh QR login.
+    if (this.started && this.ctx) {
+      await this.startMonitor(this.ctx);
     }
   }
 
-  private aborted(): boolean {
-    return this.ctx?.signal.aborted ?? false;
+  private requireStartedForAuth(): void {
+    if (!this.ctx || !this.client) {
+      throw new ChannelError('CHANNEL_NOT_STARTED', 'weixin adapter is not started');
+    }
+    if (!this.qrAuth) {
+      this.qrAuth = new WeixinQrAuth({ client: this.client, now: this.now });
+    }
   }
 
-  private emitAuth(state: 'unknown' | 'pending' | 'authenticated' | 'expired' | 'failed'): void {
-    if (!this.ctx) return;
-    void this.ctx
-      .emit({
-        type: 'auth.changed',
-        channel: this.id as never,
-        accountId: this.config.accountId as never,
-        state,
-      })
-      .catch(() => undefined);
-  }
-
-  private emitConnection(state: 'connected' | 'connecting' | 'reconnecting' | 'disconnected' | 'closed'): void {
+  private emitConnection(state: 'connected' | 'reconnecting' | 'disconnected'): void {
     if (!this.ctx) return;
     void this.ctx
       .emit({
@@ -230,22 +277,9 @@ export class WeixinAdapter implements ChannelAdapter {
       })
       .catch(() => undefined);
   }
-}
 
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal?.aborted) {
-      resolve();
-      return;
-    }
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      resolve();
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
+  private onConnectionChange(state: 'connected' | 'reconnecting' | 'disconnected'): void {
+    this.connected = state === 'connected';
+    this.emitConnection(state);
+  }
 }

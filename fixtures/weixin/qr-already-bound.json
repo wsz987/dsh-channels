@@ -1,0 +1,13 @@
+{
+  "name": "qr binded_redirect",
+  "channel": "weixin",
+  "upstreamVersion": "ilink",
+  "payload": {
+    "status": "binded_redirect",
+    "redirect_host": "ilink-idc.weixin.qq.com"
+  },
+  "expected": {
+    "state": "authenticated",
+    "alreadyBound": true
+  }
+}

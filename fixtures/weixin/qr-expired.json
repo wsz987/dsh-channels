@@ -1,0 +1,12 @@
+{
+  "name": "qr expired",
+  "channel": "weixin",
+  "upstreamVersion": "ilink",
+  "payload": {
+    "status": "expired"
+  },
+  "expected": {
+    "state": "expired",
+    "detail": "weixin QR code expired"
+  }
+}

@@ -23,7 +23,7 @@ import {
   type AgentGateway,
   type GatewayAgentHandle,
 } from '../../channel-harness/src/agent-manager.ts';
-import { AgentRouter } from '../../channel-harness/src/agent-router.ts';
+import { AgentRouter, type AgentRouteSpec } from '../../channel-harness/src/agent-router.ts';
 import { MemoryBindingStore } from '../../channel-harness/src/binding-store.ts';
 import { ChannelHarnessBridge } from '../../channel-harness/src/bridge.ts';
 import { Config as HarnessConfig } from '../../channel-harness/src/config.ts';
@@ -33,7 +33,6 @@ import { mapInbound } from '../src/mapper.ts';
 
 /** Minimal in-memory gateway recording every drive call. */
 class FakeGateway implements AgentGateway {
-  supportsResume = true;
   live = new Map<string, GatewayAgentHandle>();
   createCalls: string[] = [];
   resumeCalls: string[] = [];
@@ -45,12 +44,20 @@ class FakeGateway implements AgentGateway {
     return { id: agent.id, followup: agent.followup, whenIdle: agent.whenIdle };
   }
 
-  async create(sessionId: string, _agentId: string) {
+  canResume(): boolean {
+    return true;
+  }
+
+  async exists(): Promise<boolean> {
+    return false;
+  }
+
+  async create(sessionId: string, _route: AgentRouteSpec) {
     this.createCalls.push(sessionId);
     return this.makeHandle(sessionId);
   }
 
-  async resume(sessionId: string) {
+  async resume(sessionId: string, _route: AgentRouteSpec) {
     this.resumeCalls.push(sessionId);
     return this.makeHandle(sessionId);
   }
@@ -80,7 +87,7 @@ const silentLogger = {
 
 function harnessConfig() {
   return HarnessConfig({
-    defaultAgentId: 'default',
+    agent: { default: { preset: 'default' } },
     routing: {
       mode: 'global',
       overrides: {},
@@ -95,7 +102,6 @@ function harnessConfig() {
     },
     maxConcurrency: 4,
     includeMetadataPrefix: true,
-    agentOptions: undefined,
   });
 }
 

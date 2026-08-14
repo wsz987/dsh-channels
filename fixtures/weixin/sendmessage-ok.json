@@ -1,0 +1,11 @@
+{
+  "name": "sendmessage ok",
+  "channel": "weixin",
+  "upstreamVersion": "ilink",
+  "payload": {
+    "ret": 0
+  },
+  "expected": {
+    "ret": 0
+  }
+}

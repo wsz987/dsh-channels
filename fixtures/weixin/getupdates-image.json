@@ -1,0 +1,35 @@
+{
+  "name": "getupdates image (CDN stub)",
+  "channel": "weixin",
+  "upstreamVersion": "ilink",
+  "payload": {
+    "ret": 0,
+    "msgs": [
+      {
+        "seq": 2,
+        "message_id": 4004,
+        "from_user_id": "user_9",
+        "to_user_id": "bot_abc",
+        "create_time_ms": 1700000003000,
+        "item_list": [
+          {
+            "type": 2,
+            "image_item": {
+              "media": {
+                "full_url": "https://novac2c.cdn.weixin.qq.com/c2c/img"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "get_updates_buf": "buf-2"
+  },
+  "expected": {
+    "ret": 0,
+    "msgIds": [
+      "wx-4004"
+    ],
+    "partType": "image"
+  }
+}

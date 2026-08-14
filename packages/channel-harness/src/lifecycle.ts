@@ -1,24 +1,30 @@
 /**
- * Bridge lifecycle assembly.
+ * Bridge lifecycle assembly (doc §4 / §40).
  *
- * `startBridge(ctx, config)` wires everything together and returns a
- * disposer with the mandated stop order (execution plan Phase 5.4):
+ * `startBridge(ctx, config, persistence?)` wires everything together and
+ * returns a disposer with the mandated stop order (doc 4.3):
  * 1. stop new inbound (unregister the ChannelService listener);
- * 2. keep the `session/event` listener attached and drain active turns
- *    (`whenIdle`, bounded by a timeout) so streaming replies can still
- *    finalize via `turn/end`;
- * 3. flush any replies still marked active (`ReplyRouter.flushAll`);
- * 4. stop listening to `session/event`;
- * 5. dispose all owned agent handles;
- * 6. dispose the ReplyRouter (clear timers).
+ * 2. drain active turns (`whenIdle`, bounded by a timeout);
+ * 3. RECONCILE replies from the Session durable log — final-reply correctness
+ *    comes from the (durable) Session log, not from the `session/event`
+ *    listener still being attached;
+ * 4. flush any replies still marked active (`ReplyRouter.flushAll`);
+ * 5. stop listening to `session/event`;
+ * 6. dispose all owned agent handles;
+ * 7. dispose the ReplyRouter (clear timers).
  *
- * It also registers the two reply-context correlation listeners
- * (`agent/inbox/claimed` → `ReplyContextStore.claim`, `agent/inbox/discarded`
- * → `ReplyContextStore.discard`) on the Cordis context. They are plain
- * `ctx.on` (auto-disposed with the context) and stay active for the whole
- * bridge lifetime so every message↔turn correlation is captured.
+ * Persistence is an OPTIONAL capability resolved at the use site: the caller
+ * (plugin) queries `ctx.get('sessionPersistence')`, and the gateway's
+ * `canResume()` reflects whether it is present.
+ *
+ * Two reply-context correlation listeners (`agent/inbox/claimed` and
+ * `agent/inbox/discarded`) are registered on the Cordis context; they are
+ * plain `ctx.on`, so they auto-dispose with the context and stay active for
+ * the whole bridge lifetime.
  */
 import type { Context } from '@deepseek-ai/cordis';
+import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence';
+import { SessionId, type Session, type SessionStore } from '@deepseek-ai/dsh-session';
 import type { ChannelAdapter, ChannelEvent, ChannelLogger } from '@dsh/channel-core';
 import type { Config } from './config.js';
 import { createBindingStore } from './binding-store.js';
@@ -35,26 +41,21 @@ export interface BridgeLifecycle {
 
 const DRAIN_TIMEOUT_MS = 5000;
 
-export function startBridge(ctx: Context, config: Config): BridgeLifecycle {
+export function startBridge(
+  ctx: Context,
+  config: Config,
+  persistence?: SessionPersistence | undefined,
+): BridgeLifecycle {
   const logger: ChannelLogger = ctx.logger('channel-harness');
   const bindingStore = createBindingStore(config.bindingStore);
-  const agentGateway = new HarnessAgentGateway(ctx, config.agentOptions);
+  const agentGateway = new HarnessAgentGateway(ctx, persistence);
   const agentManager = new AgentManager(agentGateway, logger, config.maxConcurrency);
   const agentRouter = new AgentRouter(config);
   const getAdapter = (channelId: string): ChannelAdapter | undefined =>
     ctx.channels.get(channelId);
 
-  // One shared ReplyContextStore: the bridge registers per-message reply
-  // context (keyed by Harness UserMessage id), the `agent/inbox/claimed`
-  // listener claims it into an active `sessionId`+`turn` slot, and the reply
-  // router resolves it lazily when chunks flow.
   const replyContexts = new ReplyContextStore();
 
-  // Correlation listeners (v1.1 §15/§18/§19). They are plain `ctx.on` and
-  // therefore auto-dispose with the context, but they must stay active for the
-  // WHOLE bridge lifetime (not just during drain) — a turn claimed while the
-  // plugin is still live must correlate. Registered at the top level
-  // (outside the effect) so they are not tied to any drain window.
   ctx.on(
     'agent/inbox/claimed',
     ({ agent, message, turn }: { agent: { session: { id: string } }; message: { id: string }; turn: number }) => {
@@ -90,8 +91,6 @@ export function startBridge(ctx: Context, config: Config): BridgeLifecycle {
     replyContexts,
     logger,
   });
-  // Return the promise so `ChannelService.emit` awaits the bridge and can
-  // surface async failures to the emitting adapter instead of swallowing them.
   const stopInbound = ctx.channels.on((event) => bridge.handleChannelEvent(event));
 
   let disposed = false;
@@ -101,18 +100,20 @@ export function startBridge(ctx: Context, config: Config): BridgeLifecycle {
     disposed = true;
     // 1. Stop new inbound (adapter events no longer reach the bridge).
     stopInbound();
-    // 2. Keep the `session/event` listener attached and drain active turns
-    //    with a bounded wait, so a turn still streaming at unload can still
-    //    deliver its `turn/end` (and final chunks) through the reply pipeline.
+    // 2. Drain active turns with a bounded wait (the session/event listener is
+    //    still attached here, but we do NOT depend on it for final-reply
+    //    correctness).
     await drainActiveTurns(agentManager, replyRouter, logger);
-    // 3. Finalize any replies still marked active whose `turn/end` never
-    //    arrived (deliver buffered/final text or fail the handle).
+    // 3. RECONCILE replies from the Session durable log (final text delivery
+    //    does NOT rely on the listener still being attached).
+    await reconcileReplies(ctx, persistence, agentManager, replyRouter, logger);
+    // 4. Finalize any replies still marked active whose turn/end never arrived.
     await replyRouter.flushAll();
-    // 4. Stop listening to `session/event`.
+    // 5. Stop listening to session/event.
     stopListening();
-    // 5. Dispose owned agent handles (each exactly once).
+    // 6. Dispose owned agent handles (each exactly once).
     await agentManager.disposeAll();
-    // 6. Dispose the reply router (clear timers).
+    // 7. Dispose the reply router (clear timers).
     replyRouter.dispose();
   }
 
@@ -141,6 +142,40 @@ async function drainActiveTurns(
   );
 }
 
+/**
+ * Reconcile every active session's reply from the durable log. Reads the live
+ * Session when it is still in the store; otherwise inspects persistence. Skips
+ * gracefully when neither is available. Final-reply correctness comes from the
+ * Session log, not from the still-attached event listener.
+ */
+async function reconcileReplies(
+  ctx: Context,
+  persistence: SessionPersistence | undefined,
+  agentManager: AgentManager,
+  replyRouter: ReplyRouter,
+  logger: ChannelLogger,
+): Promise<void> {
+  const sessionIds = agentManager.activeSessions();
+  if (sessionIds.length === 0) return;
+  const sessions = ctx.get('sessions') as SessionStore | undefined;
+  for (const sessionId of sessionIds) {
+    try {
+      const live = sessions?.get(SessionId(sessionId)) as Session | undefined;
+      if (live) {
+        await replyRouter.reconcileSession({ id: sessionId, events: live.events });
+        continue;
+      }
+      if (persistence) {
+        const inspection = await persistence.inspect(SessionId(sessionId));
+        await replyRouter.reconcileSession({ id: sessionId, events: inspection.events });
+      }
+      // else: no live session and no persistence — skip gracefully.
+    } catch (error) {
+      logger.warn(`[channel-harness] reconcile failed for session '${sessionId}'`, error);
+    }
+  }
+}
+
 /** Resolve true when the timeout elapses before the promise settles. */
 function withTimeout(promise: Promise<void>, ms: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -164,3 +199,4 @@ function withTimeout(promise: Promise<void>, ms: number): Promise<boolean> {
     );
   });
 }
+

@@ -1,0 +1,32 @@
+{
+  "name": "getupdates text",
+  "channel": "weixin",
+  "upstreamVersion": "ilink",
+  "payload": {
+    "ret": 0,
+    "msgs": [
+      {
+        "seq": 1,
+        "message_id": 3003,
+        "from_user_id": "user_9",
+        "to_user_id": "bot_abc",
+        "create_time_ms": 1700000002000,
+        "context_token": "ctx-1",
+        "item_list": [
+          {
+            "type": 1,
+            "text_item": {
+              "text": "hi"
+            }
+          }
+        ]
+      }
+    ],
+    "get_updates_buf": "buf-1"
+  },
+  "expected": {
+    "ret": 0,
+    "msgCount": 1,
+    "get_updates_buf": "buf-1"
+  }
+}

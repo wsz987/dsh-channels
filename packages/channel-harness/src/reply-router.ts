@@ -134,6 +134,64 @@ export class ReplyRouter {
     }
   }
 
+  /**
+   * Durable-log reconcile (doc §4.3 / §4.4): deliver the final assistant text
+   * for the last unfinished turn straight from the Session durable log, even
+   * when the `session/event` listener is no longer attached.
+   *
+   * Finds the last `turn/start` with no matching `turn/end`; if the
+   * ReplyRouter already holds an active reply for it, finalizes normally.
+   * Otherwise it rebuilds the assistant text by replaying the turn's
+   * `assistant/chunk` text-delta events (falling back to the
+   * `assistant/message` text) and delivers it via `adapter.send` (buffered
+   * strategy), then finishes/cleans up. The Session log is the ONLY source of
+   * transcript truth — reconcile never maintains a second copy.
+   */
+  async reconcileSession(session: { id: string; events: readonly SessionEvent[] }): Promise<void> {
+    const sessionId = String(session.id);
+    const unfinished = lastUnfinishedTurn(session.events);
+    if (!unfinished) return; // no unfinished turn to reconcile
+    const { turn } = unfinished;
+    const rebuilt = rebuildAssistantText(session.events, turn);
+
+    const active = this.active.get(sessionId);
+    if (active && !active.finished) {
+      // Already tracking this reply — finalize it normally with the durable
+      // text as the authoritative content.
+      active.buffer = rebuilt;
+      if (rebuilt) active.finalText = rebuilt;
+      await this.finalize(active, turn);
+      return;
+    }
+
+    if (!rebuilt) {
+      this.options.replyContexts.releaseTurn(sessionId, turn);
+      return;
+    }
+
+    const binding = this.options.getBinding(sessionId);
+    if (!binding) {
+      this.options.logger.warn(`[channel-harness] reconcile: no session binding for '${sessionId}'`);
+      this.options.replyContexts.releaseTurn(sessionId, turn);
+      return;
+    }
+    const adapter = this.options.getAdapter(binding.channelId);
+    if (!adapter) {
+      this.options.logger.warn(
+        `[channel-harness] reconcile: no adapter for channel '${binding.channelId}'`,
+      );
+      this.options.replyContexts.releaseTurn(sessionId, turn);
+      return;
+    }
+    if (active?.handle) {
+      // Deliver the missing remainder through the already-open reply handle.
+      await active.handle.finish(rebuilt ? { text: rebuilt } : undefined).catch(() => {});
+    } else {
+      await this.deliver(adapter, targetFor(binding, this.options.replyContexts.getTurn(sessionId, turn)), rebuilt);
+    }
+    this.options.replyContexts.releaseTurn(sessionId, turn);
+  }
+
   /** Clear all timers and drop active replies. */
   dispose(): void {
     for (const active of this.active.values()) {
@@ -409,6 +467,46 @@ function targetFor(binding: SessionBinding, context?: ChannelReplyContext): Chan
     }
   }
   return target;
+}
+
+/**
+ * Find the last turn that started but never ended. Returns its turn number, or
+ * `undefined` when every opened turn was closed.
+ */
+function lastUnfinishedTurn(events: readonly SessionEvent[]): { turn: number } | undefined {
+  let lastOpen: number | undefined;
+  for (const event of events) {
+    if (event.type === 'turn/start') {
+      lastOpen = event.data.turn;
+    } else if (event.type === 'turn/end' && event.data.turn === lastOpen) {
+      lastOpen = undefined;
+    }
+  }
+  return lastOpen === undefined ? undefined : { turn: lastOpen };
+}
+
+/**
+ * Rebuild the assistant text for one turn by replaying its `assistant/chunk`
+ * text-delta events (in seq order), falling back to the `assistant/message`
+ * text when no deltas flowed.
+ */
+function rebuildAssistantText(events: readonly SessionEvent[], turn: number): string {
+  let text = '';
+  let sawDelta = false;
+  for (const event of events) {
+    if (event.type === 'assistant/chunk' && event.data.turn === turn && event.data.chunk.type === 'text-delta') {
+      text += event.data.chunk.text;
+      sawDelta = true;
+    }
+  }
+  if (sawDelta || text.length > 0) return text;
+  for (const event of events) {
+    if (event.type === 'assistant/message' && event.data.turn === turn) {
+      const fallback = assistantText(event.data.message);
+      if (fallback) return fallback;
+    }
+  }
+  return '';
 }
 
 /**

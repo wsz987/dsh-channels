@@ -87,7 +87,7 @@ const PATCH_URL = new URL('../cordis.patch.yml', import.meta.url);
 // Expected bundle result — the exact plugins cordis.patch.yml inserts.
 const EXPECTED_ITEMS: PatchItem[] = [
   { id: 'channels-service', name: '@dsh/channel-core/plugin' },
-  { id: 'channels-harness', name: '@dsh/channel-harness', inject: ['channels', 'agents', 'sessionPersistence'] },
+  { id: 'channels-harness', name: '@dsh/channel-harness', inject: ['channels', 'agents'] },
   { id: 'channels-weixin', name: '@dsh/channel-weixin', inject: ['channels'] },
   { id: 'channels-qq', name: '@dsh/channel-qq', inject: ['channels', 'credentials'] },
   { id: 'channels-dingtalk', name: '@dsh/channel-dingtalk', inject: ['channels'] },

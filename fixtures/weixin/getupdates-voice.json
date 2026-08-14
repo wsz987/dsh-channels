@@ -1,0 +1,37 @@
+{
+  "name": "getupdates voice",
+  "channel": "weixin",
+  "upstreamVersion": "ilink",
+  "payload": {
+    "ret": 0,
+    "msgs": [
+      {
+        "seq": 3,
+        "message_id": 5005,
+        "from_user_id": "user_9",
+        "to_user_id": "bot_abc",
+        "create_time_ms": 1700000004000,
+        "item_list": [
+          {
+            "type": 3,
+            "voice_item": {
+              "media": {
+                "full_url": "https://novac2c.cdn.weixin.qq.com/c2c/voice.amr"
+              },
+              "playtime": 3000,
+              "text": "hello (asr)"
+            }
+          }
+        ]
+      }
+    ],
+    "get_updates_buf": "buf-3"
+  },
+  "expected": {
+    "ret": 0,
+    "msgIds": [
+      "wx-5005"
+    ],
+    "partType": "audio"
+  }
+}

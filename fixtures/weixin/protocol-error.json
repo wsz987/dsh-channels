@@ -1,0 +1,12 @@
+{
+  "name": "protocol ret-code error",
+  "channel": "weixin",
+  "upstreamVersion": "ilink",
+  "payload": {
+    "ret": 100,
+    "errmsg": "invalid request"
+  },
+  "expected": {
+    "ret": 100
+  }
+}

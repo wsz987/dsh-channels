@@ -1,66 +1,59 @@
 /**
  * Weixin adapter configuration (Schemastery).
  *
- * Every deployment-tunable parameter is configurable here — no hardcoded
- * deployment constants. Credentials never belong here or in logs.
+ * Per doc section 29 — the channels-weixin config exposes iLink base URLs,
+ * network timeouts and reconnect policy. Credentials are NEVER configured in
+ * YAML; they live in the read/write credential store resolved at start.
  */
 import Schema from '@deepseek-ai/schemastery';
+import { DEFAULT_BASE_URL, DEFAULT_CDN_BASE_URL } from './ilink/constants.js';
 
-export interface WeixinAuthConfig {
-  /** Optional JSON file path for persisting auth state across restarts. */
-  statePath?: string;
-  /** How often QR auth state is polled. */
-  qrPollIntervalMs: number;
-  /** QR code expiry budget in milliseconds. */
-  qrExpireMs: number;
+export interface WeixinIlinkConfig {
+  /** API base URL; may be redirected per-account after QR login. */
+  baseUrl: string;
+  /** CDN base URL for media. */
+  cdnBaseUrl: string;
+  /** bot_agent value sent in base_info. */
+  botAgent?: string;
+}
+
+export interface WeixinNetworkConfig {
+  /** Per-request timeout in ms. */
+  timeoutMs: number;
+  /** Initial getUpdates long-poll timeout in ms. */
+  longPollTimeoutMs: number;
 }
 
 export interface WeixinReconnectConfig {
   enabled: boolean;
   baseDelayMs: number;
   maxDelayMs: number;
-  maxRetries: number;
-}
-
-export interface WeixinDedupConfig {
-  enabled: boolean;
-  windowMs: number;
 }
 
 export interface WeixinConfig {
   enabled: boolean;
-  /** Account id within the weixin channel (defaults to 'main'). */
+  /** Local DSH account alias; default 'main'. */
   accountId: string;
-  /** Base URL of the weixin HTTP gateway (only used by the upstream driver). */
-  baseUrl: string;
-  /** Per-request timeout. */
-  timeoutMs: number;
-  /** Long-poll hang time for one receive cycle. */
-  longPollTimeoutMs: number;
-  auth: WeixinAuthConfig;
+  ilink: WeixinIlinkConfig;
+  network: WeixinNetworkConfig;
   reconnect: WeixinReconnectConfig;
-  dedup: WeixinDedupConfig;
 }
 
 export const Config: Schema<WeixinConfig> = Schema.object({
   enabled: Schema.boolean().default(true),
   accountId: Schema.string().default('main'),
-  baseUrl: Schema.string().default('http://127.0.0.1:9000'),
-  timeoutMs: Schema.natural().default(30000),
-  longPollTimeoutMs: Schema.natural().default(25000),
-  auth: Schema.object({
-    statePath: Schema.string(),
-    qrPollIntervalMs: Schema.natural().default(3000),
-    qrExpireMs: Schema.natural().default(120000),
+  ilink: Schema.object({
+    baseUrl: Schema.string().default(DEFAULT_BASE_URL).description('Weixin iLink API base URL'),
+    cdnBaseUrl: Schema.string().default(DEFAULT_CDN_BASE_URL).description('Weixin CDN base URL'),
+    botAgent: Schema.string().description('bot_agent value for base_info'),
+  }),
+  network: Schema.object({
+    timeoutMs: Schema.natural().default(15000),
+    longPollTimeoutMs: Schema.natural().default(35000),
   }),
   reconnect: Schema.object({
     enabled: Schema.boolean().default(true),
-    baseDelayMs: Schema.natural().default(1000),
+    baseDelayMs: Schema.natural().default(2000),
     maxDelayMs: Schema.natural().default(30000),
-    maxRetries: Schema.natural().default(10),
-  }),
-  dedup: Schema.object({
-    enabled: Schema.boolean().default(true),
-    windowMs: Schema.natural().default(5000),
   }),
 });

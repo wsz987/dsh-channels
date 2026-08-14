@@ -1,35 +1,21 @@
-# DeepSeek Harness Channels (dsh-channels)
-
-Harness-native Channel SDK for [DeepSeek Harness](https://www.deepseek.com/harness/).
-
-## 状态
-
-**M0 — Harness-native Framework ✅**（已提交 `fd0ac46`）
+**M1 — Weixin Adapter ✅（直接 Tencent iLink 客户端）**
 
 ```text
-Monorepo
-Channel Core
-Cordis ChannelService
-Testkit
-Harness Bridge（AgentManager / SessionBinding / ReplyRouter）
-DSH Bundle 骨架
-Fake E2E  ✅ Fake Channel → Harness Agent → session/event → Fake Channel
-```
-
-**M1 — Weixin Adapter ✅**
-
-```text
-Config (Schemastery)
-Upstream Driver（HTTP long-poll / auth / send，fetch transport 可注入）
-Auth 状态机 + 持久化
-Mapper（text/image/audio/video/file/location/unknown → MessagePart[]）
-Inbound dedup + Outbound send
-Reconnect 指数退避
+直接 Tencent Weixin iLink 客户端（https://ilinkai.weixin.qq.com）
+ILinkClient（getupdates long-poll / sendmessage / getconfig / sendtyping / notify）
+QR 登录状态机（wait/scaned/confirmed/redirect/verify code/binded）
+Credential 持久化（SecretStore token + ChannelStorage meta）
+SyncCursor + ContextToken + Dedup（message_id 优先）
+纯函数 Inbound Mapper（TEXT + IMAGE/VOICE/FILE/VIDEO CDN 脚手架）
+OutboundSender（真实 sendmessage payload：client_id/context_token/run_id）
+TypingController（best effort）+ Notify 生命周期
+Media/CDN 脚手架（WX5，未接入 active 路径）
 Contract Tests 通过（runChannelAdapterContract）
-fixtures/weixin/（text/image/audio/unknown/duplicate/auth-success/auth-expired）
+fixtures/weixin/（qr-* / getupdates-* / sendmessage / typing / stale-token / protocol-error / inbound-text / duplicate）
 ```
 
-> 网络交互通过可注入的 `HttpTransport` 抽象——真实部署指向自托管微信 HTTP 网关，测试用 fake transport 全离线验证。
+> 不再依赖自托管 HTTP Gateway（localhost:9000 / /qrcode / /auth/status / /messages/long-poll / /message/send 全部移除）。
+> 协议字段对齐 Tencent/openclaw-weixin iLink 实现（见 THIRD_PARTY_NOTICES.md）。
 
 **M2 — DingTalk Adapter ✅**
 
@@ -50,7 +36,7 @@ channels doctor（Task 13.2，上游兼容性诊断）
 fixtures/qq/ + fixtures/lark/
 ```
 
-> QQ Runtime: Tencent SDK → Channel Adapter → Harness。No OpenClaw runtime dependency. No custom QQ gateway required. QQ AppSecret 通过 `ctx.credentials` 接入（config 仅存 `appSecretRef` 引用，v1.1 QQ-R5）；`channel-harness` 正式依赖 `sessionPersistence`。
+> QQ Runtime: Tencent SDK → Channel Adapter → Harness。No OpenClaw runtime dependency. No custom QQ gateway required. QQ AppSecret 通过 `ctx.credentials` 接入（config 仅存 `appSecretRef` 引用，v1.1 QQ-R5）；`channel-harness` 仅 inject `channels` + `agents`，`sessionPersistence` 为 use-site 可选服务（不存在时不调用 resume）。
 
 **M4 — 兼容性治理 ✅**
 

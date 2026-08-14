@@ -1,0 +1,17 @@
+{
+  "name": "qr confirmed",
+  "channel": "weixin",
+  "upstreamVersion": "ilink",
+  "payload": {
+    "status": "confirmed",
+    "bot_token": "bot-token-secret",
+    "ilink_bot_id": "b0f5860fdecb-im-bot",
+    "baseurl": "https://ilinkai.weixin.qq.com",
+    "ilink_user_id": "wxid_main"
+  },
+  "expected": {
+    "state": "authenticated",
+    "ilinkBotId": "b0f5860fdecb-im-bot",
+    "userId": "wxid_main"
+  }
+}

@@ -1,12 +1,20 @@
 {
-  "name": "duplicate message (webhook retry)",
+  "name": "duplicate message (cursor crash replay)",
   "channel": "weixin",
-  "upstreamVersion": "m1",
+  "upstreamVersion": "ilink",
   "payload": {
-    "type": "text",
-    "fromUserName": "user_123",
-    "msgId": "msg_dup_1",
-    "content": "hello harness"
+    "message_id": 2002,
+    "from_user_id": "user_123",
+    "to_user_id": "bot_abc",
+    "create_time_ms": 1700000001000,
+    "item_list": [
+      {
+        "type": 1,
+        "text_item": {
+          "text": "hi again"
+        }
+      }
+    ]
   },
   "expected": {
     "type": "message.received",
@@ -20,13 +28,14 @@
       "id": "user_123"
     },
     "message": {
-      "id": "msg_dup_1",
+      "id": "wx-2002",
       "content": [
         {
           "type": "text",
-          "text": "hello harness"
+          "text": "hi again"
         }
-      ]
+      ],
+      "createdAt": 1700000001000
     }
   }
 }

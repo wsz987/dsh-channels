@@ -1,0 +1,12 @@
+{
+  "name": "qr need_verifycode",
+  "channel": "weixin",
+  "upstreamVersion": "ilink",
+  "payload": {
+    "status": "need_verifycode"
+  },
+  "expected": {
+    "state": "pending",
+    "detail": "weixin QR requires a phone-verified code"
+  }
+}

@@ -1,12 +1,11 @@
 /**
- * Cordis plugin entry for the channel-harness bridge.
+ * Cordis plugin entry for the channel-harness bridge (doc §30 / H0.6).
  *
- * The plugin injects `channels` (ChannelService from `@dsh/channel-core`),
- * `agents` (AgentRegistry from `@deepseek-ai/dsh-agent`) and
- * `sessionPersistence` (SessionPersistence from
- * `@deepseek-ai/dsh-session-persistence`), so it only starts once all three
- * services are available. Without `sessionPersistence` the plugin stays
- * PENDING (v1.1 §31) rather than running a half-persisting channel runtime.
+ * The plugin injects `channels` (ChannelService) and `agents` (AgentRegistry)
+ * ONLY. `sessionPersistence` is NOT required: it is an optional capability
+ * resolved at the use site and passed into the gateway, so `canResume()`
+ * reflects whether the service is present.
+ *
  * The whole bridge lifecycle is registered as one `ctx.effect` whose disposer
  * is the teardown chain from `startBridge`.
  */
@@ -16,11 +15,14 @@ import { startBridge } from './lifecycle.js';
 
 export const name = 'channel-harness';
 
-export const inject: string[] = ['channels', 'agents', 'sessionPersistence'];
+export const inject: string[] = ['channels', 'agents'];
 
 export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => {
-    const lifecycle = startBridge(ctx, config);
+    // Optional service resolved at the use site (never required).
+    const persistence = ctx.get('sessionPersistence');
+    const lifecycle = startBridge(ctx, config, persistence);
     return () => lifecycle.dispose();
   });
 }
+

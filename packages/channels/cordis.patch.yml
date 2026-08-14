@@ -18,7 +18,6 @@
       inject:
         - channels
         - agents
-        - sessionPersistence
 
     - id: channels-weixin
       name: '@dsh/channel-weixin'

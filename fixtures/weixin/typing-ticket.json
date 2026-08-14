@@ -1,0 +1,13 @@
+{
+  "name": "getconfig typing ticket",
+  "channel": "weixin",
+  "upstreamVersion": "ilink",
+  "payload": {
+    "ret": 0,
+    "typing_ticket": "ticket-abc"
+  },
+  "expected": {
+    "ret": 0,
+    "typing_ticket": "ticket-abc"
+  }
+}

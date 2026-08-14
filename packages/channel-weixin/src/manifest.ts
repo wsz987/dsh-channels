@@ -1,15 +1,19 @@
 /**
- * Weixin upstream compatibility manifest (execution plan Task 13.1).
+ * Weixin upstream compatibility manifest (doc section 35).
  *
- * Records the upstream reference and tested version so `channels doctor` and
- * the upgrade pipeline can govern compatibility without re-verifying by hand.
+ * Structural shape matched to `AdapterManifest` so `channels doctor` and the
+ * channel-compat governance read it without a package dependency. The iLink
+ * protocol derives from Tencent/openclaw-weixin (source-port strategy).
  */
+import pkg from '../package.json' with { type: 'json' };
 
 export interface WeixinUpstreamManifest {
   reference: string;
   testedVersion: string;
+  testedCommit?: string;
   versionRange: string;
-  strategy: 'source';
+  strategy: 'source-port';
+  protocol: 'weixin-ilink';
 }
 
 export interface WeixinManifest {
@@ -20,15 +24,16 @@ export interface WeixinManifest {
   status: 'tested';
 }
 
-/** M1 manifest: self-hosted HTTP gateway, protocol-level strategy. */
 export const manifest: WeixinManifest = {
   id: 'weixin',
-  adapterVersion: '0.8.1',
+  adapterVersion: pkg.version,
   upstream: {
-    reference: 'weixin http gateway (self-hosted, protocol-level)',
-    testedVersion: 'm1-http',
+    reference: 'Tencent/openclaw-weixin (direct Weixin iLink client, source-port)',
+    testedVersion: '<pending-live-verification>',
+    testedCommit: '<pending-live-verification>',
     versionRange: '*',
-    strategy: 'source',
+    strategy: 'source-port',
+    protocol: 'weixin-ilink',
   },
   sdk: undefined,
   status: 'tested',

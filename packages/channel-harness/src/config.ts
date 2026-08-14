@@ -2,29 +2,40 @@
  * Schemastery configuration for the channel-harness bridge.
  *
  * All deployment-related parameters are configurable here; defaults match the
- * v1 behavior (global default agent, file-backed binding store with restart
+ * v2 behavior (global default route, file-backed binding store with restart
  * recovery, throttled reply previews, bounded gateway concurrency).
+ *
+ * v2 routing (doc §30): the old `defaultAgentId` and top-level
+ * `agentOptions` are gone. Agent selection resolves to an `AgentRouteSpec`
+ * (preset / provider / model / maxTokens), with `agent.default` as the global
+ * fallback and optional per-channel / per-account / per-conversation overrides.
  */
 import Schema from '@deepseek-ai/schemastery';
+import type { AgentRouteSpec } from './agent-router.js';
 import { DEFAULT_BINDING_STORE_PATH } from './binding-store.js';
 
-/** How the default agent is selected for a conversation. */
+/** Route for the global default agent. */
+export interface AgentConfig {
+  /** Fallback route used when no routing override matches. */
+  default: AgentRouteSpec;
+}
+
+/** How the default agent route is selected for a conversation. */
 export interface RoutingConfig {
   /**
    * The default-resolution granularity. `global` uses only
-   * `defaultAgentId`; the finer modes additionally allow per-channel,
+   * `agent.default`; the finer modes additionally allow per-channel,
    * per-account and per-conversation overrides via `routing.overrides`.
    */
   mode: 'global' | 'channel' | 'account' | 'conversation';
   /**
-   * Per-level agent overrides. Resolution priority when an override hits:
-   * conversation > account > channel > `defaultAgentId`. A binding that
-   * already carries an `agentId` always wins over routing.
+   * Per-level agent route overrides. Resolution priority when an override
+   * hits: conversation > account > channel > `agent.default`.
    */
   overrides?: {
-    channel?: Record<string, string>;
-    account?: Record<string, string>;
-    conversation?: Record<string, string>;
+    channel?: Record<string, AgentRouteSpec>;
+    account?: Record<string, AgentRouteSpec>;
+    conversation?: Record<string, AgentRouteSpec>;
   };
 }
 
@@ -54,8 +65,8 @@ export interface BindingStoreConfig {
 }
 
 export interface Config {
-  /** Agent used when routing resolves nothing more specific. */
-  defaultAgentId: string;
+  /** Default route (and explicit per-level override dictionary). */
+  agent: AgentConfig;
   routing: RoutingConfig;
   bindingStore: BindingStoreConfig;
   reply: ReplyConfig;
@@ -66,21 +77,25 @@ export interface Config {
   maxConcurrency: number;
   /** Prefix inbound user messages with `[channel=.. sender=.. message=..]`. */
   includeMetadataPrefix: boolean;
-  /** Optional provider/model passed to `ctx.agents.create` / `resume`. */
-  agentOptions?: {
-    provider?: string;
-    model?: string;
-  };
 }
 
+const routeSchema = Schema.object({
+  preset: Schema.string(),
+  provider: Schema.string(),
+  model: Schema.string(),
+  maxTokens: Schema.natural(),
+});
+
 export const Config: Schema<Config> = Schema.object({
-  defaultAgentId: Schema.string().default('default'),
+  agent: Schema.object({
+    default: routeSchema,
+  }),
   routing: Schema.object({
     mode: Schema.union(['global', 'channel', 'account', 'conversation']).default('global'),
     overrides: Schema.object({
-      channel: Schema.dict(Schema.string()),
-      account: Schema.dict(Schema.string()),
-      conversation: Schema.dict(Schema.string()),
+      channel: Schema.dict(routeSchema),
+      account: Schema.dict(routeSchema),
+      conversation: Schema.dict(routeSchema),
     }),
   }),
   bindingStore: Schema.object({
@@ -98,8 +113,4 @@ export const Config: Schema<Config> = Schema.object({
   }),
   maxConcurrency: Schema.natural().default(4),
   includeMetadataPrefix: Schema.boolean().default(true),
-  agentOptions: Schema.object({
-    provider: Schema.string(),
-    model: Schema.string(),
-  }),
 });
