@@ -5,11 +5,7 @@
  * (QR login, getUpdates long-poll, sendmessage). Streaming is `buffered`.
  */
 import { type Context } from '@deepseek-ai/cordis';
-import {
-  MemorySecretStore,
-  MemoryStorage,
-  mountChannelAdapter,
-} from '@dsh/channel-core';
+import { mountChannelAdapter } from '@dsh/channel-core';
 import type { WeixinConfig } from './config.js';
 import { Config } from './config.js';
 import { WeixinAdapter, type WeixinAdapterDeps } from './adapter.js';
@@ -53,9 +49,17 @@ export {
 } from './auth/account-store.js';
 export { SyncCursorStore } from './storage/sync-cursor.js';
 export { ContextTokenStore } from './storage/context-token.js';
-export { DedupWindow, dedupKey, stableHash, type DedupOptions } from './messaging/dedup.js';
+export {
+  MemoryDedupStore,
+  PersistentDedupStore,
+  dedupKey,
+  stableHash,
+  type DedupStore,
+  type DedupRecord,
+  type DedupOptions,
+} from './messaging/dedup.js';
 export { mapInbound, mapItem } from './messaging/mapper.js';
-export { WeixinMonitor, type WeixinMonitorOptions } from './messaging/monitor.js';
+export { WeixinMonitor, CursorCommitError, type WeixinMonitorOptions } from './messaging/monitor.js';
 export { OutboundSender, buildSendTextPayload, type OutboundSenderOptions } from './messaging/send.js';
 export { TypingController, type TypingControllerOptions } from './messaging/typing.js';
 export { FetchTransport, type HttpTransport, type HttpRequestInit } from './transport.js';
@@ -93,12 +97,6 @@ export function apply(ctx: Context, config: WeixinConfig, deps: WeixinAdapterDep
   mountChannelAdapter(
     ctx,
     adapter,
-    (signal) => ({
-      emit: (event) => ctx.channels.emit(event),
-      logger: ctx.logger('channel-weixin'),
-      secrets: new MemorySecretStore(),
-      storage: new MemoryStorage(),
-      signal,
-    }),
+    (signal) => ctx.channels.createAdapterContext({ channelId: 'weixin', signal }),
   );
 }
