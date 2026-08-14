@@ -26,6 +26,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
+    "test:live": "vitest run test/live",
     "clean": "rimraf lib"
   },
   "dependencies": {
