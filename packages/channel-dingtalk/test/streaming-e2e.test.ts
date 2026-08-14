@@ -107,6 +107,14 @@ function makeRouter(
   binding: SessionBinding,
   updateIntervalMs: number,
 ): ReplyRouter {
+  const replyContexts = new ReplyContextStore();
+  // Seed a channel-inbound ReplyContext for turn 0 (the turn these tests
+  // drive) so the router's ReplyContext outbound gate passes.
+  replyContexts.register('harness-0', {
+    sessionId: binding.sessionId,
+    context: { conversationType: 'dm', replyToMessageId: 'msg_0' },
+  });
+  replyContexts.claim({ sessionId: binding.sessionId, messageId: 'harness-0', turn: 0 });
   return new ReplyRouter({
     config: {
       updateIntervalMs,
@@ -117,7 +125,7 @@ function makeRouter(
     },
     getAdapter: () => adapter,
     getBinding: () => binding,
-    replyContexts: new ReplyContextStore(),
+    replyContexts,
     logger: silentLogger,
   });
 }

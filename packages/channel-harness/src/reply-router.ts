@@ -18,12 +18,23 @@
  *
  * The reply target is resolved by reversing `sessionId -> SessionBinding`,
  * never by inspecting the agent itself. Per-turn reply context (conversation
- * type + triggering message id) comes from the shared `ReplyContextStore`,
- * but — unlike v1.0 — it is NOT guessed at `turn/start`. Instead:
- * - `turn/start` only establishes turn existence (`context: undefined`);
- * - `assistant/chunk` / `assistant/message` resolve the context lazily via
- *   `ReplyContextStore.getTurn(sessionId, turn)`, which is authoritative by
- *   then because `agent/inbox/claimed` (message id → turn) has already fired;
+ * type + triggering message id) comes from the shared `ReplyContextStore`.
+ *
+ * The two concepts are deliberately separated (core hardening):
+ * - `SessionBinding` answers "WHERE would a reply go" (the channel
+ *   conversation ↔ session relation). It does NOT authorize outbound.
+ * - `ReplyContext` answers "SHOULD this turn go back to the channel" — a turn
+ *   is only routed when the store has an active context for `sessionId:turn`,
+ *   which exists only because the turn was triggered by a channel inbound
+ *   message (`register` → `agent/inbox/claimed` → `getTurn`).
+ * Both are required: a turn driven by Web UI / CLI / steer / another plugin
+ * on a channel-bound session has no `ReplyContext`, so it is never delivered
+ * back to the channel.
+ *
+ * - `turn/start` only establishes turn existence (no active reply);
+ * - `assistant/chunk` / `assistant/message` require an active `ReplyContext`
+ *   (authoritative by then because `agent/inbox/claimed` fired first) and
+ *   otherwise drop the output;
  * - `turn/end` releases the active context via `releaseTurn`.
  * The target passed to `createReply`/`send` carries the context so
  * target-aware adapters (e.g. QQ C2C native streaming) behave correctly.
@@ -89,10 +100,10 @@ export class ReplyRouter {
   onSessionEvent(session: Session, event: SessionEvent): void {
     switch (event.type) {
       case 'turn/start':
-        // Turn existence only — ReplyContext is NOT derived here (v1.1 §25).
-        // The authoritative message↔turn correlation arrives later via the
-        // store's `getTurn`, populated by `agent/inbox/claimed`.
-        this.ensureActive(session, event.data.turn);
+        // Turn existence only — no active reply is established here. Outbound
+        // delivery requires a Channel ReplyContext (message-id → claimed →
+        // turn), which is only authoritative once chunks flow. A non-channel
+        // turn on a channel-bound session must NOT auto-route (see header).
         break;
       case 'assistant/chunk': {
         const { turn, chunk } = event.data;
@@ -154,6 +165,15 @@ export class ReplyRouter {
     const { turn } = unfinished;
     const rebuilt = rebuildAssistantText(session.events, turn);
 
+    // Same outbound gate as the live path: a durable-log turn with no active
+    // ReplyContext was not channel-inbound, so it must not be delivered back
+    // to the channel on unload.
+    const context = this.options.replyContexts.getTurn(sessionId, turn);
+    if (!context) {
+      this.options.replyContexts.releaseTurn(sessionId, turn);
+      return;
+    }
+
     const active = this.active.get(sessionId);
     if (active && !active.finished) {
       // Already tracking this reply — finalize it normally with the durable
@@ -187,7 +207,7 @@ export class ReplyRouter {
       // Deliver the missing remainder through the already-open reply handle.
       await active.handle.finish(rebuilt ? { text: rebuilt } : undefined).catch(() => {});
     } else {
-      await this.deliver(adapter, targetFor(binding, this.options.replyContexts.getTurn(sessionId, turn)), rebuilt);
+      await this.deliver(adapter, targetFor(binding, context), rebuilt);
     }
     this.options.replyContexts.releaseTurn(sessionId, turn);
   }
@@ -203,14 +223,31 @@ export class ReplyRouter {
 
   private ensureActive(session: Session, turn: number): ActiveReply | null {
     const sessionId = String(session.id);
+
+    // ReplyContext is the outbound gate: a turn without an active context was
+    // not triggered by a channel inbound message, so it must never be routed
+    // back to the channel (even if the session is channel-bound).
+    const context = this.options.replyContexts.getTurn(sessionId, turn);
+    if (!context) {
+      return null;
+    }
+
     const existing = this.active.get(sessionId);
     if (existing) {
-      // A turn already active: re-resolve its context lazily. By the time
-      // chunks flow, `agent/inbox/claimed` has fired and `getTurn` is
-      // authoritative, so an already-open turn can still pick up its binding.
-      this.applyContext(existing, turn);
+      // Defensive refresh: re-resolve target/strategy if the context changed.
+      // A session is single-flight (one turn at a time), so this is normally
+      // a no-op.
+      if (existing.context !== context) {
+        existing.context = context;
+        existing.target = targetFor(existing.binding, context);
+        existing.strategy = strategyFor(
+          this.options.getAdapter(existing.binding.channelId)!,
+          existing.target,
+        );
+      }
       return existing;
     }
+
     const binding = this.options.getBinding(sessionId);
     if (!binding) {
       this.options.logger.warn(`[channel-harness] no session binding for '${sessionId}'`);
@@ -223,15 +260,12 @@ export class ReplyRouter {
       );
       return null;
     }
-    // Active record starts with `context: undefined`; the store's active
-    // context (populated by `agent/inbox/claimed`) is resolved lazily below
-    // and on later chunks once it becomes available.
-    const target = targetFor(binding, undefined);
+    const target = targetFor(binding, context);
     const active: ActiveReply = {
       binding,
       strategy: strategyFor(adapter, target),
       target,
-      context: undefined,
+      context,
       handle: null,
       buffer: '',
       finalText: '',
@@ -243,26 +277,7 @@ export class ReplyRouter {
       flushing: null,
     };
     this.active.set(sessionId, active);
-    this.applyContext(active, turn);
     return active;
-  }
-
-  /**
-   * Resolve the active reply context lazily from the store at this moment and
-   * (re)compute target + strategy when the context first appears or changes.
-   * `agent/inbox/claimed` fires before any chunks flow, so `getTurn` is the
-   * authoritative correlation (v1.1 replacement for FIFO-at-turn/start).
-   */
-  private applyContext(active: ActiveReply, turn: number): void {
-    const context = this.options.replyContexts.getTurn(String(active.binding.sessionId), turn);
-    if (!context) return;
-    if (active.context === context) return;
-    active.context = context;
-    active.target = targetFor(active.binding, context);
-    active.strategy = strategyFor(
-      this.options.getAdapter(active.binding.channelId)!,
-      active.target,
-    );
   }
 
   private appendText(active: ActiveReply, delta: string): void {

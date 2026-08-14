@@ -130,10 +130,27 @@ function makeBinding(sessionId = 's1'): SessionBinding {
   };
 }
 
+/** Seed a channel-inbound context (register + claim) for one turn. */
+function seedChannelTurn(store: ReplyContextStore, turn = 0, sessionId = 's1'): void {
+  store.register(`harness_${turn}`, {
+    sessionId,
+    context: { conversationType: 'dm', replyToMessageId: `qq_${turn}` },
+  });
+  store.claim({ sessionId, messageId: `harness_${turn}`, turn });
+}
+
+/** A ReplyContextStore pre-seeded with a channel-inbound context for `turn`. */
+function seededStore(turn = 0): ReplyContextStore {
+  const store = new ReplyContextStore();
+  seedChannelTurn(store, turn);
+  return store;
+}
+
 function makeRouter(
   adapter: ChannelAdapter,
   reply: Partial<{ updateIntervalMs: number; maxTextLength: number }> = {},
 ): ReplyRouter {
+  const replyContexts = seededStore(0);
   return new ReplyRouter({
     config: {
       updateIntervalMs: reply.updateIntervalMs ?? 0,
@@ -144,7 +161,7 @@ function makeRouter(
     },
     getAdapter: () => adapter,
     getBinding: () => makeBinding(),
-    replyContexts: new ReplyContextStore(),
+    replyContexts,
     logger: silentLogger,
   });
 }
@@ -263,7 +280,7 @@ describe('ReplyRouter edit strategy', () => {
       },
       getAdapter: () => adapter as unknown as ChannelAdapter,
       getBinding: () => makeBinding(),
-      replyContexts: new ReplyContextStore(),
+      replyContexts: seededStore(),
       logger: silentLogger,
     });
     const session = fakeSession('s1');
@@ -314,7 +331,7 @@ describe('ReplyRouter edit strategy', () => {
       },
       getAdapter: () => adapter as unknown as ChannelAdapter,
       getBinding: () => makeBinding(),
-      replyContexts: new ReplyContextStore(),
+      replyContexts: seededStore(),
       logger: silentLogger,
     });
     const session = fakeSession('s1');
@@ -434,5 +451,56 @@ describe('ReplyRouter message-id → claimed → turn correlation (no cross-wire
       conversationType: 'group',
       replyToMessageId: 'qq_B',
     });
+  });
+});
+
+describe('ReplyRouter outbound gate (ReplyContext required)', () => {
+  it('does not route a non-channel turn back to channel', async () => {
+    const sent: { text?: string }[] = [];
+    const adapter = {
+      id: 'no-ctx',
+      capabilities: {
+        text: true,
+        image: false,
+        file: false,
+        audio: false,
+        video: false,
+        markdown: true,
+        cards: false,
+        reactions: false,
+        threads: false,
+        streaming: 'buffered',
+      },
+      start: async () => {},
+      stop: async () => {},
+      send: async (_target: unknown, message: { text?: string }) => {
+        sent.push(message);
+        return { delivered: true };
+      },
+    };
+    // SessionBinding exists (session once belonged to this channel), but there
+    // is NO ReplyContext: the turn was triggered by another surface.
+    const router = new ReplyRouter({
+      config: {
+        updateIntervalMs: 0,
+        maxTextLength: undefined,
+        splitParagraphs: true,
+        splitCodeBlocks: true,
+        finalFlush: true,
+      },
+      getAdapter: () => adapter as unknown as ChannelAdapter,
+      getBinding: () => makeBinding(),
+      replyContexts: new ReplyContextStore(),
+      logger: silentLogger,
+    });
+    const session = fakeSession('s1');
+
+    router.onSessionEvent(session, turnStartEvent(0));
+    router.onSessionEvent(session, chunkEvent(0, 'hello'));
+    router.onSessionEvent(session, turnEndEvent(0));
+
+    // Give any (wrong) async delivery a chance to run.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(sent).toHaveLength(0);
   });
 });

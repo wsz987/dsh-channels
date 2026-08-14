@@ -35,6 +35,16 @@ const silentLogger = {
   error: () => {},
 };
 
+/** Seed a channel-inbound ReplyContext (register + claim) for one turn. */
+function seededContext(store: ReplyContextStore, turn = 0, sessionId = 's1'): ReplyContextStore {
+  store.register(`harness_${turn}`, {
+    sessionId,
+    context: { conversationType: 'dm', replyToMessageId: `qq_${turn}` },
+  });
+  store.claim({ sessionId, messageId: `harness_${turn}`, turn });
+  return store;
+}
+
 /** Config with distinct routes at every override level + a default. */
 function routedConfig(): Config {
   return Config({
@@ -113,7 +123,7 @@ function makeBridge(gateway: FakeGateway) {
     agentManager: manager,
     agentRouter: new AgentRouter(routedConfig()),
     getAdapter: () => undefined,
-    replyContexts: new ReplyContextStore(),
+    replyContexts: seededContext(new ReplyContextStore()),
     logger: silentLogger,
   });
   return { gateway, manager, bridge };
@@ -282,7 +292,7 @@ describe('durable unload reconcile', () => {
       config: { updateIntervalMs: 0, maxTextLength: undefined, splitParagraphs: true, splitCodeBlocks: true, finalFlush: true },
       getAdapter: () => adapter as never,
       getBinding: () => binding,
-      replyContexts: new ReplyContextStore(),
+      replyContexts: seededContext(new ReplyContextStore()),
       logger: silentLogger,
     });
 
@@ -327,7 +337,7 @@ describe('durable unload reconcile', () => {
       config: { updateIntervalMs: 0, maxTextLength: undefined, splitParagraphs: true, splitCodeBlocks: true, finalFlush: true },
       getAdapter: () => adapter as never,
       getBinding: () => binding,
-      replyContexts: new ReplyContextStore(),
+      replyContexts: seededContext(new ReplyContextStore()),
       logger: silentLogger,
     });
     const events: SessionEvent[] = [
@@ -365,7 +375,7 @@ describe('durable unload reconcile', () => {
       config: { updateIntervalMs: 0, maxTextLength: undefined, splitParagraphs: true, splitCodeBlocks: true, finalFlush: true },
       getAdapter: () => adapter as never,
       getBinding: () => binding,
-      replyContexts: new ReplyContextStore(),
+      replyContexts: seededContext(new ReplyContextStore()),
       logger: silentLogger,
     });
     // A turn was streaming through the listener and has an active reply.

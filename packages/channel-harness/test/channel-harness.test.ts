@@ -208,6 +208,16 @@ function makeBinding(overrides: Partial<SessionBinding> = {}): SessionBinding {
   };
 }
 
+/** Seed a channel-inbound ReplyContext (register + claim) for one turn. */
+function seededContext(store: ReplyContextStore, turn = 0, sessionId = 's1'): ReplyContextStore {
+  store.register(`harness_${turn}`, {
+    sessionId,
+    context: { conversationType: 'dm', replyToMessageId: `qq_${turn}` },
+  });
+  store.claim({ sessionId, messageId: `harness_${turn}`, turn });
+  return store;
+}
+
 
 describe('session binding', () => {
   it('builds canonical channel:account:conversation[:thread] keys', () => {
@@ -431,7 +441,7 @@ describe('ReplyRouter', () => {
       config: baseConfig().reply,
       getAdapter: () => adapter as never,
       getBinding: () => binding,
-      replyContexts: new ReplyContextStore(),
+      replyContexts: seededContext(new ReplyContextStore(), 0),
       logger: silentLogger,
     });
     const session = fakeSession('s1');
@@ -444,6 +454,27 @@ describe('ReplyRouter', () => {
       expect(adapter.sent).toHaveLength(1);
     });
     expect(adapter.sent[0]?.text).toBe('hello world');
+  });
+
+  it('does not route a non-channel turn back to channel', async () => {
+    const adapter = new FakeAdapter('fake');
+    const binding = makeBinding({ channelId: 'fake' });
+    // SessionBinding exists, but there is no ReplyContext: the turn was
+    // triggered by another surface, so nothing may be delivered.
+    const router = new ReplyRouter({
+      config: baseConfig().reply,
+      getAdapter: () => adapter as never,
+      getBinding: () => binding,
+      replyContexts: new ReplyContextStore(),
+      logger: silentLogger,
+    });
+    const session = fakeSession('s1');
+
+    router.onSessionEvent(session, chunkEvent(0, 'hello'));
+    router.onSessionEvent(session, turnEndEvent(0));
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(adapter.sent).toHaveLength(0);
   });
 
   it('flushes native/edit previews through createReply and finishes', async () => {
@@ -487,7 +518,7 @@ describe('ReplyRouter', () => {
       config: { ...baseConfig().reply, updateIntervalMs: 0 },
       getAdapter: () => adapter as never,
       getBinding: () => binding,
-      replyContexts: new ReplyContextStore(),
+      replyContexts: seededContext(new ReplyContextStore(), 0),
       logger: silentLogger,
     });
     const session = fakeSession('s1');
@@ -510,7 +541,7 @@ describe('ReplyRouter', () => {
       config: { ...baseConfig().reply, maxTextLength: 10 },
       getAdapter: () => adapter as never,
       getBinding: () => binding,
-      replyContexts: new ReplyContextStore(),
+      replyContexts: seededContext(new ReplyContextStore(), 0),
       logger: silentLogger,
     });
     const session = fakeSession('s1');
@@ -646,11 +677,15 @@ describe('ChannelHarnessBridge end-to-end', () => {
       new ChannelService(ctx);
       const agents = new AgentRegistry(ctx);
       const idleResolvers: Array<() => void> = [];
+      let harnessMessageId: string | undefined;
+      const followup = (message: { id: string }) => {
+        harnessMessageId = message.id;
+      };
       agents.setFactory({
         createAgent: async (_owner, options) => ({
           agent: {
             id: options.sessionId,
-            followup: () => {},
+            followup,
             whenIdle: () =>
               new Promise<void>((resolve) => idleResolvers.push(resolve)),
           } as never,
@@ -659,7 +694,7 @@ describe('ChannelHarnessBridge end-to-end', () => {
         resume: async (_owner, options) => ({
           agent: {
             id: options.resumeSessionId,
-            followup: () => {},
+            followup,
             whenIdle: () =>
               new Promise<void>((resolve) => idleResolvers.push(resolve)),
           } as never,
@@ -674,6 +709,15 @@ describe('ChannelHarnessBridge end-to-end', () => {
         bindingStore: { type: 'file', path: file },
       });
       await lifecycle.handleChannelEvent(makeMessageEvent());
+
+      // Model the agent's `agent/inbox/claimed`: move the registered context
+      // into the active `seed-session`+turn 0 slot so the reply router has a
+      // channel ReplyContext.
+      ctx.emit('agent/inbox/claimed', {
+        agent: { session: { id: 'seed-session' } },
+        message: { id: harnessMessageId },
+        turn: 0,
+      });
 
       const session = fakeSession('seed-session');
       ctx.emit('session/event', session, turnStartEvent(0));
@@ -706,11 +750,15 @@ describe('ChannelHarnessBridge end-to-end', () => {
       const ctx = new Context();
       new ChannelService(ctx);
       const agents = new AgentRegistry(ctx);
+      let harnessMessageId: string | undefined;
+      const followup = (message: { id: string }) => {
+        harnessMessageId = message.id;
+      };
       agents.setFactory({
         createAgent: async (_owner, options) => ({
           agent: {
             id: options.sessionId,
-            followup: () => {},
+            followup,
             whenIdle: async () => {},
           } as never,
           dispose: async () => {},
@@ -718,7 +766,7 @@ describe('ChannelHarnessBridge end-to-end', () => {
         resume: async (_owner, options) => ({
           agent: {
             id: options.resumeSessionId,
-            followup: () => {},
+            followup,
             whenIdle: async () => {},
           } as never,
           dispose: async () => {},
@@ -732,6 +780,13 @@ describe('ChannelHarnessBridge end-to-end', () => {
         bindingStore: { type: 'file', path: file },
       });
       await lifecycle.handleChannelEvent(makeMessageEvent());
+
+      // Model the agent's `agent/inbox/claimed` for turn 0.
+      ctx.emit('agent/inbox/claimed', {
+        agent: { session: { id: 'seed-session' } },
+        message: { id: harnessMessageId },
+        turn: 0,
+      });
 
       const session = fakeSession('seed-session');
       ctx.emit('session/event', session, turnStartEvent(0));
