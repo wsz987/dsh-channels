@@ -12,11 +12,7 @@
  * platform credentials (never logged).
  */
 import { type Context } from '@deepseek-ai/cordis';
-import {
-  MemorySecretStore,
-  MemoryStorage,
-  type ChannelAdapterContext,
-} from '@dsh/channel-core';
+import { mountChannelAdapter } from '@dsh/channel-core';
 import type { DingTalkConfig } from './config.js';
 import { Config } from './config.js';
 import { DingTalkAdapter, type DingTalkAdapterDeps } from './adapter.js';
@@ -50,21 +46,9 @@ export { manifest, type DingTalkManifest } from './manifest.js';
 export function apply(ctx: Context, config: DingTalkConfig, deps: DingTalkAdapterDeps = {}): void {
   if (!config.enabled) return;
   const adapter = new DingTalkAdapter(config, deps);
-  ctx.effect(async () => {
-    const unregister = ctx.channels.register(adapter);
-    const abort = new AbortController();
-    const adapterCtx: ChannelAdapterContext = {
-      emit: (event) => ctx.channels.emit(event),
-      logger: ctx.logger('channel-dingtalk'),
-      secrets: new MemorySecretStore(),
-      storage: new MemoryStorage(),
-      signal: abort.signal,
-    };
-    await adapter.start(adapterCtx);
-    return async () => {
-      abort.abort();
-      await adapter.stop();
-      unregister();
-    };
-  });
+  mountChannelAdapter(
+    ctx,
+    adapter,
+    (signal) => ctx.channels.createAdapterContext({ channelId: 'dingtalk', signal }),
+  );
 }

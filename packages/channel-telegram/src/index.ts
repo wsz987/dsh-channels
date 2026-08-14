@@ -15,11 +15,7 @@
  * with offset ack; no beginAuth/pollAuth in V1.
  */
 import { type Context } from '@deepseek-ai/cordis';
-import {
-  MemorySecretStore,
-  MemoryStorage,
-  type ChannelAdapterContext,
-} from '@dsh/channel-core';
+import { mountChannelAdapter } from '@dsh/channel-core';
 import type { TelegramConfig } from './config.js';
 import { Config } from './config.js';
 import { TelegramAdapter, type TelegramAdapterDeps } from './adapter.js';
@@ -39,21 +35,9 @@ export { manifest, type TelegramManifest } from './manifest.js';
 export function apply(ctx: Context, config: TelegramConfig, deps: TelegramAdapterDeps = {}): void {
   if (!config.enabled) return;
   const adapter = new TelegramAdapter(config, deps);
-  ctx.effect(async () => {
-    const unregister = ctx.channels.register(adapter);
-    const abort = new AbortController();
-    const adapterCtx: ChannelAdapterContext = {
-      emit: (event) => ctx.channels.emit(event),
-      logger: ctx.logger('channel-telegram'),
-      secrets: new MemorySecretStore(),
-      storage: new MemoryStorage(),
-      signal: abort.signal,
-    };
-    await adapter.start(adapterCtx);
-    return async () => {
-      abort.abort();
-      await adapter.stop();
-      unregister();
-    };
-  });
+  mountChannelAdapter(
+    ctx,
+    adapter,
+    (signal) => ctx.channels.createAdapterContext({ channelId: 'telegram', signal }),
+  );
 }
