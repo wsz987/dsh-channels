@@ -13,6 +13,7 @@
  */
 import type {
   AuthChallenge,
+  AuthInput,
   AuthStatePoll,
   ChannelAdapter,
   ChannelAdapterContext,
@@ -272,6 +273,13 @@ export class WeixinAdapter implements ChannelAdapter {
   submitVerifyCode(code: string): void {
     this.requireStartedForAuth();
     this.qrAuth!.submitVerifyCode(code);
+  }
+
+  /** Generic auth-input hook: maps verification-code inputs to submitVerifyCode. */
+  submitAuthInput(_challenge: AuthChallenge, input: AuthInput): void {
+    if (input.kind === 'verification-code') {
+      this.submitVerifyCode(input.value);
+    }
   }
 
   async getHealth(): Promise<ChannelHealth> {

@@ -1,0 +1,73 @@
+/**
+ * Locale dictionaries for the "渠道" (Channels) Settings section.
+ * Keyed namespace: 'channels'.
+ */
+export const locales = {
+  zh: {
+    nav: '渠道',
+    title: '渠道',
+    loaded: 'dsh-channels web extension loaded',
+    comingSoon: '微信、QQ、钉钉、飞书四张渠道卡片将在下一阶段（M1）接入真实状态与配置入口。',
+    fourChannels: '微信 · QQ · 钉钉 · 飞书',
+    // M1 dashboard
+    connect: '连接微信',
+    connecting: '连接中…',
+    notConfigured: '未配置',
+    configured: '已配置',
+    mounted: '已挂载',
+    notMounted: '未挂载',
+    capabilities: '能力',
+    configNextPhase: '配置界面将在下一阶段开放',
+    waitingScan: '等待扫码',
+    scannedConfirm: '已扫码，请确认',
+    needVerifyCode: '需要验证码',
+    success: '认证成功',
+    expired: '二维码已过期',
+    failed: '认证失败',
+    regenerate: '重新生成',
+    verifyCodePlaceholder: '输入验证码',
+    submit: '提交',
+    close: '关闭',
+    openLink: '打开微信授权链接',
+    refresh: '刷新',
+    expiresIn: '剩余',
+    seconds: '秒',
+    connectionError: '连接出错',
+    retry: '重试',
+  },
+  en: {
+    nav: 'Channels',
+    title: 'Channels',
+    loaded: 'dsh-channels web extension loaded',
+    comingSoon: 'The four channel cards (Weixin, QQ, DingTalk, Lark) arrive in the next phase (M1) with live status and configuration.',
+    fourChannels: 'Weixin · QQ · DingTalk · Lark',
+    // M1 dashboard
+    connect: 'Connect Weixin',
+    connecting: 'Connecting…',
+    notConfigured: 'Not configured',
+    configured: 'Configured',
+    mounted: 'Mounted',
+    notMounted: 'Not mounted',
+    capabilities: 'Capabilities',
+    configNextPhase: 'Configuration UI opens in the next phase',
+    waitingScan: 'Waiting for scan',
+    scannedConfirm: 'Scanned, please confirm',
+    needVerifyCode: 'Verification code required',
+    success: 'Authentication successful',
+    expired: 'QR code expired',
+    failed: 'Authentication failed',
+    regenerate: 'Regenerate',
+    verifyCodePlaceholder: 'Enter verification code',
+    submit: 'Submit',
+    close: 'Close',
+    openLink: 'Open WeChat authorization link',
+    refresh: 'Refresh',
+    expiresIn: 'Expires in',
+    seconds: 's',
+    connectionError: 'Connection error',
+    retry: 'Retry',
+  },
+} as const;
+
+export type ChannelNavNamespaces = 'zh' | 'en';
+export type ChannelLocale = typeof locales;

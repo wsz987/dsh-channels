@@ -83,6 +83,11 @@ export interface AuthStatePoll {
   detail?: string;
 }
 
+export interface AuthInput {
+  kind: 'verification-code';
+  value: string;
+}
+
 export interface ChannelAdapter {
   readonly id: string;
 
@@ -115,6 +120,8 @@ export interface ChannelAdapter {
   beginAuth?(): Promise<AuthChallenge>;
 
   pollAuth?(challenge: AuthChallenge): Promise<AuthStatePoll>;
+
+  submitAuthInput?(challenge: AuthChallenge, input: AuthInput): Promise<void> | void;
 
   getHealth?(): Promise<ChannelHealth>;
 }

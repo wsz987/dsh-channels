@@ -148,12 +148,12 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: ^3.18.1
         version: 3.18.1
-      '@wsz987/channel-core':
-        specifier: workspace:*
-        version: link:../channel-core
       '@larksuiteoapi/node-sdk':
         specifier: 1.73.0
         version: 1.73.0
+      '@wsz987/channel-core':
+        specifier: workspace:*
+        version: link:../channel-core
     devDependencies:
       '@wsz987/channel-testkit':
         specifier: workspace:*
@@ -173,12 +173,12 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: ^3.18.1
         version: 3.18.1
-      '@wsz987/channel-core':
-        specifier: workspace:*
-        version: link:../channel-core
       '@tencent-connect/qqbot-nodejs':
         specifier: 1.0.4
         version: 1.0.4
+      '@wsz987/channel-core':
+        specifier: workspace:*
+        version: link:../channel-core
     devDependencies:
       '@wsz987/channel-testkit':
         specifier: workspace:*
@@ -235,6 +235,28 @@ importers:
         specifier: ^6.0.0
         version: 6.1.3
 
+  packages/channel-web:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: ^4.0.1
+        version: 4.0.1
+      '@wsz987/channel-core':
+        specifier: workspace:*
+        version: link:../channel-core
+    devDependencies:
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
+      rimraf:
+        specifier: ^6.0.0
+        version: 6.1.3
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.7(@types/node@22.20.1)
+
   packages/channel-weixin:
     dependencies:
       '@deepseek-ai/cordis':
@@ -274,6 +296,9 @@ importers:
       '@wsz987/channel-qq':
         specifier: workspace:*
         version: link:../channel-qq
+      '@wsz987/channel-web':
+        specifier: workspace:*
+        version: link:../channel-web
       '@wsz987/channel-weixin':
         specifier: workspace:*
         version: link:../channel-weixin

@@ -1,0 +1,59 @@
+{
+  "name": "@wsz987/channel-web",
+  "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wsz987/dsh-channels.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "description": "DeepSeek Harness Web client: Settings > Channels (渠道) dashboard",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./protocol": {
+      "types": "./lib/protocol.d.ts",
+      "default": "./lib/protocol.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "files": [
+    "lib"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf lib"
+  },
+  "dependencies": {
+    "@wsz987/channel-core": "workspace:*",
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "rimraf": "^6.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  },
+  "license": "MIT"
+}

@@ -3,7 +3,7 @@
  *
  * Parses `cordis.patch.yml` with a hand-rolled minimal parser (the file is a
  * fixed `- insert:` list of `- id:` / `name:` pairs — no YAML dependency),
- * asserts the six plugin insertions, resolves every plugin specifier through
+ * asserts the seven plugin insertions, resolves every plugin specifier through
  * the package `exports` maps (dynamic import enforces Node ESM exports
  * resolution), and checks that each channel adapter Config exposes an
  * `enabled` boolean so every channel can be disabled via config.
@@ -92,13 +92,17 @@ const EXPECTED_ITEMS: PatchItem[] = [
   { id: 'channels-qq', name: '@wsz987/channel-qq', inject: ['channels', 'credentials'] },
   { id: 'channels-dingtalk', name: '@wsz987/channel-dingtalk', inject: ['channels'] },
   { id: 'channels-lark', name: '@wsz987/channel-lark', inject: ['channels'] },
+  // The Web client plugin has no module-level `inject` export on its host
+  // entry (only `name` + `apply`); the client half declares inject and the
+  // settings.section slot, which is not part of the host patch shape.
+  { id: 'channels-web', name: '@wsz987/channel-web' },
 ];
 
 describe('DSH bundle patch (cordis.patch.yml)', () => {
   const patchSource = readFileSync(fileURLToPath(PATCH_URL), 'utf8');
   const items = parsePatch(patchSource);
 
-  it('inserts exactly the six expected plugins, in order, with the right names and inject lists', () => {
+  it('inserts exactly the seven expected plugins, in order, with the right names and inject lists', () => {
     expect(items.map((i) => i.id)).toEqual(EXPECTED_ITEMS.map((i) => i.id));
     expect(items.map((i) => i.name)).toEqual(EXPECTED_ITEMS.map((i) => i.name));
     expect(items.map((i) => i.inject)).toEqual(EXPECTED_ITEMS.map((i) => i.inject));

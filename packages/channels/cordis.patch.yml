@@ -39,3 +39,5 @@
       name: '@wsz987/channel-lark'
       inject:
         - channels
+    - id: channels-web
+      name: '@wsz987/channel-web'

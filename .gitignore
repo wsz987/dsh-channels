@@ -14,3 +14,6 @@ coverage/
 # Runtime state (session bindings, weixin credentials/cursor when a file
 # provider is configured). Never commit.
 data/
+
+# Local spike scratch (M0/M1 verification tooling)
+.spike/
