@@ -258,10 +258,17 @@ async function inspectAdapterSurface(dir: string, pkg: PackageInfo | undefined):
     const imported = (await import(pathToFileURL(entry).href)) as Record<string, unknown>;
     mod = imported;
   } catch (error) {
+    // A source (.ts) entry means the package was not built: lib/ is missing and
+    // the ESM `.js` specifiers inside the TypeScript sources cannot resolve
+    // under plain Node. Hint the maintainer instead of leaving a cryptic
+    // 'Cannot find module .../src/config.js' error.
+    const hint = entry.endsWith('.ts')
+      ? ' (source entry: the adapter is not built — run `pnpm build` for this package first so lib/index.js exists)'
+      : '';
     return {
       check: {
         id: 'adapter-surface',
-        items: [fail('adapter-import-failed', `could not import '${relative(dir, entry)}': ${errorMessage(error)}`)],
+        items: [fail('adapter-import-failed', `could not import '${relative(dir, entry)}': ${errorMessage(error)}${hint}`)],
       },
       adapter: undefined,
     };
