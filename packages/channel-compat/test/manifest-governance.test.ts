@@ -31,10 +31,10 @@ function packageVersion(packageName: string): string {
 }
 
 const channels = [
-  { id: 'weixin', manifest: weixinManifest, package: 'channel-weixin' },
-  { id: 'dingtalk', manifest: dingtalkManifest, package: 'channel-dingtalk' },
-  { id: 'qq', manifest: qqManifest, package: 'channel-qq' },
-  { id: 'lark', manifest: larkManifest, package: 'channel-lark' },
+  { id: 'weixin', manifest: weixinManifest, package: 'channel-weixin', status: 'experimental' as const },
+  { id: 'dingtalk', manifest: dingtalkManifest, package: 'channel-dingtalk', status: 'tested' as const },
+  { id: 'qq', manifest: qqManifest, package: 'channel-qq', status: 'tested' as const },
+  { id: 'lark', manifest: larkManifest, package: 'channel-lark', status: 'tested' as const },
 ] as const;
 
 /** Wrap a manifest in a minimal adapter-shaped object for the compat check. */
@@ -43,13 +43,13 @@ function manifestAdapter(manifest: AdapterManifest): { id: string; manifest: Ada
 }
 
 describe('manifest governance (all four channels)', () => {
-  for (const { id, manifest, package: pkg } of channels) {
+  for (const { id, manifest, package: pkg, status } of channels) {
     it(`${id}: manifest validates cleanly`, () => {
       expect(validateManifest(manifest)).toEqual([]);
     });
 
-    it(`${id}: declared tested with non-empty upstream fields`, () => {
-      expect(manifest.status).toBe('tested');
+    it(`${id}: declared ${status} with non-empty upstream fields`, () => {
+      expect(manifest.status).toBe(status);
       expect(manifest.upstream.reference.length).toBeGreaterThan(0);
       expect(manifest.upstream.testedVersion.length).toBeGreaterThan(0);
       expect(manifest.upstream.versionRange.length).toBeGreaterThan(0);
@@ -72,13 +72,13 @@ describe('checkAdapterCompatibility (M4 aggregation)', () => {
     expect(result.reason).toContain('does not expose a compatibility manifest');
   });
 
-  it('reports tested/ok for a valid manifest', () => {
+  it('reports experimental/warning for the weixin manifest', () => {
     const result = checkAdapterCompatibility(manifestAdapter(weixinManifest));
     expect(result.manifest?.id).toBe('weixin');
     expect(result.validationErrors).toEqual([]);
-    expect(result.state).toBe('tested');
-    expect(result.verdict).toBe('ok');
-    expect(result.reason).toContain('tested against upstream');
+    expect(result.state).toBe('experimental');
+    expect(result.verdict).toBe('warning');
+    expect(result.reason).toContain('experimental');
   });
 
   it('reports unsupported/fail unless allowUnsupported is set', () => {

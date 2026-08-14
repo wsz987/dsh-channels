@@ -2,9 +2,10 @@
  * Doctor surface for all four official channels (M4 — `pnpm doctor`).
  *
  * Instantiates the real Weixin / QQ / DingTalk / Lark adapters with minimal
- * configs, runs `diagnose` over all four and asserts every diagnostic is
- * `tested` with an `ok` verdict, then prints the formatted doctor output —
- * exactly the surface CI prints via `pnpm doctor`.
+ * configs, runs diagnose over all four and asserts each diagnostic is in an
+ * expected state (weixin is 'experimental' until the live gate passes; the
+ * others are 'tested'), then prints the formatted doctor output — exactly
+ * the surface CI prints via pnpm doctor.
  *
  * All four adapters expose a `readonly manifest` class field that the
  * doctor reads structurally.
@@ -84,9 +85,17 @@ describe('doctor — all four official channels (M4 surface)', () => {
     const ids = diagnostics.map((d) => d.id).sort();
     expect(ids).toEqual(['dingtalk', 'lark', 'qq', 'weixin']);
 
+    const expectedCompat: Record<string, 'tested' | 'experimental'> = {
+      weixin: 'experimental',
+      qq: 'tested',
+      dingtalk: 'tested',
+      lark: 'tested',
+    };
     for (const d of diagnostics) {
-      expect(d.compatibility).toBe('tested');
-      expect(manifestVerdict(d.compatibility)).toBe('ok');
+      expect(d.compatibility).toBe(expectedCompat[d.id]);
+      expect(manifestVerdict(d.compatibility)).toBe(
+        d.compatibility === 'experimental' ? 'warning' : 'ok',
+      );
       expect(d.adapterVersion.length).toBeGreaterThan(0);
       expect(d.upstreamReference.length).toBeGreaterThan(0);
       expect(d.upstreamTestedVersion.length).toBeGreaterThan(0);
@@ -96,7 +105,7 @@ describe('doctor — all four official channels (M4 surface)', () => {
     const text = formatDoctor(diagnostics);
     for (const id of ['weixin', 'qq', 'dingtalk', 'lark']) {
       expect(text).toContain(id);
-      expect(text).toContain('Compatibility: tested');
+      expect(text).toContain('Compatibility: ' + expectedCompat[id]);
     }
 
     // The doctor surface CI prints via `pnpm doctor`.

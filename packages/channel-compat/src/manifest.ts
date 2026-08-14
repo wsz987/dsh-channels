@@ -10,7 +10,7 @@
  */
 
 /** Compatibility state of an adapter against its upstream (Task 13.3). */
-export type ManifestStatus = 'tested' | 'compatible' | 'untested' | 'unsupported';
+export type ManifestStatus = 'tested' | 'compatible' | 'untested' | 'unsupported' | 'experimental';
 
 /** Upstream (SDK / gateway / protocol) the adapter was verified against. */
 export interface AdapterUpstreamManifest {
@@ -52,7 +52,7 @@ export interface AdapterManifest {
 
 /** Narrow `unknown` to a `ManifestStatus`. */
 export function isManifestStatus(value: unknown): value is ManifestStatus {
-  return value === 'tested' || value === 'compatible' || value === 'untested' || value === 'unsupported';
+  return value === 'tested' || value === 'compatible' || value === 'untested' || value === 'unsupported' || value === 'experimental';
 }
 
 /**
@@ -107,7 +107,7 @@ export function validateManifest(value: unknown): string[] {
     errors.push('manifest.adapterVersion must be a non-empty string');
   }
   if (m.status !== undefined && !isManifestStatus(m.status)) {
-    errors.push('manifest.status must be one of tested|compatible|untested|unsupported');
+    errors.push('manifest.status must be one of tested|compatible|untested|unsupported|experimental');
   }
 
   if (typeof m.upstream !== 'object' || m.upstream === null) {

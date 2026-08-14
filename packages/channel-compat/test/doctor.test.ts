@@ -332,7 +332,7 @@ describe('formatDoctor (Task 13.2 layout)', () => {
 });
 
 describe('integration: real adapters expose a readable manifest', () => {
-  it('WeixinAdapter carries a structurally readable tested manifest', () => {
+  it('WeixinAdapter carries a structurally readable manifest (experimental until the live gate)', () => {
     const adapter = new WeixinAdapter(
       WeixinConfig({
         enabled: true,
@@ -348,7 +348,7 @@ describe('integration: real adapters expose a readable manifest', () => {
     expect(adapter.manifest).toBeDefined();
     const manifest = getAdapterManifest(adapter);
     expect(manifest?.id).toBe('weixin');
-    expect(manifest?.status).toBe('tested');
+    expect(manifest?.status).toBe('experimental');
     expect(manifest?.adapterVersion).toBe('0.8.1');
     expect(adapter.id).toBe('weixin');
   });

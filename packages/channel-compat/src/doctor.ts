@@ -146,7 +146,7 @@ export function formatDiagnostic(d: ChannelDiagnostic): string {
     lines.push('SDK: undefined');
   }
   lines.push(`Compatibility: ${d.compatibility}`);
-  if (d.compatibility === 'untested' || d.compatibility === 'unsupported') {
+  if (d.compatibility === 'untested' || d.compatibility === 'experimental' || d.compatibility === 'unsupported') {
     lines.push(`Note: ${d.compatibilityReason}`);
   }
   lines.push(`Connection: ${d.connection ?? 'unknown'}`);

@@ -1,12 +1,13 @@
 /**
  * Version state policy (execution plan Task 13.3).
  *
- * The four compatibility states and their default treatment:
+ * The five compatibility states and their default treatment:
  *
- * - `tested`     → ok
- * - `compatible` → ok
- * - `untested`   → warning (default state when there is no evidence)
- * - `unsupported`→ fail unless overridden via `opts.allowUnsupported`
+ * - tested        -> ok
+ * - compatible    -> ok
+ * - untested      -> warning (default state when there is no evidence)
+ * - experimental  -> warning (declared but not yet live-verified)
+ * - unsupported   -> fail unless overridden via opts.allowUnsupported
  *
  * The core states come from the manifest's own `status` field. When a target
  * upstream version is supplied, the manifest's declared `versionRange` is
@@ -146,6 +147,11 @@ export function versionState(
         state: 'untested',
         reason: `${manifest.id} ${manifest.adapterVersion} has not been tested against upstream; treat with caution`,
       };
+    case 'experimental':
+      return {
+        state: 'experimental',
+        reason: manifest.id + ' ' + manifest.adapterVersion + ' is declared experimental; awaiting live verification',
+      };
     default:
       return {
         state: 'unsupported',
@@ -164,6 +170,7 @@ export function manifestVerdict(state: ManifestStatus, opts: VersionPolicyOption
     case 'compatible':
       return 'ok';
     case 'untested':
+    case 'experimental':
       return 'warning';
     case 'unsupported':
       return opts.allowUnsupported ? 'warning' : 'fail';
