@@ -116,7 +116,7 @@ export class WeixinQrAuth {
 
     return {
       id: this.activeId,
-      instruction: `scan the QR code with WeChat: ${qr.qrcode}`,
+      instruction: '请使用微信扫描二维码',
       qrUrl: qr.qrcode_img_content,
       expiresAt: started + this.expiresInMs,
     };
@@ -142,6 +142,8 @@ export class WeixinQrAuth {
         verifyCode: this.pendingVerifyCode,
       });
     } catch (error) {
+      // getQrcodeStatus already maps long-poll aborts/timeouts to `wait`, so
+      // a throw here is a genuine protocol/network error — surface as failed.
       this.state.status = 'unknown';
       return {
         state: 'failed',

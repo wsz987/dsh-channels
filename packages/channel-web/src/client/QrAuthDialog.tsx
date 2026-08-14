@@ -3,12 +3,14 @@
  *
  * Self-manages the whole QR auth loop against the host: beginAuth → poll →
  * verification-code input → authenticated. Regenerate fetches a fresh
- * challenge. Renders the QR image (qrUrl is a data URL from the host; never a
- * secret), a countdown from expiresAt, an expired overlay with regenerate, and
- * a verification-code input when the host reports prompt === 'verify-code'.
+ * challenge. Encodes qrUrl into a QR image locally (data:image/* is used
+ * as-is; any other URL/string is turned into a PNG data URL via `qrcode`), a
+ * countdown from expiresAt, an expired overlay with regenerate, and a
+ * verification-code input when the host reports prompt === 'verify-code'.
  *
  * Dependency-light: plain divs + inline styles, no @deepseek-ai UI primitives.
  */
+import QRCode from 'qrcode';
 import { useEffect, useRef, useState } from 'react';
 import {
   pollAuth,
@@ -42,6 +44,8 @@ export function QrAuthDialog(props: QrAuthDialogProps) {
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [verifyCode, setVerifyCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [qrImage, setQrImage] = useState<string | null>(null);
+  const [qrRenderError, setQrRenderError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const alive = useRef(true);
 
@@ -85,8 +89,10 @@ export function QrAuthDialog(props: QrAuthDialogProps) {
     if (!challenge) return;
     if (state.phase !== 'pending') return;
 
+    let inFlight = false;
     const run = async () => {
-      if (!alive.current || !challenge) return;
+      if (!alive.current || !challenge || inFlight) return;
+      inFlight = true;
       try {
         const poll = await pollAuth(channelId, challenge.id);
         if (!alive.current) return;
@@ -112,11 +118,13 @@ export function QrAuthDialog(props: QrAuthDialogProps) {
         }
       } catch (e) {
         if (alive.current) setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        inFlight = false;
       }
     };
 
     run();
-    timer.current = setInterval(run, 2500);
+    timer.current = setInterval(run, 3000);
     return () => clearTimer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [challenge, state.phase, channelId]);
@@ -129,6 +137,48 @@ export function QrAuthDialog(props: QrAuthDialogProps) {
     }, 1000);
     return () => clearInterval(id);
   }, [challenge]);
+
+  // Encode the QR payload locally: data:image/* is used as-is, otherwise the
+  // URL/string is turned into a PNG data URL (the Weixin challenge is a login
+  // content URL, not an image URL).
+  useEffect(() => {
+    let disposed = false;
+    const source = challenge?.qrUrl;
+
+    if (!source) {
+      setQrImage(null);
+      setQrRenderError(null);
+      return;
+    }
+
+    if (source.startsWith('data:image/')) {
+      setQrImage(source);
+      setQrRenderError(null);
+      return;
+    }
+
+    QRCode.toDataURL(source, {
+      errorCorrectionLevel: 'M',
+      margin: 1,
+      width: 208,
+    })
+      .then((dataUrl) => {
+        if (!disposed) {
+          setQrImage(dataUrl);
+          setQrRenderError(null);
+        }
+      })
+      .catch((err) => {
+        if (!disposed) {
+          setQrImage(null);
+          setQrRenderError(err instanceof Error ? err.message : String(err));
+        }
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [challenge?.qrUrl]);
 
   const submitCode = async () => {
     if (!challenge || !verifyCode.trim()) return;
@@ -192,14 +242,14 @@ export function QrAuthDialog(props: QrAuthDialogProps) {
             )}
             {qrUrl ? (
               <div style={{ textAlign: 'center', padding: '12px 0' }}>
-                {qrUrl.startsWith('data:image') ? (
+                {qrImage ? (
                   <img
-                    src={qrUrl}
+                    src={qrImage}
                     alt="QR"
                     data-testid="qr-auth-image"
-                    style={{ width: 200, height: 200, objectFit: 'contain', background: '#fff', border: '1px solid #e3e3e3', borderRadius: 6 }}
+                    style={{ width: 208, height: 208, objectFit: 'contain', background: '#fff', border: '1px solid #e3e3e3', borderRadius: 6 }}
                   />
-                ) : (
+                ) : qrRenderError ? (
                   <a
                     href={qrUrl}
                     target="_blank"
@@ -209,6 +259,8 @@ export function QrAuthDialog(props: QrAuthDialogProps) {
                   >
                     {t('openLink')}
                   </a>
+                ) : (
+                  <div style={{ fontSize: 12, opacity: 0.6 }}>{t('connecting')}</div>
                 )}
                 {expiresAt && (
                   <div style={{ fontSize: 11, opacity: 0.6, marginTop: 6 }}>

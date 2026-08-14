@@ -21,8 +21,10 @@ import {
 import { KNOWN_SESSION_EVENT_TYPES, SessionId } from '@deepseek-ai/dsh-session';
 import {
   HarnessAgentGateway,
+  resolveRoute,
   type AgentGateway,
   type AgentRouteSpec,
+  type DefaultModelSelection,
   type GatewayAgentHandle,
 } from '../src/agent-manager.ts';
 import type { AgentRouteSpec as RouteSpec } from '../src/agent-router.ts';
@@ -119,10 +121,10 @@ describe('Harness compatibility (pinned rc.6 contract)', () => {
     expect(observed[1]?.options).toEqual(observed[0]?.options);
   });
 
-  it('create maps the preset into meta.agentPreset', async () => {
+  it('create sets meta.cwd to process.cwd() and maps the preset into meta.agentPreset', async () => {
     const ctx = new Context();
     const agents = new AgentRegistry(ctx);
-    const createdMeta: { agentPreset?: string }[] = [];
+    const createdMeta: { cwd?: string; agentPreset?: string }[] = [];
     agents.setFactory({
       createAgent: async (_owner, options) => {
         createdMeta.push(options.meta ?? {});
@@ -133,7 +135,26 @@ describe('Harness compatibility (pinned rc.6 contract)', () => {
 
     const gateway = new HarnessAgentGateway(ctx);
     await gateway.create('s-meta', { preset: 'coding' });
-    expect(createdMeta).toEqual([{ agentPreset: 'coding' }]);
+    // `{{cwd}}` reads session.header.cwd, so a fresh channel session must always
+    // carry the Harness process cwd; the preset rides along when specified.
+    expect(createdMeta).toEqual([{ cwd: process.cwd(), agentPreset: 'coding' }]);
+  });
+
+  it('create sets meta.cwd even when the route has no preset', async () => {
+    const ctx = new Context();
+    const agents = new AgentRegistry(ctx);
+    const createdMeta: { cwd?: string; agentPreset?: string }[] = [];
+    agents.setFactory({
+      createAgent: async (_owner, options) => {
+        createdMeta.push(options.meta ?? {});
+        return makeHandle(options.sessionId);
+      },
+      resume: async (_owner, options) => makeHandle(options.resumeSessionId),
+    } satisfies AgentFactory);
+
+    const gateway = new HarnessAgentGateway(ctx);
+    await gateway.create('s-meta', {});
+    expect(createdMeta).toEqual([{ cwd: process.cwd() }]);
   });
 
   it('the AgentHandle shape the gateway wraps is { agent: { id, followup, steer, inject, whenIdle }, dispose }', async () => {
@@ -171,5 +192,64 @@ describe('Harness compatibility (pinned rc.6 contract)', () => {
     for (const type of ['turn/start', 'assistant/chunk', 'assistant/message', 'turn/end']) {
       expect(KNOWN_SESSION_EVENT_TYPES.has(type)).toBe(true);
     }
+  });
+});
+
+describe('resolveRoute (Harness default-model fallback)', () => {
+  const fallback: DefaultModelSelection = { provider: 'deepseek', model: 'deepseek-chat' };
+
+  it('keeps an explicit provider+model route', () => {
+    const explicit = { provider: 'openai', model: 'gpt-5' };
+    expect(resolveRoute(explicit, fallback)).toBe(explicit);
+  });
+
+  it('inherits the default model when both provider and model are unset', () => {
+    expect(resolveRoute({}, fallback)).toEqual({ provider: 'deepseek', model: 'deepseek-chat' });
+    expect(resolveRoute({ preset: 'standard' }, fallback)).toEqual({
+      preset: 'standard',
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+    });
+  });
+
+  it('leaves the route unchanged when no default selection is available', () => {
+    expect(resolveRoute({}, undefined)).toEqual({});
+    expect(resolveRoute({ preset: 'x' }, undefined)).toEqual({ preset: 'x' });
+  });
+
+  it('keeps a model-only route unchanged (model already resolves {{model}})', () => {
+    expect(resolveRoute({ model: 'weixin-agent' }, fallback)).toEqual({ model: 'weixin-agent' });
+  });
+
+  it('fills the model from the default when only a provider is pinned', () => {
+    expect(resolveRoute({ provider: 'openai' }, fallback)).toEqual({
+      provider: 'openai',
+      model: 'deepseek-chat',
+    });
+  });
+});
+
+describe('HarnessAgentGateway default-model wiring', () => {
+  it('applies the default model to agentOptions when the route omits provider/model', async () => {
+    const ctx = new Context();
+    const agents = new AgentRegistry(ctx);
+    ctx.provide('agentDefaultModel', {
+      currentSelection: () => ({ provider: 'deepseek', model: 'deepseek-chat' }),
+    });
+
+    const observed: AgentOptions[] = [];
+    agents.setFactory({
+      createAgent: async (_owner, options) => {
+        observed.push(options.agentOptions ?? {});
+        return makeHandle(options.sessionId);
+      },
+      resume: async (_owner, options) => makeHandle(options.resumeSessionId),
+    } satisfies AgentFactory);
+
+    const gateway = new HarnessAgentGateway(ctx);
+    await gateway.create('s-default', { preset: 'standard' });
+
+    expect(observed).toHaveLength(1);
+    expect(observed[0]).toEqual({ provider: 'deepseek', model: 'deepseek-chat' });
   });
 });

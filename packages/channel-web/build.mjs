@@ -11,9 +11,10 @@
  * package "build" script (`tsc -p tsconfig.json && node build.mjs`). The client
  * half is NOT typechecked by tsc (esbuild strips types).
  *
- * Every bare-specifier import in the client bundle is kept as a runtime
- * require() call (react, react/jsx-runtime, @deepseek-ai/...); only relative
- * imports are inlined — exactly the Harness bundle convention (§1.2).
+ * React and react/jsx-runtime are kept as runtime require() calls (the
+ * Harness Web runtime provides them); every other bare-specifier import —
+ * notably `qrcode`, which the client needs to render QR codes locally — is
+ * bundled inline so the client has no undeclared runtime dependency.
  */
 import { build } from 'esbuild';
 import { writeFile, rm } from 'node:fs/promises';
@@ -33,8 +34,11 @@ async function buildClient() {
     jsx: 'automatic',
     sourcemap: 'external',
     sourcesContent: true,
-    // Keep every bare package import as require(); bundle only relative files.
-    packages: 'external',
+    // Harness provides React; bundle everything else (e.g. qrcode) into client.js.
+    external: [
+      'react',
+      'react/jsx-runtime',
+    ],
     outfile: root + '/lib/.client.tmp.js',
     write: false,
   });

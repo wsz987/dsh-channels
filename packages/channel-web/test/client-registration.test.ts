@@ -119,4 +119,14 @@ describe('@wsz987/channel-web client bundle', () => {
     expect(opts.id).toBe('channels');
     expect(opts.order).toBe(60);
   });
+
+  it('bundles qrcode inline instead of requiring it at runtime', () => {
+    const code = readFileSync(join(root, 'lib', 'client.js'), 'utf8');
+    // qrcode must be inlined: the Harness ModuleLoader does not provide it.
+    expect(code).not.toContain('require("qrcode")');
+    expect(code).not.toContain("require('qrcode')");
+    // React stays external (provided by the Harness runtime).
+    expect(code).toContain('require("react")');
+    expect(code).toContain('require("react/jsx-runtime")');
+  });
 });

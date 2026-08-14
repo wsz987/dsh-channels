@@ -15,7 +15,11 @@ import { startBridge } from './lifecycle.js';
 
 export const name = 'channel-harness';
 
-export const inject: string[] = ['channels', 'agents'];
+// `agentDefaultModel` is the Harness default-model service: an agent created
+// without an explicit provider/model (the channel `agent.default` route) must
+// inherit the user's Harness-wide default model so the `{{model}}` persona
+// variable always resolves. See `resolveRoute` in agent-manager.ts.
+export const inject: string[] = ['channels', 'agents', 'agentDefaultModel'];
 
 export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => {

@@ -163,6 +163,37 @@ describe('WeixinQrAuth', () => {
     expect(challenge.expiresAt).toBeTypeOf('number');
   });
 
+  it('does not leak the qrcode token into the instruction', async () => {
+    const transport = new FakeTransport();
+    transport.route('/ilink/bot/get_bot_qrcode?bot_type=3', () => ({ qrcode: 'secret-qr-token', qrcode_img_content: 'https://weixin.qq.com/q/xx' }));
+    const auth = makeAuth(transport);
+    const challenge = await auth.beginAuth();
+    // qrUrl encodes the login content, not the poll token.
+    expect(challenge.qrUrl).toBe('https://weixin.qq.com/q/xx');
+    // The raw token is never surfaced to the operator.
+    expect(challenge.instruction).not.toContain('secret-qr-token');
+    expect(challenge.instruction).toBe('请使用微信扫描二维码');
+  });
+
+  it('maps a long-poll abort on get_qrcode_status back to wait (not a failure)', async () => {
+    const transport = new FakeTransport();
+    transport.route('/ilink/bot/get_bot_qrcode?bot_type=3', () => ({ qrcode: 'qr1', qrcode_img_content: 'u' }));
+    // Simulate the client-side long-poll timeout: an AbortError, as raised by
+    // FetchTransport after `controller.abort()` fires the QR poll timeout.
+    transport.route('/ilink/bot/get_qrcode_status?qrcode=qr1', () => {
+      throw new DOMException('Aborted', 'AbortError');
+    });
+
+    const client = new ILinkClient({ baseUrl: 'https://fake.ilink.test', transport, timeoutMs: 1000, longPollTimeoutMs: 35000, now: () => 1000 });
+    const auth = new WeixinQrAuth({ client, now: () => 1000 });
+    const challenge = await auth.beginAuth();
+
+    // The timeout must be normalized to `wait`, so pollAuth stays pending and
+    // keeps polling instead of surfacing "http request aborted" as a failure.
+    const poll = await auth.pollAuth(challenge);
+    expect(poll.state).toBe('pending');
+  });
+
   it('pollAuth walk wait -> confirmed and keeps credentials', async () => {
     const transport = new FakeTransport();
     transport.route('/ilink/bot/get_bot_qrcode?bot_type=3', () => ({ qrcode: 'qr1', qrcode_img_content: 'u' }));

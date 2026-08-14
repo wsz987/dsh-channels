@@ -18,6 +18,7 @@
       inject:
         - channels
         - agents
+        - agentDefaultModel
 
     - id: channels-weixin
       name: '@wsz987/channel-weixin'

@@ -22,6 +22,7 @@ import {
   ENDPOINT_SEND_MESSAGE,
   ENDPOINT_SEND_TYPING,
   DEFAULT_BOT_TYPE,
+  DEFAULT_QR_POLL_TIMEOUT_MS,
 } from './constants.js';
 import { normalizeILinkError } from './errors.js';
 import type {
@@ -157,10 +158,13 @@ export class ILinkClient {
     }
   }
 
-  private async get(endpoint: string, signal?: AbortSignal): Promise<unknown> {
+  private async get(endpoint: string, signal?: AbortSignal, timeoutMs?: number): Promise<unknown> {
     const url = ensureSlash(this._baseUrl) + endpoint;
+    const init: { method: string; headers: Record<string, string>; timeoutMs?: number } =
+      { method: 'GET', headers: this.headers() };
+    if (timeoutMs !== undefined) init.timeoutMs = timeoutMs;
     try {
-      return await this.transport.request(url, { method: 'GET', headers: this.headers() }, signal);
+      return await this.transport.request(url, init, signal);
     } catch (error) {
       throw normalizeILinkError(error, { operation: endpoint, accountId: this.accountId });
     }
@@ -177,14 +181,29 @@ export class ILinkClient {
     };
   }
 
-  /** GET /ilink/bot/get_qrcode_status?qrcode=... (optionally &verify_code=...). */
+  /**
+   * GET /ilink/bot/get_qrcode_status?qrcode=... (optionally &verify_code=...).
+   *
+   * This is a long-poll endpoint: the server holds the request open while the
+   * status is `wait` (before the user scans). A client-side long-poll timeout
+   * is therefore normal control flow — same semantics as `getUpdates` — and is
+   * mapped back to `{ status: 'wait' }` so `WeixinQrAuth` never has to reason
+   * about HTTP timeouts: timeout → wait → pending → next poll.
+   */
   async getQrcodeStatus(qrcode: string, opts: { verifyCode?: string; signal?: AbortSignal } = {}): Promise<ILinkQrStatusResponse> {
     let endpoint = `${ENDPOINT_GET_QRCODE_STATUS}?qrcode=${encodeURIComponent(qrcode)}`;
     if (opts.verifyCode) {
       endpoint += `&verify_code=${encodeURIComponent(opts.verifyCode)}`;
     }
-    const raw = await this.get(endpoint, opts.signal);
-    return raw as ILinkQrStatusResponse;
+    try {
+      const raw = await this.get(endpoint, opts.signal, DEFAULT_QR_POLL_TIMEOUT_MS);
+      return raw as ILinkQrStatusResponse;
+    } catch (error) {
+      if (isClientAbortOrTimeout(error)) {
+        return { status: 'wait' };
+      }
+      throw error;
+    }
   }
 
   /**
@@ -286,6 +305,29 @@ export class ILinkClient {
 
 /** A long-poll getUpdates client-side timeout (AbortError from the timeout) is treated as empty. */
 function isLongPollClientTimeout(error: unknown): boolean {
-  const name = (error as Error)?.name;
-  return name === 'AbortError' || name === 'ILinkAbortError';
+  return isClientAbortOrTimeout(error);
+}
+
+/**
+ * Client-side abort/timeout (walking the `.cause` chain) — the transport and
+ * `normalizeILinkError` wrap the raw `AbortError`, so we must follow `cause`
+ * to classify a long-poll timeout as normal control flow rather than an error.
+ */
+function isClientAbortOrTimeout(error: unknown): boolean {
+  let cur: unknown = error;
+  // Guard against cycles.
+  const seen = new Set<unknown>();
+  while (cur && !seen.has(cur)) {
+    seen.add(cur);
+    const name = (cur as Error)?.name;
+    if (name === 'AbortError' || name === 'ILinkAbortError' || name === 'ILinkTimeoutError' || name === 'TimeoutError') {
+      return true;
+    }
+    const msg = typeof (cur as Error)?.message === 'string' ? (cur as Error).message : '';
+    if (msg.includes('http request aborted') || msg.includes('timed out')) {
+      return true;
+    }
+    cur = (cur as Error)?.cause;
+  }
+  return false;
 }

@@ -44,6 +44,9 @@ export const ENDPOINT_GET_UPLOAD_URL = 'ilink/bot/getuploadurl';
 /** Default long-poll timeout for `getUpdates` (server holds the request). */
 export const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 
+/** Default long-poll timeout for `get_qrcode_status` (server holds the request). */
+export const DEFAULT_QR_POLL_TIMEOUT_MS = 35_000;
+
 /** Default timeout for regular API requests (`sendMessage`, QR calls). */
 export const DEFAULT_API_TIMEOUT_MS = 15_000;
 

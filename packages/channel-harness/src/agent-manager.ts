@@ -90,6 +90,49 @@ export function optionsFor(route: AgentRouteSpec): AgentOptions | undefined {
 }
 
 /**
+ * Structural view of Harness's `agentDefaultModel` service. Declared locally
+ * (rather than importing `@deepseek-ai/dsh-agent-default-model`) so the bridge
+ * keeps its dependency surface minimal; the real service satisfies this shape.
+ */
+export interface DefaultModelSelection {
+  provider: string;
+  model: string;
+}
+
+export interface AgentDefaultModelService {
+  currentSelection(): DefaultModelSelection;
+}
+
+/**
+ * Resolve a route's provider/model, falling back to Harness's default model
+ * selection when the route leaves the model unset.
+ *
+ * `{{model}}` (the persona variable that fails with "prompt variable has no
+ * value") depends only on `model`, so a route that already pins a model —
+ * with or without a provider — is left untouched. Only a missing model is
+ * filled from the default (and the default's provider rides along when the
+ * route also left provider unset).
+ *
+ * The default model is read live (per agent creation), so new channel sessions
+ * follow the user's Harness-wide default while sessions pinned to an explicit
+ * route keep their own provider/model.
+ */
+export function resolveRoute(
+  route: AgentRouteSpec,
+  defaultSelection: DefaultModelSelection | undefined,
+): AgentRouteSpec {
+  if (route.model) return route;
+
+  if (!defaultSelection?.model) return route;
+
+  return {
+    ...route,
+    model: defaultSelection.model,
+    provider: route.provider ?? defaultSelection.provider,
+  };
+}
+
+/**
  * Probe a persisted session's existence through the persistence service's
  * `list()` membership. A session that is absent returns `false`; any backend
  * failure (corruption, unsupported format, connectivity) propagates loudly.
@@ -143,21 +186,36 @@ export class HarnessAgentGateway implements AgentGateway {
     return this.probe.exists(sessionId);
   }
 
+  /** Read Harness's live default-model selection (undefined when absent). */
+  private defaultSelection(): DefaultModelSelection | undefined {
+    const service = this.ctx.get('agentDefaultModel') as AgentDefaultModelService | undefined;
+    return service?.currentSelection();
+  }
+
   async create(sessionId: string, route: AgentRouteSpec): Promise<GatewayAgentHandle> {
+    const resolved = resolveRoute(route, this.defaultSelection());
     const handle = await this.ctx.agents.create({
       sessionId: SessionId(sessionId),
-      meta: route.preset ? { agentPreset: route.preset } : undefined,
-      agentOptions: optionsFor(route),
+      // A fresh channel session inherits the Harness process cwd (the same
+      // semantic the official Web entry applies when the user picks no
+      // workspace). `{{cwd}}` reads `session.header.cwd`, so this must be set
+      // at creation — `resume` has no `meta` and cannot add it later.
+      meta: {
+        cwd: process.cwd(),
+        ...(resolved.preset ? { agentPreset: resolved.preset } : {}),
+      },
+      agentOptions: optionsFor(resolved),
     });
     return this.wrap(handle);
   }
 
   async resume(sessionId: string, route: AgentRouteSpec): Promise<GatewayAgentHandle> {
-    // Route parity (doc H0.5): resume uses the SAME optionsFor(route) as
-    // create. NEVER `model ?? agentId`.
+    // Route parity (doc H0.5): resume uses the SAME optionsFor(resolveRoute(...))
+    // as create. NEVER `model ?? agentId`.
+    const resolved = resolveRoute(route, this.defaultSelection());
     const handle = await this.ctx.agents.resume({
       resumeSessionId: SessionId(sessionId),
-      agentOptions: optionsFor(route),
+      agentOptions: optionsFor(resolved),
     });
     return this.wrap(handle);
   }
