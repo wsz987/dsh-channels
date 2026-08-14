@@ -52,7 +52,12 @@ export function mapItem(item: ILinkMessageItem): MessagePart {
     case 2: {
       const img = item.image_item;
       if (img && hasMedia(item)) {
-        return { type: 'image', url: img.media?.full_url ?? img.url, alt: undefined };
+        return {
+          type: 'image',
+          url: img.media?.full_url ?? img.url,
+          mimeType: 'image/jpeg',
+          alt: undefined,
+        };
       }
       return { type: 'unsupported', reason: 'image without downloadable CDN fields (WX5)' };
     }

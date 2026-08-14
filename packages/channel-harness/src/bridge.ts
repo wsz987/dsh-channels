@@ -28,7 +28,7 @@ import type { AgentRouter, AgentRouteSpec } from './agent-router.js';
 import { routesEqual } from './agent-router.js';
 import { SESSION_BINDING_SCHEMA_VERSION, type SessionBinding } from './session-router.js';
 import { sessionKey } from './session-router.js';
-import { toHarnessUserMessage } from './message-converter.js';
+import { toHarnessUserMessage, type SaveImageHook } from './message-converter.js';
 import { ReplyContextStore } from './reply-context-store.js';
 
 export interface ChannelHarnessBridgeOptions {
@@ -39,6 +39,8 @@ export interface ChannelHarnessBridgeOptions {
   getAdapter(channelId: string): ChannelAdapter | undefined;
   replyContexts: ReplyContextStore;
   logger: ChannelLogger;
+  /** Optional attachment-commit seam (WX5 real image path). */
+  saveImage?: SaveImageHook;
 }
 
 export class ChannelHarnessBridge {
@@ -111,8 +113,14 @@ export class ChannelHarnessBridge {
 
     this.options.agentManager.registerBinding(binding);
 
-    const userMessage = toHarnessUserMessage(event, {
+    // One turn-scoped runId per inbound message: every outbound send scoped to
+    // this turn reuses it (the platform sees one correlation, not a fresh UUID
+    // per sender call).
+    const runId = randomUUID();
+
+    const userMessage = await toHarnessUserMessage(event, {
       includeMetadataPrefix: this.options.config.includeMetadataPrefix,
+      saveImage: this.options.saveImage,
     });
     // Register the reply context keyed by the Harness UserMessage id strictly
     // BEFORE followup.
@@ -121,6 +129,7 @@ export class ChannelHarnessBridge {
       context: {
         conversationType: event.conversation.type,
         replyToMessageId: event.message.id,
+        runId,
       },
     });
     agentRef.followup(userMessage);

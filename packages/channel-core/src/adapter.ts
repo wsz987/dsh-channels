@@ -36,6 +36,12 @@ export interface ChannelTarget extends ChannelConversationKey {
   replyToMessageId?: MessageId;
   /** Raw target data the adapter needs but core does not model. */
   raw?: unknown;
+  /**
+   * Turn-scoped correlation id shared by every send within one Harness turn.
+   * Generic: adapters that correlate outbound sends to a single turn (e.g.
+   * Weixin run_id) read it; others ignore it.
+   */
+  runId?: string;
 }
 
 export interface CreateReplyOptions {
@@ -95,6 +101,14 @@ export interface ChannelAdapter {
   stop(): Promise<void>;
 
   send(target: ChannelTarget, message: OutboundMessage): Promise<SendResult>;
+
+  /**
+   * Best-effort typing indicator. Optional: adapters with a typing API (e.g.
+   * Weixin sendtyping) implement these; the harness fires them around turn
+   * start/end and NEVER lets a failure break reply delivery.
+   */
+  startTyping?(conversationId: string): Promise<void>;
+  stopTyping?(conversationId: string): Promise<void>;
 
   createReply?(target: ChannelTarget, options?: CreateReplyOptions): Promise<ReplyHandle>;
 

@@ -401,7 +401,7 @@ describe('AgentRouter', () => {
   });
 });
 describe('message conversion', () => {
-  it('converts structured parts to text and folds metadata', () => {
+  it('converts structured parts to text and folds metadata', async () => {
     const event = makeMessageEvent({
       message: {
         id: 'm1',
@@ -411,7 +411,7 @@ describe('message conversion', () => {
         ],
       },
     });
-    const message = toHarnessUserMessage(event);
+    const message = await toHarnessUserMessage(event);
     const text = message.content
       .map((block) => (block.type === 'text' ? block.text : ''))
       .join('');
@@ -421,8 +421,8 @@ describe('message conversion', () => {
     expect(message.source).toEqual({ kind: 'plugin', plugin: 'channel-harness' });
   });
 
-  it('maps every part kind without embedding raw payloads', () => {
-    const text = partsToText([
+  it('maps every part kind without embedding raw payloads', async () => {
+    const text = await partsToText([
       { type: 'audio', durationMs: 500 },
       { type: 'file', name: 'a.pdf' },
       { type: 'location', latitude: 1, longitude: 2 },

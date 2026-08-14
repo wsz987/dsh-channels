@@ -33,7 +33,11 @@ import { SyncCursorStore } from './storage/sync-cursor.js';
 import { ContextTokenStore } from './storage/context-token.js';
 import { WeixinMonitor } from './messaging/monitor.js';
 import { OutboundSender } from './messaging/send.js';
+import { TypingController } from './messaging/typing.js';
+import { downloadMedia } from './media/download.js';
 import { manifest as weixinManifest, type WeixinManifest } from './manifest.js';
+import type { ILinkCDNMedia, ILinkMessageItem } from './ilink/types.js';
+import type { ImagePart, MessagePart } from '@dsh/channel-core';
 
 export interface WeixinAdapterDeps {
   /** Injectable transport (tests); defaults to FetchTransport. */
@@ -52,7 +56,7 @@ export class WeixinAdapter implements ChannelAdapter {
 
   readonly capabilities: ChannelCapabilities = {
     text: true,
-    image: false,
+    image: true,
     file: false,
     audio: false,
     video: false,
@@ -75,6 +79,11 @@ export class WeixinAdapter implements ChannelAdapter {
   private contextTokens?: ContextTokenStore;
   private sender?: OutboundSender;
   private monitor?: WeixinMonitor;
+  private typing?: TypingController;
+  /** Cached per-peer typing ticket (from getconfig). */
+  private readonly typingTickets = new Map<string, string>();
+  /** Peer the current ticket resolution is scoped to (single-flight turns). */
+  private typingPeer?: string;
 
   private ctx?: ChannelAdapterContext;
   private started = false;
@@ -125,7 +134,20 @@ export class WeixinAdapter implements ChannelAdapter {
 
     // The outbound path is always wired so `send()` can work even before a
     // credential is configured (the protocol omits the Authorization header).
-    this.sender = new OutboundSender({ client: this.client, contextTokens: this.contextTokens });
+    this.sender = new OutboundSender({
+      client: this.client!,
+      contextTokens: this.contextTokens,
+      cdnBaseUrl: this.client!.cdnUrl,
+      apiBaseUrl: this.client!.baseUrl,
+    });
+
+    // Best-effort typing controller (WX6). Typing ticket is fetched lazily via
+    // getconfig and cached per peer; not configured means the indicator stays off.
+    this.typing = new TypingController({
+      client: this.client!,
+      enabled: true,
+      typingTicket: () => this.resolveTypingTicket(this.typingPeer),
+    });
 
     const credential = await this.credentialStore.load();
     if (!credential) {
@@ -158,10 +180,53 @@ export class WeixinAdapter implements ChannelAdapter {
       dedupWindowMs: 30_000,
       now: this.now,
       onConnectionChange: (state) => this.onConnectionChange(state),
+      emit: async (event) => {
+        // WX5.1 image: download + decrypt local bytes before dispatch so the
+        // harness receives a genuine image attachment.
+        await this.enrichInboundMedia(event);
+        await ctx.emit(event);
+      },
     });
     this.monitor = monitor;
     this.connected = true;
     await monitor.start();
+  }
+
+  /**
+   * Download + decrypt inbound image parts and attach the plaintext bytes to
+   * the mapped event's message content. Non-image parts are left untouched and
+   * any download failure silently keeps the URL-only part (text fallback —
+   * media download must never break message delivery).
+   */
+  private async enrichInboundMedia(event: {
+    message: { content: MessagePart[] };
+    raw?: unknown;
+  }): Promise<void> {
+    if (!this.client) return;
+    const raw = event.raw as { item_list?: ILinkMessageItem[] } | undefined;
+    const items = raw?.item_list ?? [];
+    const parts = event.message.content;
+    const cdnBaseUrl = this.client.cdnUrl;
+
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i] as ImagePart | undefined;
+      if (!part || part.type !== 'image') continue;
+      const item = items[i];
+      const img = item?.image_item;
+      const media: ILinkCDNMedia | undefined = img?.media;
+      if (!media) continue;
+      try {
+        const downloaded = await downloadMedia(media, {
+          cdnBaseUrl,
+          aesKey: img?.aeskey,
+          mimeType: part.mimeType ?? 'image/jpeg',
+        });
+        part.localData = new Uint8Array(downloaded.data);
+        part.mimeType = downloaded.mimeType ?? part.mimeType ?? 'image/jpeg';
+      } catch {
+        // best effort — keep the URL-only image part (text placeholder fallback).
+      }
+    }
   }
 
   async stop(): Promise<void> {
@@ -232,6 +297,45 @@ export class WeixinAdapter implements ChannelAdapter {
   /** Expose the underlying client (tests introspection). */
   get_iLinkClient(): ILinkClient | undefined {
     return this.client;
+  }
+
+  /** Best-effort typing start (WX6). Failures never break the main flow. */
+  async startTyping(conversationId: string): Promise<void> {
+    if (!this.typing) return;
+    this.typingPeer = conversationId;
+    try {
+      await this.typing.start(conversationId);
+    } catch {
+      // best effort
+    }
+  }
+
+  /** Best-effort typing stop (WX6). Failures never break the main flow. */
+  async stopTyping(conversationId: string): Promise<void> {
+    if (!this.typing) return;
+    this.typingPeer = conversationId;
+    try {
+      await this.typing.stop(conversationId);
+    } catch {
+      // best effort
+    }
+  }
+
+  /** Resolve + cache a per-peer typing ticket via getconfig (best effort). */
+  private async resolveTypingTicket(peer?: string): Promise<string | undefined> {
+    if (!peer || !this.client) return undefined;
+    const cached = this.typingTickets.get(peer);
+    if (cached) return cached;
+    try {
+      const config = await this.client.getConfig({ ilink_user_id: peer });
+      if (config.typing_ticket) {
+        this.typingTickets.set(peer, config.typing_ticket);
+        return config.typing_ticket;
+      }
+    } catch {
+      // best effort — no ticket means the indicator silently no-ops upstream.
+    }
+    return undefined;
   }
 
   /** Persist the QR-confirmed credential into the store. */

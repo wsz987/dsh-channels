@@ -64,12 +64,27 @@ export { OutboundSender, buildSendTextPayload, type OutboundSenderOptions } from
 export { TypingController, type TypingControllerOptions } from './messaging/typing.js';
 export { FetchTransport, type HttpTransport, type HttpRequestInit } from './transport.js';
 export { manifest, type WeixinManifest } from './manifest.js';
-// WX5 media scaffold.
-export { aes128Decrypt, wx5NotImplemented } from './media/decrypt.js';
+// WX5 media.
+export { aes128Decrypt } from './media/decrypt.js';
 export { aes128Encrypt } from './media/encrypt.js';
-export { downloadMedia } from './media/download.js';
-export { uploadMedia } from './media/upload.js';
-export { sendMedia } from './media/send-media.js';
+export {
+  downloadMedia,
+  resolveDownloadUrl,
+  type DownloadedMedia,
+  type DownloadMediaOptions,
+} from './media/download.js';
+export {
+  uploadMedia,
+  buildUploadUrlRequest,
+  WX5_MEDIA_TYPE_IMAGE,
+  type UploadedMedia,
+  type UploadMediaOptions,
+} from './media/upload.js';
+export {
+  sendMedia,
+  buildSendMediaPayload,
+  type SendMediaOptions,
+} from './media/send-media.js';
 // Protocol types.
 export type {
   ILinkBaseInfo,
@@ -85,6 +100,8 @@ export type {
   ILinkQrStatusResponse,
   ILinkGetConfigRequest,
   ILinkGetConfigResponse,
+  ILinkGetUploadUrlRequest,
+  ILinkGetUploadUrlResponse,
   ILinkSendTypingRequest,
   ILinkSendTypingResponse,
   ILinkNotifyResponse,

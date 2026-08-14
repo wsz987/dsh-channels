@@ -16,6 +16,7 @@ import {
   ENDPOINT_GET_CONFIG,
   ENDPOINT_GET_QRCODE_STATUS,
   ENDPOINT_GET_UPDATES,
+  ENDPOINT_GET_UPLOAD_URL,
   ENDPOINT_NOTIFY_START,
   ENDPOINT_NOTIFY_STOP,
   ENDPOINT_SEND_MESSAGE,
@@ -28,6 +29,8 @@ import type {
   ILinkGetConfigRequest,
   ILinkGetConfigResponse,
   ILinkGetUpdatesResponse,
+  ILinkGetUploadUrlRequest,
+  ILinkGetUploadUrlResponse,
   ILinkNotifyResponse,
   ILinkQrCodeResponse,
   ILinkQrStatusResponse,
@@ -245,6 +248,13 @@ export class ILinkClient {
       });
     }
     return resp;
+  }
+
+  /** POST /ilink/bot/getuploadurl (WX5 media upload slot). */
+  async getUploadUrl(req: ILinkGetUploadUrlRequest, signal?: AbortSignal): Promise<ILinkGetUploadUrlResponse> {
+    const body = { ...req, base_info: req.base_info ?? this.baseInfo() };
+    const raw = await this.post(ENDPOINT_GET_UPLOAD_URL, body, signal);
+    return raw as ILinkGetUploadUrlResponse;
   }
 
   /** POST /ilink/bot/getconfig. */

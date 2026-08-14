@@ -26,6 +26,12 @@ export interface ChannelReplyContext {
   conversationType: 'dm' | 'group';
   replyToMessageId?: string;
   raw?: unknown;
+  /**
+   * Turn-scoped correlation id. Mined once per inbound turn and shared by every
+   * outbound send scoped to that turn, so the platform (e.g. Weixin run_id)
+   * sees ONE stable correlation instead of a fresh UUID per sender call.
+   */
+  runId?: string;
 }
 
 export class ReplyContextStore {
@@ -61,6 +67,11 @@ export class ReplyContextStore {
   /** Drop a pending context by message id (agent/inbox/discarded) — prevents leaks. */
   discard(messageId: string): void {
     this.pendingByMessageId.delete(messageId);
+  }
+
+  /** Session id of a still-pending context, if any (used to cancel typing on discard). */
+  pendingSessionId(messageId: string): string | undefined {
+    return this.pendingByMessageId.get(messageId)?.sessionId;
   }
 
   /** Active context for sessionId+turn, if any. */

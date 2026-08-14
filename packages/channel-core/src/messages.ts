@@ -20,6 +20,13 @@ export interface ImagePart {
   dataUri?: string;
   mimeType?: string;
   alt?: string;
+  /**
+   * Bytes the adapter already downloaded and decrypted (e.g. an encrypted CDN
+   * body). Core never decodes or persists these — the Harness bridge turns
+   * them into a real image attachment. Prefer over `url`/`dataUri` when the
+   * adapter has the raw image in hand.
+   */
+  localData?: Uint8Array;
 }
 
 /** A generic file reference. */
@@ -30,6 +37,8 @@ export interface FilePart {
   mimeType?: string;
   name?: string;
   size?: number;
+  /** Downloaded/decrypted bytes (see ImagePart.localData). */
+  localData?: Uint8Array;
 }
 
 /** An audio reference (e.g. voice message, ASR input). */

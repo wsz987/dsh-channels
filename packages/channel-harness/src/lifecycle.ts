@@ -33,6 +33,7 @@ import { AgentRouter } from './agent-router.js';
 import { ReplyRouter } from './reply-router.js';
 import { ChannelHarnessBridge } from './bridge.js';
 import { ReplyContextStore } from './reply-context-store.js';
+import type { SaveImageHook } from './message-converter.js';
 
 export interface BridgeLifecycle {
   dispose(): Promise<void>;
@@ -54,6 +55,30 @@ export function startBridge(
 
   const replyContexts = new ReplyContextStore();
 
+  // Optional attachment service -> real image path (WX5). Absent in deployments
+  // without an attachment backend; the converter then keeps text placeholders.
+  const attachments = ctx.get('attachments');
+  const saveImage: SaveImageHook | undefined = attachments
+    ? (input) => attachments.saveImage(input)
+    : undefined;
+
+  // Best-effort typing indicator wiring: a typing API failure must NEVER break
+  // the inbound/outbound flow, so every call is fire-and-forget with a swallow.
+  const startTyping = (sessionId: string): void => {
+    const binding = agentManager.bindingFor(sessionId);
+    if (!binding) return;
+    const adapter = getAdapter(binding.channelId);
+    if (!adapter?.startTyping) return;
+    void adapter.startTyping(binding.conversationId).catch(() => {});
+  };
+  const stopTyping = (sessionId: string): void => {
+    const binding = agentManager.bindingFor(sessionId);
+    if (!binding) return;
+    const adapter = getAdapter(binding.channelId);
+    if (!adapter?.stopTyping) return;
+    void adapter.stopTyping(binding.conversationId).catch(() => {});
+  };
+
   ctx.on(
     'agent/inbox/claimed',
     ({ agent, message, turn }: { agent: { session: { id: string } }; message: { id: string }; turn: number }) => {
@@ -62,12 +87,17 @@ export function startBridge(
         messageId: String(message.id),
         turn,
       });
+      startTyping(String(agent.session.id));
     },
   );
   ctx.on(
     'agent/inbox/discarded',
     ({ message }: { message: { id: string } }) => {
+      // Resolve the session id BEFORE dropping the pending entry so we can
+      // cancel any typing the (never-claimed) inbound would have triggered.
+      const sessionId = replyContexts.pendingSessionId(String(message.id));
       replyContexts.discard(String(message.id));
+      if (sessionId) stopTyping(sessionId);
     },
   );
 
@@ -88,6 +118,7 @@ export function startBridge(
     getAdapter,
     replyContexts,
     logger,
+    saveImage,
   });
   const stopInbound = ctx.channels.on((event) => bridge.handleChannelEvent(event));
 
