@@ -18,6 +18,8 @@ export interface AdapterUpstreamManifest {
   reference: string;
   /** Exact upstream version the adapter was tested against. */
   testedVersion: string;
+  /** Exact upstream commit SHA (source-port channels); filled only after live gate. */
+  testedCommit?: string;
   /** Range of upstream versions the adapter is believed to support, e.g. `'>=0.8.20 <0.9.0'`. */
   versionRange: string;
   /** How the adapter integrates with upstream: `'source'`, `'sdk'`, `'gateway'`, etc. */
@@ -55,6 +57,17 @@ export function isManifestStatus(value: unknown): value is ManifestStatus {
   return value === 'tested' || value === 'compatible' || value === 'untested' || value === 'unsupported' || value === 'experimental';
 }
 
+/** A pending placeholder such as `<pending-live-verification>` or empty. */
+export function isPlaceholder(value: string): boolean {
+  if (value.length === 0) return true;
+  return /^<[^>]*>$/.test(value);
+}
+
+/** A valid Git object id (7–40 hex chars; accepts full and abbreviated SHAs). */
+export function isGitSha(value: string): boolean {
+  return /^[0-9a-f]{7,40}$/i.test(value);
+}
+
 /**
  * Structural type guard over an arbitrary adapter instance. Returns the
  * adapter's manifest when it exposes a structurally valid `manifest` field,
@@ -75,6 +88,7 @@ export function getAdapterManifest(adapter: unknown): AdapterManifest | undefine
   const u = upstream as Record<string, unknown>;
   if (typeof u.reference !== 'string') return undefined;
   if (typeof u.testedVersion !== 'string') return undefined;
+  if (u.testedCommit !== undefined && typeof u.testedCommit !== 'string') return undefined;
   if (typeof u.versionRange !== 'string') return undefined;
   if (typeof u.strategy !== 'string') return undefined;
 
@@ -126,6 +140,9 @@ export function validateManifest(value: unknown): string[] {
     if (typeof u.strategy !== 'string' || u.strategy.length === 0) {
       errors.push('manifest.upstream.strategy must be a non-empty string');
     }
+    if (u.testedCommit !== undefined && typeof u.testedCommit !== 'string') {
+      errors.push('manifest.upstream.testedCommit must be a string when present');
+    }
   }
 
   if (m.sdk !== undefined) {
@@ -139,6 +156,26 @@ export function validateManifest(value: unknown): string[] {
       if (typeof sdk.testedVersion !== 'string' || sdk.testedVersion.length === 0) {
         errors.push('manifest.sdk.testedVersion must be a non-empty string');
       }
+    }
+  }
+
+  // Release-gate enforcement (R6): a `tested` manifest must carry REAL values —
+  // never placeholders, a wildcard range, or an invalid source commit.
+  // `experimental` is allowed to stay pending.
+  if (m.status === 'tested') {
+    const u = (m.upstream ?? {}) as Record<string, unknown>;
+    const testedVersion = typeof u.testedVersion === 'string' ? u.testedVersion : '';
+    const versionRange = typeof u.versionRange === 'string' ? u.versionRange : '';
+    const testedCommit = u.testedCommit;
+
+    if (isPlaceholder(testedVersion)) {
+      errors.push('manifest.upstream.testedVersion must be a real version (not a placeholder) when status is tested');
+    }
+    if (isPlaceholder(versionRange) || versionRange === '*') {
+      errors.push("manifest.upstream.versionRange must be pinned (not '*') when status is tested");
+    }
+    if (testedCommit !== undefined && (typeof testedCommit !== 'string' || !isGitSha(testedCommit))) {
+      errors.push('manifest.upstream.testedCommit must be a valid Git SHA (7-40 hex) when status is tested');
     }
   }
 

@@ -35,7 +35,7 @@ function makeManifest(overrides: Partial<AdapterManifest> = {}): AdapterManifest
     upstream: {
       reference: 'upstream gateway',
       testedVersion: '1.0.0',
-      versionRange: '*',
+      versionRange: '1.0.0',
       strategy: 'source',
     },
     status: 'tested',
