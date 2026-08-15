@@ -67,7 +67,7 @@ export function QrCodeDisplay(props: QrCodeDisplayProps) {
 
   if (!payload) {
     return (
-      <div style={{ textAlign: 'center', padding: '24px 0', fontSize: 13 }} data-testid="qr-auth-image">
+      <div style={{ textAlign: 'center', padding: '24px 0', fontSize: 13, color: 'var(--dsw-alias-label-tertiary)' }} data-testid="qr-auth-image">
         {t('waitingScan')}
       </div>
     );
@@ -76,7 +76,7 @@ export function QrCodeDisplay(props: QrCodeDisplayProps) {
   const isExternal = payload.kind === 'external-url';
   const imgStyle: Record<string, string | number> = {
     width, height: width, objectFit: 'contain', background: '#fff',
-    border: '1px solid #e3e3e3', borderRadius: 6,
+    border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6,
   };
 
   let body;
@@ -91,13 +91,13 @@ export function QrCodeDisplay(props: QrCodeDisplayProps) {
         target="_blank"
         rel="noopener noreferrer"
         data-testid="qr-auth-image"
-        style={{ color: '#1f6feb', fontSize: 13, textDecoration: 'underline' }}
+        style={{ color: 'var(--dsw-alias-label-primary-bluish)', fontSize: 13, textDecoration: 'underline' }}
       >
         {t('openLink')}
       </a>
     );
   } else {
-    body = <div style={{ fontSize: 12, opacity: 0.6 }}>{t('loading')}</div>;
+    body = <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }}>{t('loading')}</div>;
   }
 
   return (
@@ -110,14 +110,14 @@ export function QrCodeDisplay(props: QrCodeDisplayProps) {
             target="_blank"
             rel="noopener noreferrer"
             data-testid="qr-open-link"
-            style={{ color: '#1f6feb', fontSize: 12, textDecoration: 'underline' }}
+            style={{ color: 'var(--dsw-alias-label-primary-bluish)', fontSize: 12, textDecoration: 'underline' }}
           >
             {t('openLink')} ↗
           </a>
         </div>
       )}
       {payload.expiresAt != null && (
-        <div style={{ fontSize: 11, opacity: 0.6, marginTop: 6 }} data-testid="qr-countdown">
+        <div style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', marginTop: 6 }} data-testid="qr-countdown">
           {t('expiresIn')} {secondsLeft}{t('seconds')}
         </div>
       )}

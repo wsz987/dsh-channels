@@ -14,6 +14,7 @@ import {
 import { CredentialField } from './components/CredentialField.js';
 import { QrCodeDisplay } from './components/QrCodeDisplay.js';
 import { AuthProgress } from './components/AuthProgress.js';
+import { injectSetupDialogStyles } from './components/setupDialogStyles.js';
 
 export interface ChannelSetupDialogProps {
   channelId: string;
@@ -38,6 +39,11 @@ export function ChannelSetupDialog(props: ChannelSetupDialogProps) {
   const authMethodRef = useRef<AuthMethod | undefined>(method);
   const timer = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const [completedMessage, setCompletedMessage] = useState('success');
+
+  // Collapse the primitives Modal body's default top gap (see setupDialogStyles).
+  useEffect(() => {
+    injectSetupDialogStyles();
+  }, []);
 
   const clearTimer = () => {
     if (timer.current) clearInterval(timer.current);
@@ -128,6 +134,7 @@ export function ChannelSetupDialog(props: ChannelSetupDialogProps) {
       onClose={close}
       title={t('title') + ' · ' + channelId}
       closeLabel={t('close')}
+      contentClassName="dsc-setup-dialog"
       footer={
         step === 'completed' ? (
           <Button variant="primary" onClick={close} data-testid="setup-done-button">
@@ -137,8 +144,26 @@ export function ChannelSetupDialog(props: ChannelSetupDialogProps) {
       }
     >
       <div data-testid="channel-setup-dialog">
-        {error && <div style={{ fontSize: 12, color: '#d0453b', marginBottom: 10 }}>{error}</div>}
-        {step === 'loading' && <div style={{ textAlign: 'center', padding: '28px 0', fontSize: 13 }}>{t('loading')}</div>}
+        {error && (
+          <div
+            style={{
+              fontSize: 12,
+              color: 'var(--dsw-alias-state-error-primary)',
+              background: 'var(--dsw-alias-bg-layer-1)',
+              border: '1px solid var(--dsw-alias-border-l1)',
+              borderRadius: 8,
+              padding: '8px 10px',
+              marginBottom: 14,
+            }}
+          >
+            {error}
+          </div>
+        )}
+        {step === 'loading' && (
+          <div style={{ textAlign: 'center', padding: '28px 0', fontSize: 13, color: 'var(--dsw-alias-label-secondary)' }}>
+            {t('loading')}
+          </div>
+        )}
 
         {step === 'credentials' && descriptor && (
           <CredentialsForm
@@ -150,26 +175,30 @@ export function ChannelSetupDialog(props: ChannelSetupDialogProps) {
         )}
 
         {(step === 'qr' || step === 'verification') && (
-          <div data-testid="auth-flow" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div data-testid="auth-flow" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
             {session?.qr && <QrCodeDisplay payload={session.qr} width={208} t={t} />}
             {status && (
-              <AuthProgress
-                channelId={channelId}
-                sessionId={session?.id ?? ''}
-                status={status}
-                t={t}
-                onRegenerate={() => {
-                  const activeMethod = authMethodRef.current;
-                  if (activeMethod) void startAuth(activeMethod);
-                }}
-              />
+              <div style={{ width: '100%' }}>
+                <AuthProgress
+                  channelId={channelId}
+                  sessionId={session?.id ?? ''}
+                  status={status}
+                  t={t}
+                  onRegenerate={() => {
+                    const activeMethod = authMethodRef.current;
+                    if (activeMethod) void startAuth(activeMethod);
+                  }}
+                />
+              </div>
             )}
           </div>
         )}
 
         {step === 'completed' && (
           <div data-testid="setup-completed" style={{ textAlign: 'center', padding: '20px 0' }}>
-            <div style={{ fontSize: 14, color: '#1a7f37', marginBottom: 14 }}>{t(completedMessage)}</div>
+            <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--dsw-alias-state-success-primary)', marginBottom: 14 }}>
+              {t(completedMessage)}
+            </div>
           </div>
         )}
       </div>
@@ -239,13 +268,20 @@ function CredentialsForm({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }} data-testid="credentials-form">
-      <div style={{ fontSize: 12, opacity: 0.8 }}>{t('setupIntro')}</div>
+      <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: 'var(--dsw-alias-label-secondary)' }}>
+        {t('setupIntro')}
+      </p>
       {descriptor.setupUrl && (
-        <a href={descriptor.setupUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: '#1f6feb', width: 'fit-content' }}>
-          {t('openPlatform')}
+        <a
+          href={descriptor.setupUrl}
+          target="_blank"
+          rel="noreferrer"
+          style={{ fontSize: 12, color: 'var(--dsw-alias-label-primary-bluish)', textDecoration: 'none', width: 'fit-content' }}
+        >
+          {t('openPlatform')} ↗
         </a>
       )}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {descriptor.fields.map((field) => (
           <CredentialField
             key={field.name}
@@ -261,18 +297,20 @@ function CredentialsForm({
         ))}
       </div>
       {missing.length > 0 && changed.length > 0 && (
-        <div style={{ fontSize: 11, color: '#9a6700' }}>{t('incompleteSetup')}</div>
+        <div style={{ fontSize: 12, color: 'var(--dsw-alias-state-warn-primary)' }}>{t('incompleteSetup')}</div>
       )}
-      {error && <div style={{ fontSize: 11, color: '#d0453b' }}>{t('saveError')}: {error}</div>}
-      <Button
-        variant="primary"
-        onClick={() => void submit()}
-        disabled={!canSubmit}
-        data-testid="setup-save"
-        style={{ width: '100%' }}
-      >
-        {saving ? t('saving') : t('saveAndConnect')}
-      </Button>
+      {error && <div style={{ fontSize: 12, color: 'var(--dsw-alias-state-error-primary)' }}>{t('saveError')}: {error}</div>}
+      <div style={{ marginTop: 2, paddingTop: 14, borderTop: '1px solid var(--dsw-alias-border-l1)' }}>
+        <Button
+          variant="primary"
+          onClick={() => void submit()}
+          disabled={!canSubmit}
+          data-testid="setup-save"
+          style={{ width: '100%' }}
+        >
+          {saving ? t('saving') : t('saveAndConnect')}
+        </Button>
+      </div>
     </div>
   );
 }

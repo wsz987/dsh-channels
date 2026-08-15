@@ -22,7 +22,7 @@ export function AuthProgress(props: AuthProgressProps) {
 
   if (status.phase === 'authorized' || status.state === 'authenticated') {
     return (
-      <div data-testid="auth-progress" style={{ fontSize: 13, color: '#2e9e5b', textAlign: 'center', padding: '12px 0' }}>
+      <div data-testid="auth-progress" style={{ fontSize: 13, color: 'var(--dsw-alias-state-success-primary)', textAlign: 'center', padding: '12px 0' }}>
         {t('success')}
       </div>
     );
@@ -42,7 +42,7 @@ export function AuthProgress(props: AuthProgressProps) {
   if (status.phase === 'failed' || status.state === 'failed') {
     return (
       <div data-testid="auth-progress" style={{ textAlign: 'center', padding: '16px 0' }}>
-        <div style={{ fontSize: 13, color: '#d0453b', marginBottom: 12 }}>
+        <div style={{ fontSize: 13, color: 'var(--dsw-alias-state-error-primary)', marginBottom: 12 }}>
           {t('failed')}{status.detail ? ': ' + status.detail : ''}
         </div>
         <Button variant="outline" size="sm" onClick={onRegenerate} data-testid="auth-retry">
@@ -97,7 +97,7 @@ function VerifyCodeInput({
 
   return (
     <div data-testid="auth-progress" style={{ marginTop: 4 }}>
-      <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 6 }}>{t('needVerifyCode')}</div>
+      <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)', marginBottom: 6 }}>{t('needVerifyCode')}</div>
       <Input
         value={code}
         onChange={(e) => setCode(e.target.value)}
@@ -112,7 +112,7 @@ function VerifyCodeInput({
       >
         {submitting ? '…' : t('submit')}
       </Button>
-      {error && <div style={{ fontSize: 11, color: '#d0453b', marginTop: 6 }}>{error}</div>}
+      {error && <div style={{ fontSize: 11, color: 'var(--dsw-alias-state-error-primary)', marginTop: 6 }}>{error}</div>}
     </div>
   );
 }
@@ -120,7 +120,7 @@ function VerifyCodeInput({
 type CssStyle = Record<string, string | number>;
 
 function hint(): CssStyle {
-  return { fontSize: 13, opacity: 0.8, textAlign: 'center' as const, padding: '12px 0' };
+  return { fontSize: 13, color: 'var(--dsw-alias-label-secondary)', textAlign: 'center' as const, padding: '12px 0' };
 }
 
 export default AuthProgress;
