@@ -25,18 +25,20 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence';
 import { SessionId, type Session, type SessionStore } from '@deepseek-ai/dsh-session';
-import type { ChannelAdapter, ChannelEvent, ChannelLogger } from '@wsz987/channel-core';
+import type { ChannelAdapter, ChannelEvent, ChannelLogger, ChannelTarget } from '@wsz987/channel-core';
 import type { Config } from './config.js';
 import { createBindingStore } from './binding-store.js';
 import { AgentManager, HarnessAgentGateway } from './agent-manager.js';
 import { AgentRouter } from './agent-router.js';
 import { ReplyRouter } from './reply-router.js';
 import { ChannelHarnessBridge } from './bridge.js';
+import { ChannelOutboxService } from './outbox/service.js';
 import { HarnessChannelWorkspaceResolver } from './workspace-resolver.js';
-import { ReplyContextStore } from './reply-context-store.js';
+import { ReplyContextStore, type ChannelReplyContext } from './reply-context-store.js';
 import type { ChannelCommandDependencies } from './commands/index.js';
 import type { SaveImageHook } from './message-converter.js';
 import { installDebugConsoleExporter } from './debug-logger.js';
+import type { ChannelFileProvider } from './file-provider.js';
 
 export interface BridgeLifecycle {
   dispose(): Promise<void>;
@@ -68,32 +70,43 @@ export function startBridge(
     ? (input) => attachments.saveImage(input)
     : undefined;
 
+  // Optional generic-file extension. Harness currently has a native image
+  // service but no generic FileBlock/FileAttachment surface, so deployments
+  // may provide this separately without coupling document parsers to the bridge.
+  const fileProvider = ctx.get('channelFiles') as ChannelFileProvider | undefined;
+
   // Best-effort typing indicator wiring: a typing API failure must NEVER break
   // the inbound/outbound flow, so every call is fire-and-forget with a swallow.
-  const startTyping = (sessionId: string): void => {
+  const startTyping = (sessionId: string, context?: ChannelReplyContext): void => {
     const binding = agentManager.bindingFor(sessionId);
     if (!binding) return;
     const adapter = getAdapter(binding.channelId);
-    if (!adapter?.startTyping) return;
-    void adapter.startTyping(binding.conversationId).catch(() => {});
+    if (adapter?.startTypingForTarget && context) {
+      void adapter.startTypingForTarget(typingTarget(binding, context)).catch(() => {});
+      return;
+    }
+    if (adapter?.startTyping) void adapter.startTyping(binding.conversationId).catch(() => {});
   };
-  const stopTyping = (sessionId: string): void => {
+  const stopTyping = (sessionId: string, context?: ChannelReplyContext): void => {
     const binding = agentManager.bindingFor(sessionId);
     if (!binding) return;
     const adapter = getAdapter(binding.channelId);
-    if (!adapter?.stopTyping) return;
-    void adapter.stopTyping(binding.conversationId).catch(() => {});
+    if (adapter?.stopTypingForTarget && context) {
+      void adapter.stopTypingForTarget(typingTarget(binding, context)).catch(() => {});
+      return;
+    }
+    if (adapter?.stopTyping) void adapter.stopTyping(binding.conversationId).catch(() => {});
   };
 
   ctx.on(
     'agent/inbox/claimed',
     ({ agent, message, turn }: { agent: { session: { id: string } }; message: { id: string }; turn: number }) => {
-      replyContexts.claim({
+      const context = replyContexts.claim({
         sessionId: String(agent.session.id),
         messageId: String(message.id),
         turn,
       });
-      startTyping(String(agent.session.id));
+      startTyping(String(agent.session.id), context);
     },
   );
   ctx.on(
@@ -101,9 +114,11 @@ export function startBridge(
     ({ message }: { message: { id: string } }) => {
       // Resolve the session id BEFORE dropping the pending entry so we can
       // cancel any typing the (never-claimed) inbound would have triggered.
-      const sessionId = replyContexts.pendingSessionId(String(message.id));
-      replyContexts.discard(String(message.id));
-      if (sessionId) stopTyping(sessionId);
+      const messageId = String(message.id);
+      const sessionId = replyContexts.pendingSessionId(messageId);
+      const context = replyContexts.pendingContext(messageId);
+      replyContexts.discard(messageId);
+      if (sessionId) stopTyping(sessionId, context);
     },
   );
 
@@ -120,6 +135,19 @@ export function startBridge(
   // the bridge back to the bridge's own fresh-session bootstrap. The arrow only
   // calls `bridge.startNewSession` at runtime (when a command actually runs), by
   // which point the bridge is assigned (definite-assignment assertion below).
+  // Durable outbox (plan M6 / §60-§71 / §95): the proactive send path. The
+  // binding authority is the DURABLE store (never AgentManager's hint cache),
+  // and the adapter lookup + asset store are the same ones the reply pipeline
+  // uses. Optional: absent -> the send_channel_message tool is not installed.
+  const outbox = new ChannelOutboxService({
+    bindingStore,
+    getAdapter,
+    attachmentResolver: fileProvider
+      ? (attachmentId, sessionId) => fileProvider.resolveAttachment(attachmentId, sessionId)
+      : undefined,
+    logger,
+  });
+
   let bridge!: ChannelHarnessBridge;
   const commandDeps: ChannelCommandDependencies = {
     startNewSession: (agent) => bridge.startNewSession(agent),
@@ -133,9 +161,11 @@ export function startBridge(
     replyContexts,
     logger,
     saveImage,
+    fileProvider,
     ctx,
     commandDeps,
     workspaceResolver,
+    outbox,
   });
   const stopInbound = ctx.channels.on((event) => bridge.handleChannelEvent(event));
 
@@ -166,6 +196,22 @@ export function startBridge(
   return {
     dispose,
     handleChannelEvent: (event) => bridge.handleChannelEvent(event),
+  };
+}
+
+function typingTarget(
+  binding: { channelId: string; accountId: string; conversationId: string; threadId?: string },
+  context: ChannelReplyContext,
+): ChannelTarget {
+  return {
+    channelId: binding.channelId as ChannelTarget['channelId'],
+    accountId: binding.accountId as ChannelTarget['accountId'],
+    conversationId: binding.conversationId as ChannelTarget['conversationId'],
+    threadId: binding.threadId as ChannelTarget['threadId'],
+    conversationType: context.conversationType,
+    replyToMessageId: context.replyToMessageId as ChannelTarget['replyToMessageId'],
+    raw: context.raw,
+    runId: context.runId,
   };
 }
 

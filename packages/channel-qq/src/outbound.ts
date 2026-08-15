@@ -3,7 +3,9 @@
  *
  * Text-only messages go through `sendText`; messages carrying a media part
  * with a resolvable source go through `sendMedia` (fileType mapped from the
- * part type). Failures are wrapped in `ChannelSendError`.
+ * part type). A part's `localData` bytes (image or generic file) are sent via
+ * `sendMedia` with the SDK `fileData` base64 carrier (plan §23 / §65 / §85).
+ * Failures are wrapped in `ChannelSendError`.
  */
 import type {
   ChannelLogger,
@@ -58,10 +60,8 @@ function hasMedia(message: OutboundMessage): boolean {
       case 'image':
       case 'audio':
       case 'video':
-        if (part.url || part.dataUri) return true;
-        break;
       case 'file':
-        if (part.url || part.dataUri) return true;
+        if (part.url || part.dataUri || part.localData !== undefined) return true;
         break;
       default:
         break;

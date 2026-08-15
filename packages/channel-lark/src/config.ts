@@ -37,6 +37,8 @@ export interface LarkCardConfig {
    * `false`, deltas buffer locally and the card is only created at `finish`.
    */
   createOnFirstDelta: boolean;
+  /** Add/remove the Feishu `Typing` reaction while generating a reply. */
+  typingIndicator: boolean;
 }
 
 /**
@@ -114,6 +116,7 @@ export const Config: Schema<LarkConfig> = Schema.object({
   }),
   card: Schema.object({
     createOnFirstDelta: Schema.boolean().default(true),
+    typingIndicator: Schema.boolean().default(true),
   }),
   upstream: Schema.object({
     mode: Schema.union(['sdk', 'gateway']).default('sdk'),

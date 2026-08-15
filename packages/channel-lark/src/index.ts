@@ -48,7 +48,7 @@ export { LarkAdapter, resolveDomain, type LarkAdapterDeps } from './adapter.js';
 export { LarkCardReply, type LarkCardStatus, type LarkCardUpdate } from './card.js';
 export { InboundProcessor } from './inbound.js';
 export { OutboundSender } from './outbound.js';
-export { HttpLarkUpstream, type LarkOutbound, type LarkUpstream } from './upstream.js';
+export { HttpLarkUpstream, type LarkOutbound, type LarkUpstream, type LarkFileRef } from './upstream.js';
 export {
   LarkOpenApiOutbound,
   receiveIdType,
@@ -61,6 +61,10 @@ export {
   type LarkPatchMessagePayload,
   type LarkCreateImagePayload,
   type LarkCreateImageResult,
+  fileTypeFromName,
+  type LarkFileType,
+  type LarkCreateFilePayload,
+  type LarkCreateFileResult,
   type LarkApiResponse,
 } from './openapi-outbound.js';
 export {
@@ -72,6 +76,24 @@ export {
   type LarkSdkUpstreamOptions,
   type LarkMessageEventData,
 } from './lark-sdk-upstream.js';
+export {
+  LarkOpenApiMediaPort,
+  type LarkMediaClient,
+  type LarkMediaPort,
+  type LarkMediaPortOptions,
+  type LarkMessageResourceGetPayload,
+  type LarkMessageResourceResult,
+  type LarkImageGetPayload,
+  type LarkImageCreatePayload,
+  type LarkImageCreateResult,
+  type LarkFileCreatePayload,
+  type LarkFileCreateResult,
+} from './upstream/media-port.js';
+export {
+  ImageHydrator,
+  classifyIngressFailure,
+  type ImageHydratorOptions,
+} from './media-hydrator.js';
 export { FetchTransport, type HttpTransport } from './transport.js';
 export {
   mapInbound,

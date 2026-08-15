@@ -25,7 +25,7 @@
 - **一个包接入多渠道**：内置微信 / QQ / 钉钉 / 飞书，装完即在 Harness Web「设置 → 渠道」统一配置与扫码授权
 - **扫码即登录**：微信扫码免配置，钉钉 / 飞书支持扫码授权或填写平台凭证，QQ 填写 AppID / AppSecret 即可
 - **流式回复**：QQ / 钉钉 / 飞书支持边生成边输出
-- **附件**：微信已支持收发图片，其余渠道待接入
+- **附件**：微信 / QQ / 飞书 / 钉钉已接入 Harness 官方原生图片附件；通用文件（PDF / DOCX / XLSX / 文本）工具内容提取理解；（见[渠道总览](#-渠道总览)）
 - **工作区隔离**：各渠道 / 账号会话空间相互独立，互不串扰
 - **渠道指令**：会话内支持 `/new` 等斜杠指令
 - **凭据安全**：基于 DeepSeek Harness 凭据服务（`ctx.credentials`）存储密钥，扫码凭据持久化、重启免登录
@@ -38,8 +38,8 @@
 # 1. 安装 bundle 到 web profile（首次自动初始化 profile，装完自动合并 cordis.patch.yml）
 npx @deepseek-ai/dsh plugin --profile web add @wsz987/dsh-channels
 
-# 2. 确认合并：应看到 channels-service / channels-harness / channels-control /
-#    channels-web / channels-weixin / channels-qq / channels-dingtalk / channels-lark
+# 2. 确认合并：应看到 channels-service / channels-files / channels-harness /
+#    channels-control / channels-web 及四个渠道插件
 npx @deepseek-ai/dsh --profile web --dump-config
 
 # 3. 启动 Harness（等价于 --profile web）
@@ -159,12 +159,20 @@ pnpm web:debug             # 启动 dsh web
 
 | 渠道 | 现在能做什么 | 状态 |
 | --- | --- | --- |
-| 微信 | 文本对话 · 图片收发 | ✅ |
-| QQ | 文本对话 · 流式回复 | ✅ |
-| 钉钉 | 文本对话 · 流式回复 | ✅ |
-| 飞书 | 文本对话 · 流式回复 | ✅ |
+| 微信 | 文本对话 · 原生图片（收/发）· 通用文件预览 · 主动文本/媒体外发 | ✅ |
+| QQ | 文本对话 · 流式回复 · 原生图片（收/发）· 通用文件预览 · 主动文本/媒体外发 | ✅ |
+| 钉钉 | 文本对话 · 流式回复 · 原生图片（收/发）· 通用文件预览 · 主动文本（SDK 模式）| ✅ |
+| 飞书 | 文本对话 · 流式回复 · 原生图片（收/发）· 通用文件预览 · 主动文本/媒体外发 | ✅ |
 
-> 入站媒体（图片 / 文件 / 音频 / 视频）尚未接入 Harness 真实附件——除微信图片外，其余渠道进入模型时仍为文本占位符；file / audio / video 需等 Harness 官方扩展（见 [接入计划](docs/dsh-channels-unified-attachments-outbox-final-execution-plan-2026-08-16.md)）。
+> **附件接入（final 基线）**：DeepSeek Harness 官方 v1 已支持真实栅格图片附件；`dsh-channels` 的公共 Harness 图片附件链路已经完成。钉钉图片下载链路已接入，但在 offline contract 与 live proof 均通过前保持验证中；已验证渠道统一走 Harness `saveImage()` / `ImageBlock` 原生链路。
+>
+> **图片 + 通用文件**：图片走 Harness 官方 `ctx.attachments` 原生链路；PDF / DOCX / XLSX / 文本由可选包 `@wsz987/channel-files` 提供 Private Channel Asset Store、Extractors 和 `read_channel_attachment`。PDF 使用 `unpdf`（PDF.js），不是项目自写解析器。音频 / 视频因 Harness v1 没有对应原生 Attachment/ContentBlock，暂继续降级或等待专门处理能力（ASR / 转录，见接入计划 P1）。
+>
+> **微信入站文件大小**：微信下载的图片和通用文件统一限制为 **100 MiB**；超过该大小会在下载阶段被拒绝，不会写入附件存储。
+>
+> `channels-files` 在 bundle 中默认启用，但不是 `channel-harness` 的必需依赖。要等待 Harness 官方通用文件能力或只保留文件占位符，可从 profile patch 删除 `id: channels-files`；文本、会话和官方图片链路不受影响。
+>
+> **主动外发（outbox）**：`send_channel_message` Harness 工具支持主动文本/媒体外发；各渠道 proactive 能力：飞书 ✅、QQ ✅、钉钉 仅 SDK 模式 ✅（gateway 模式 fail-closed）、微信按上游能力对外暴露。
 
 **第三方渠道**：如 Telegram 等，待接入。
 
@@ -208,7 +216,8 @@ pnpm install && pnpm build && pnpm typecheck && pnpm test
 | --- | --- |
 | `packages/channels` | 对外 bundle `@wsz987/dsh-channels`（聚合 patch） |
 | `packages/channel-core` | **Channel Contract**：类型 + `ctx.channels` Service + `defineChannelAdapter` |
-| `packages/channel-harness` | 渠道 ↔ Harness 桥（唯一允许 import Harness API 的地方） |
+| `packages/channel-harness` | 渠道 ↔ Harness 桥；只保留可选 `ChannelFileProvider` 端口 |
+| `packages/channel-files` | 可选通用文件扩展：私有存储、成熟文档解析库、读取工具 |
 | `packages/channel-control` | 控制面：配置 / 凭据 / 扫码授权 / 运行时生命周期 |
 | `packages/channel-{weixin,qq,dingtalk,lark}` | 内置渠道适配器 |
 | `packages/channel-{compat,testkit,verify,web}` | 契约验证 / 测试工具 / Web 可视化 |

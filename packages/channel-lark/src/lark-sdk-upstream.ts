@@ -25,7 +25,7 @@
  * client and drive a real `EventDispatcher` with v1 event envelopes.
  */
 import { EventDispatcher, LoggerLevel } from '@larksuiteoapi/node-sdk';
-import type { CardCreateResult, LarkMediaRef, LarkOutbound, LarkUpstream } from './upstream.js';
+import type { CardCreateResult, LarkFileRef, LarkMediaRef, LarkOutbound, LarkUpstream } from './upstream.js';
 
 /** Event type key for inbound message delivery (v1 event). */
 export const MESSAGE_EVENT_KEY = 'im.message.receive_v1';
@@ -228,6 +228,10 @@ export class LarkSdkUpstream implements LarkUpstream {
     return this.options.outbound.sendMedia(to, media);
   }
 
+  sendFile(to: string, file: LarkFileRef): Promise<unknown> {
+    return this.options.outbound.sendFile(to, file);
+  }
+
   createCard(conversationId: string, text: string): Promise<CardCreateResult> {
     return this.options.outbound.createCard(conversationId, text);
   }
@@ -242,6 +246,14 @@ export class LarkSdkUpstream implements LarkUpstream {
 
   failCard(cardId: string, reason?: string): Promise<unknown> {
     return this.options.outbound.failCard(cardId, reason);
+  }
+
+  startTyping(messageId: string): Promise<void> {
+    return this.options.outbound.startTyping?.(messageId) ?? Promise.resolve();
+  }
+
+  stopTyping(messageId: string): Promise<void> {
+    return this.options.outbound.stopTyping?.(messageId) ?? Promise.resolve();
   }
 }
 

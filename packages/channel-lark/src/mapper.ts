@@ -20,6 +20,9 @@ import type {
   AccountId,
   ChannelId,
   ConversationId,
+  AudioPart,
+  FilePart,
+  ImagePart,
   MessageId,
   MessagePart,
   MessageReceived,
@@ -27,8 +30,19 @@ import type {
   OutboundMessage,
   SenderId,
   ThreadId,
+  VideoPart,
 } from '@wsz987/channel-core';
 import { textParts } from '@wsz987/channel-core';
+
+
+/**
+ * A genuine http(s) URL (the only string allowed in the `url` carrier per
+ * plan §9). Anything else (image_key, file_key, mediaId, …) is a
+ * platform-opaque handle and must be mapped into `resourceRef` instead.
+ */
+function isHttpUrl(value: string | undefined): value is string {
+  return typeof value === 'string' && /^https?:\/\//i.test(value);
+}
 
 export interface LarkInboundMeta {
   channel: ChannelId;
@@ -143,15 +157,47 @@ function partsFor(raw: LarkRaw): MessagePart[] {
     case 'text':
       return textParts(raw.content ?? '');
     case 'image':
-    case 'picture':
-      return [{ type: 'image', url: raw.picUrl ?? raw.mediaUrl, alt: raw.title }];
+    case 'picture': {
+      // Per plan §28/§9 a Lark image locator is an opaque image_key (NOT a
+      // URL): it MUST live in `resourceRef`, never `url` — `url` is reserved
+      // for genuine http(s) URLs. The real SDK path sets picUrl = image_key
+      // (opaque → resourceRef); a legacy gateway that already resolved it to
+      // an http(s) URL keeps the URL carrier.
+      const locator = raw.picUrl ?? raw.mediaUrl;
+      const part: ImagePart = { type: 'image', alt: raw.title };
+      if (isHttpUrl(locator)) part.url = locator;
+      else if (locator) part.resourceRef = locator;
+      return [part];
+    }
     case 'audio':
-    case 'voice':
-      return [{ type: 'audio', url: raw.mediaUrl, durationMs: raw.durationMs }];
-    case 'video':
-      return [{ type: 'video', url: raw.mediaUrl, durationMs: raw.durationMs }];
-    case 'file':
-      return [{ type: 'file', url: raw.mediaUrl, name: raw.title }];
+    case 'voice': {
+      // Per plan 28 the SDK audio body carries an opaque file_key; if it is
+      // not a genuine http(s) URL it maps to resourceRef (resolved later by the
+      // media port), mirroring the image-key rule (plan 9).
+      const locator = raw.mediaUrl;
+      const part: AudioPart = { type: 'audio', durationMs: raw.durationMs };
+      if (isHttpUrl(locator)) part.url = locator;
+      else if (locator) part.resourceRef = locator;
+      return [part];
+    }
+    case 'video': {
+      const locator = raw.mediaUrl;
+      const part: VideoPart = { type: 'video', durationMs: raw.durationMs };
+      if (isHttpUrl(locator)) part.url = locator;
+      else if (locator) part.resourceRef = locator;
+      return [part];
+    }
+    case 'file': {
+      // Per plan 28/84 the SDK file body carries an opaque file_key (currently
+      // routed through raw.mediaUrl by lark-sdk-upstream.ts). A genuine
+      // http(s) URL stays in url (plan 9); anything else maps to resourceRef,
+      // which the media port resolves into localData before emit.
+      const locator = raw.mediaUrl;
+      const part: FilePart = { type: 'file', name: raw.title };
+      if (isHttpUrl(locator)) part.url = locator;
+      else if (locator) part.resourceRef = locator;
+      return [part];
+    }
     case 'link':
       return textParts(raw.title ?? raw.content ?? '');
     default:

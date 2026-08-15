@@ -1,4 +1,13 @@
 /**
+ * Classification: A — DSH glue getUpdates loop [keep].
+ *
+ * DSH's receive loop (cursor + dedup + context-token capture + dispatch). The
+ * official monitor (monitor/monitor.js) is coupled to the OpenClaw channel
+ * lifecycle (PluginRuntime) and is not reusable host-neutrally. This loop is
+ * DSH orchestration, not a duplicated wire protocol. Keep; driven by
+ * upstream/tencent-upstream.ts startMonitor().
+ */
+/**
  * WeixinMonitor — the getUpdates loop (doc §16-18).
  *
  * Flow per round:
@@ -18,7 +27,7 @@
  * reconnect config. On AbortSignal it exits cleanly. Notify lifecycle
  * (notifystart/notifystop) is best-effort.
  */
-import type { ChannelAdapterContext } from '@wsz987/channel-core';
+import type { ChannelAdapterContext, MessagePart } from '@wsz987/channel-core';
 import type { ILinkClient } from '../ilink/client.js';
 import type { ILinkMessage, WeixinInboundMeta } from '../ilink/types.js';
 import type { SyncCursorStore } from '../storage/sync-cursor.js';
@@ -201,6 +210,12 @@ export class WeixinMonitor {
     }
     const event = mapInbound(msg, this.meta);
     await this.emitMsg(event);
+    // The upstream callback hydrates media before dispatch. Log afterward so
+    // localDataBytes reports the final adapter-visible state, not raw mapping.
+    this.ctx.logger.info(
+      `[channel-weixin] inbound message ${event.message.id} from ${event.sender.id} in ${event.conversation.id}`,
+      { parts: summarizeParts(event.message.content) },
+    );
     // Only after a successful emit is the message a committed dedup entry.
     await this.dedup.commit(key);
   }
@@ -211,6 +226,40 @@ export class WeixinMonitor {
   }
 }
 
+
+/** Compact per-part summary for inbound message logs (debug diagnostics). */
+function summarizeParts(parts: readonly MessagePart[]): unknown[] {
+  return parts.map((part) => {
+    switch (part.type) {
+      case 'text':
+        return { type: 'text', text: part.text.slice(0, 80) };
+      case 'image':
+        return {
+          type: 'image',
+          url: part.url,
+          resourceRef: part.resourceRef,
+          mimeType: part.mimeType,
+          localDataBytes: part.localData?.byteLength,
+          ingressFailure: part.ingressFailure,
+        };
+      case 'file':
+        return {
+          type: 'file',
+          name: part.name,
+          size: part.size,
+          mimeType: part.mimeType,
+          localDataBytes: part.localData?.byteLength,
+          ingressFailure: part.ingressFailure,
+        };
+      case 'audio':
+        return { type: 'audio', durationMs: part.durationMs, localDataBytes: part.localData?.byteLength };
+      case 'video':
+        return { type: 'video', durationMs: part.durationMs, localDataBytes: part.localData?.byteLength };
+      default:
+        return { type: part.type };
+    }
+  });
+}
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     if (signal.aborted) {

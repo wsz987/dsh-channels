@@ -1,4 +1,12 @@
 /**
+ * Classification: A — DSH pure mapping [keep].
+ *
+ * Pure iLink-message → Channel MessagePart mapping, no I/O, no platform
+ * algorithm. The official package's inbound mapper (messaging/inbound.js) is a
+ * different model surface (OpenClaw messages); DSH keeps its own neutral
+ * mapper for the Channel contract. Keep.
+ */
+/**
  * Pure inbound mapper — an iLink {@link ILinkMessage} -> Channel
  * {@link MessageReceived}. No I/O.
  *

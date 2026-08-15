@@ -144,3 +144,64 @@ describe('mediaOpts (dataUri → fileData)', () => {
     expect(decodeDataUri('data:;base64,AAAA')).toBe('AAAA');
   });
 });
+
+describe('mediaOpts — localData → base64 fileData (M7B)', () => {
+  it('sends a file part with localData as base64 fileData (not url)', () => {
+    const bytes = new TextEncoder().encode('hello-pdf-bytes');
+    const opts = mediaOpts({
+      parts: [{ type: 'file', localData: bytes, name: 'r.pdf', mimeType: 'application/pdf' }],
+    });
+    expect(opts.fileType).toBe(MediaFileType.FILE);
+    expect(opts.fileData).toBe(Buffer.from(bytes).toString('base64'));
+    expect(opts.url).toBeUndefined();
+    expect(opts.fileName).toBe('r.pdf');
+  });
+
+  it('sends an image part with localData as base64 fileData (image path unchanged)', () => {
+    const bytes = new TextEncoder().encode('png-bytes');
+    const opts = mediaOpts({ parts: [{ type: 'image', localData: bytes, name: 'p.png' }] });
+    expect(opts.fileType).toBe(MediaFileType.IMAGE);
+    expect(opts.fileData).toBe(Buffer.from(bytes).toString('base64'));
+    expect(opts.url).toBeUndefined();
+  });
+
+  it('prefers localData over a real url', () => {
+    const bytes = new TextEncoder().encode('local-wins');
+    const opts = mediaOpts({ parts: [{ type: 'file', url: 'https://e/r.pdf', localData: bytes }] });
+    expect(opts.fileData).toBe(Buffer.from(bytes).toString('base64'));
+    expect(opts.url).toBeUndefined();
+  });
+});
+
+describe('OutboundSender — generic file via sendMedia (M7B)', () => {
+  it('sends a file part with localData through sendMedia', async () => {
+    const client = new FakeQQSdkClient();
+    const sender = new OutboundSender(client, silentLogger);
+    const bytes = new TextEncoder().encode('file-bytes');
+    const result = await sender.send(
+      { ...targetFn(), conversationType: 'group' },
+      { parts: [{ type: 'file', localData: bytes, name: 'r.pdf', size: bytes.byteLength }] },
+    );
+    expect(result.delivered).toBe(true);
+    expect(client.mediaCalls).toHaveLength(1);
+    expect(client.mediaCalls[0]?.target).toEqual({ scope: 'group', targetId: 'conv_1', msgId: undefined });
+    // The raw bytes travel to the fake client untouched (plan §96 Adapter → Fake).
+    expect(client.mediaCalls[0]?.message.parts[0]).toEqual({
+      type: 'file',
+      localData: bytes,
+      name: 'r.pdf',
+      size: bytes.byteLength,
+    });
+    expect(client.textCalls).toHaveLength(0);
+  });
+
+  it('still sends an image with localData via sendMedia (no text fallback)', async () => {
+    const client = new FakeQQSdkClient();
+    const sender = new OutboundSender(client, silentLogger);
+    const bytes = new TextEncoder().encode('img-bytes');
+    await sender.send(targetFn(), { parts: [{ type: 'image', localData: bytes, alt: 'x' }] });
+    expect(client.mediaCalls).toHaveLength(1);
+    expect(client.textCalls).toHaveLength(0);
+  });
+});
+

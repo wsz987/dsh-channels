@@ -39,9 +39,21 @@ interface DingTalkRaw {
   content?: string;
   picUrl?: string;
   mediaUrl?: string;
+  /** Opaque picture media id (official robot schema; not a URL). */
+  picMediaId?: string;
+  /** Per-message media download code (official robot schema). */
+  picDownloadCode?: string;
+  /** Per-message media download code for audio/video/file (official schema). */
+  downloadCode?: string;
   durationMs?: number;
   title?: string;
+  richTextImages?: Array<{ pictureUrl?: string; downloadCode?: string }>;
   [key: string]: unknown;
+}
+
+/** True only for genuine http(s) locators (plan §9: url is reserved for those). */
+function isHttpUrl(locator: string | undefined): locator is string {
+  return typeof locator === 'string' && /^https?:\/\//i.test(locator);
 }
 
 /** Stable hash for ids when the gateway omits a msgId. */
@@ -88,15 +100,41 @@ function partsFor(raw: DingTalkRaw): MessagePart[] {
     case 'text':
       return textParts(raw.content ?? '');
     case 'image':
-    case 'picture':
-      return [{ type: 'image', url: raw.picUrl ?? raw.mediaUrl, alt: raw.title }];
+    case 'picture': {
+      // Official robot picture messages carry an opaque picMediaId/downloadCode
+      // (NOT a URL): resourceRef holds the opaque handle, url only a genuine
+      // http(s) URL (plan §9). Resolving resourceRef is the upstream's job.
+      const url = isHttpUrl(raw.picUrl) ? raw.picUrl : undefined;
+      const opaque = raw.picMediaId ?? raw.picDownloadCode ?? (raw.picUrl ? raw.picUrl : undefined);
+      return [{ type: 'image', ...(url ? { url } : opaque ? { resourceRef: opaque } : {}), alt: raw.title }];
+    }
+    case 'richText': {
+      const parts: MessagePart[] = textParts(raw.content ?? '');
+      for (const image of raw.richTextImages ?? []) {
+        const url = isHttpUrl(image.pictureUrl) ? image.pictureUrl : undefined;
+        const resourceRef = image.downloadCode ? `downloadCode:${image.downloadCode}` : undefined;
+        parts.push({ type: 'image', ...(url ? { url } : resourceRef ? { resourceRef } : {}) });
+      }
+      return parts.length > 0
+        ? parts
+        : [{ type: 'unsupported', reason: "empty dingtalk richText message" }];
+    }
     case 'audio':
-    case 'voice':
-      return [{ type: 'audio', url: raw.mediaUrl, durationMs: raw.durationMs }];
-    case 'video':
-      return [{ type: 'video', url: raw.mediaUrl, durationMs: raw.durationMs }];
-    case 'file':
-      return [{ type: 'file', url: raw.mediaUrl, name: raw.title }];
+    case 'voice': {
+      const url = isHttpUrl(raw.mediaUrl) ? raw.mediaUrl : undefined;
+      const opaque = raw.downloadCode ?? (raw.mediaUrl ? raw.mediaUrl : undefined);
+      return [{ type: 'audio', ...(url ? { url } : opaque ? { resourceRef: opaque } : {}), durationMs: raw.durationMs }];
+    }
+    case 'video': {
+      const url = isHttpUrl(raw.mediaUrl) ? raw.mediaUrl : undefined;
+      const opaque = raw.downloadCode ?? (raw.mediaUrl ? raw.mediaUrl : undefined);
+      return [{ type: 'video', ...(url ? { url } : opaque ? { resourceRef: opaque } : {}), durationMs: raw.durationMs }];
+    }
+    case 'file': {
+      const url = isHttpUrl(raw.mediaUrl) ? raw.mediaUrl : undefined;
+      const opaque = raw.downloadCode ?? (raw.mediaUrl ? raw.mediaUrl : undefined);
+      return [{ type: 'file', ...(url ? { url } : opaque ? { resourceRef: opaque } : {}), name: raw.title }];
+    }
     case 'link':
       return textParts(raw.title ?? raw.content ?? '');
     default:

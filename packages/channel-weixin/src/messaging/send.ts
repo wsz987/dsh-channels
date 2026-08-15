@@ -1,4 +1,13 @@
 /**
+ * Classification: C — duplicate send payload + orchestration [@deprecated upstream-gap].
+ *
+ * Outbound text/image send payload building + CDN upload routing. The official
+ * messaging/send.js (sendMessageWeixin / sendImageMessageWeixin) is OpenClaw
+ * coupled (imports api/api + util/logger). The text payload builders here
+ * mirror the official shapes; kept behind the facade as an upstream-gap. The
+ * local type/shape enums mirror the Tencent source reference.
+ */
+/**
  * OutboundSender — builds the real iLink sendmessage payload and calls the
  * client. The ReplyRouter never generates Weixin protocol fields; they live
  * here.

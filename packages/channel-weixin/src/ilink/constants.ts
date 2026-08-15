@@ -1,4 +1,14 @@
 /**
+ * Classification: C — duplicate protocol constants [@deprecated upstream-gap].
+ *
+ * iLink endpoint table + header names + wire values self-maintained. The
+ * official package's constants live in api/types.js (endpoint paths are NOT
+ * exported there — they are hard-coded inside api/api.js, which is OpenClaw
+ * coupled). The endpoint PATH strings here are protocol knowledge that the
+ * official coupled module owns; kept behind the facade as an upstream-gap
+ * until Tencent exposes public host-neutral API endpoints. Marked upstream-gap.
+ */
+/**
  * Tencent Weixin iLink protocol constants.
  *
  * Endpoint paths, header names and fixed wire values for the direct iLink

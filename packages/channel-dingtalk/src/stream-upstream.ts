@@ -75,7 +75,16 @@ export interface DingTalkStreamUpstreamOptions {
   onConnected?: () => void;
 }
 
-/** Parsed robot message payload carried in `message.data` (JSON string). */
+/**
+ * Parsed robot message payload carried in `message.data` (JSON string).
+ *
+ * Per the official robot-message schema (oracle:
+ * `@dingtalk-real-ai/dingtalk-connector@0.8.24` message-handler), media
+ * messages carry their content in `content` (an object, or a JSON string) —
+ * NOT a `picture.url`. The actionable field for inbound media is
+ * `content.downloadCode` (picture may additionally carry `pictureUrl` /
+ * `picMediaId`). `picture.url` is kept for gateway-mode compatibility.
+ */
 interface DingTalkStreamRobotMessage {
   msgId?: string;
   senderStaffId?: string;
@@ -86,12 +95,42 @@ interface DingTalkStreamRobotMessage {
   robotCode?: string;
   msgtype?: string;
   text?: { content?: string };
-  picture?: { url?: string };
-  audio?: { duration?: number; url?: string };
-  video?: { duration?: number; url?: string };
-  file?: { fileName?: string; url?: string };
+  /** Media content container (object or JSON string), official schema. */
+  content?: unknown;
+  richText?: { richTextList?: unknown[] };
+  picture?: { url?: string; picMediaId?: string; downloadCode?: string };
+  audio?: { duration?: number; url?: string; downloadCode?: string };
+  video?: { duration?: number; url?: string; downloadCode?: string };
+  file?: { fileName?: string; url?: string; downloadCode?: string };
   link?: { title?: string; text?: string; picUrl?: string };
   [key: string]: unknown;
+}
+
+/** Resolve the media content container (mirrors the official connector's
+ * `resolveContent`): `data.content` as an object, or a parsed JSON string. */
+function resolveContent(data: DingTalkStreamRobotMessage): Record<string, unknown> | undefined {
+  const raw = data.content;
+  if (raw == null) return undefined;
+  if (typeof raw === 'object') return raw as Record<string, unknown>;
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>;
+    } catch {
+      // fall through
+    }
+  }
+  return undefined;
+}
+
+function richTextList(
+  data: DingTalkStreamRobotMessage,
+  content: Record<string, unknown> | undefined,
+): Record<string, unknown>[] {
+  const current = content?.richText;
+  const legacy = data.richText?.richTextList;
+  const list = Array.isArray(current) ? current : Array.isArray(legacy) ? legacy : [];
+  return list.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object');
 }
 
 /**
@@ -118,26 +157,52 @@ export function toGatewayRaw(message: DingTalkStreamMessage): Record<string, unk
     sessionWebhook: data.sessionWebhook,
     robotCode: data.robotCode,
   };
-  // Media fields follow the documented robot-message schema (best-effort);
-  // the mapper turns them into image/audio/video/file parts.
+  // Media fields follow the documented robot-message schema (oracle:
+  // @dingtalk-real-ai/dingtalk-connector@0.8.24). Media messages carry their
+  // content in `data.content` (object or JSON string) whose actionable field
+  // is `downloadCode`; picture may also carry `pictureUrl` / `picMediaId`.
+  // The `data.<type>?.url` shapes are kept for gateway-mode compatibility.
+  // The mapper turns these into image/audio/video/file parts.
+  const content = resolveContent(data);
   switch (data.msgtype) {
     case 'text':
       raw.content = data.text?.content;
       break;
-    case 'picture':
-      raw.picUrl = data.picture?.url;
+    case 'picture': {
+      raw.picUrl = (content?.pictureUrl as string | undefined) ?? data.picture?.url;
+      raw.picMediaId = (content?.picMediaId as string | undefined) ?? data.picture?.picMediaId;
+      raw.picDownloadCode = (content?.downloadCode as string | undefined) ?? data.picture?.downloadCode;
       break;
+    }
+    case 'richText': {
+      const items = richTextList(data, content);
+      raw.content = items
+        .filter((item) => item.type !== 'skill' && !item.skillData)
+        .map((item) => typeof item.text === 'string' ? item.text : '')
+        .join('');
+      raw.richTextImages = items.flatMap((item) => {
+        const pictureUrl = typeof item.pictureUrl === 'string' ? item.pictureUrl : undefined;
+        const downloadCode = typeof item.downloadCode === 'string' && (item.type === 'picture' || !item.type)
+          ? item.downloadCode
+          : undefined;
+        return pictureUrl || downloadCode ? [{ pictureUrl, downloadCode }] : [];
+      });
+      break;
+    }
     case 'audio':
-      raw.mediaUrl = data.audio?.url;
-      raw.durationMs = data.audio?.duration;
+      raw.mediaUrl = (content?.url as string | undefined) ?? data.audio?.url;
+      raw.downloadCode = (content?.downloadCode as string | undefined) ?? data.audio?.downloadCode;
+      raw.durationMs = (content?.duration as number | undefined) ?? data.audio?.duration;
       break;
     case 'video':
-      raw.mediaUrl = data.video?.url;
-      raw.durationMs = data.video?.duration;
+      raw.mediaUrl = (content?.url as string | undefined) ?? data.video?.url;
+      raw.downloadCode = (content?.downloadCode as string | undefined) ?? data.video?.downloadCode;
+      raw.durationMs = (content?.duration as number | undefined) ?? data.video?.duration;
       break;
     case 'file':
-      raw.mediaUrl = data.file?.url;
-      raw.title = data.file?.fileName;
+      raw.mediaUrl = (content?.url as string | undefined) ?? data.file?.url;
+      raw.downloadCode = (content?.downloadCode as string | undefined) ?? data.file?.downloadCode;
+      raw.title = (content?.fileName as string | undefined) ?? data.file?.fileName;
       break;
     case 'link':
       raw.title = data.link?.title;

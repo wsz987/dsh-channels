@@ -1,4 +1,12 @@
 /**
+ * Classification: A — DSH glue [keep].
+ *
+ * Typed iLink protocol errors + redaction + normalization. This is DSH error
+ * mapping onto `ChannelError`; not a duplicated platform algorithm. The
+ * official package throws raw Errors; DSH's typed layer surfaces them under the
+ * standard Channel contract. Keep.
+ */
+/**
  * Typed iLink protocol errors and normalization.
  *
  * Tokens are NEVER embedded in error messages or logs — every message passes

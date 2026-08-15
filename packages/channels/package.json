@@ -38,6 +38,7 @@
   "dependencies": {
     "@wsz987/channel-core": "workspace:*",
     "@wsz987/channel-dingtalk": "workspace:*",
+    "@wsz987/channel-files": "workspace:*",
     "@wsz987/channel-harness": "workspace:*",
     "@wsz987/channel-lark": "workspace:*",
     "@wsz987/channel-qq": "workspace:*",

@@ -39,9 +39,44 @@ export {
 export { DingTalkAdapter, type DingTalkAdapterDeps } from './adapter.js';
 export { DingTalkCardReply, type DingTalkCardStatus, type DingTalkCardUpdate } from './ai-card.js';
 export { InboundProcessor } from './inbound.js';
-export { OutboundSender } from './outbound.js';
+export {
+  IMAGE_IDLE_TIMEOUT_MS,
+  IMAGE_MAX_BYTES,
+  FILE_MAX_BYTES,
+  defaultSecureFetcher,
+  findFetchableImages,
+  hydrateFiles,
+  hydrateImages,
+  type BinaryIngressFailureCode,
+  type HydrateFilesOptions,
+  type HydrateImagesOptions,
+  type RemoteMediaFetchLike,
+  type ResolvedImageLocator,
+} from './image-hydrator.js';
+export {
+  OutboundSender,
+  type OutboundSenderOptions,
+} from './outbound.js';
 export { HttpDingTalkUpstream, type CardCreateResult, type DingTalkUpstream } from './upstream.js';
-export { DingTalkOfficialUpstream } from './official-upstream.js';
+export {
+  DingTalkOfficialUpstream,
+  DingTalkOpenApiPortImpl,
+  OFFICIAL_BASIS,
+  type DingTalkOfficialUpstreamOptions,
+} from './official-upstream.js';
+export {
+  type AccessTokenResult,
+  type DingTalkOpenApiCredentials,
+  type DingTalkOpenApiPort,
+  type MediaResolverLike,
+  type MediaSendInput,
+  type MediaUploadInput,
+  type MediaUploadResult,
+  type OutboxCapabilities,
+  type ProactiveTextInput,
+  type ResolvedMedia,
+  type RobotMessageSendResult,
+} from './openapi-port.js';
 export {
   DingTalkStreamUpstream,
   ackRobotMessage,

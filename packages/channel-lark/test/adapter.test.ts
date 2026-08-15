@@ -157,6 +157,12 @@ class FakeOpenApiClient implements LarkOpenApiClient {
           return { image_key: 'img_v2_out' };
         },
       },
+      file: {
+        create: async (payload: unknown) => {
+          this.calls.push({ method: 'file.create', payload });
+          return { file_key: 'file_v2_out' };
+        },
+      },
     },
   };
 }
@@ -214,6 +220,96 @@ describe('mapper (fixture-driven)', () => {
     const expected = fixture.expected as MessageReceived;
     expect(event.conversation).toEqual(expected.conversation);
     expect(event.message.content).toEqual(expected.message.content);
+  });
+
+  it('maps an opaque Lark image_key into resourceRef, not url (plan §28/§9)', () => {
+    // The real SDK path sets picUrl = image_key (an opaque platform handle),
+    // so the mapper must place it in resourceRef — never in url, which is
+    // reserved for genuine http(s) URLs (plan §9).
+    const raw = {
+      type: 'image',
+      msgId: 'm_img_key',
+      senderId: 'ou_1',
+      conversationId: 'oc_1',
+      picUrl: 'img_v2_abcdef',
+      title: 'opaque key image',
+    };
+    const event = mapInbound(raw, meta);
+    const content = event.message.content as Array<Record<string, unknown>>;
+    expect(content[0]).toEqual({
+      type: 'image',
+      resourceRef: 'img_v2_abcdef',
+      alt: 'opaque key image',
+    });
+    // url must not carry the opaque key.
+    expect((content[0] as { url?: string }).url).toBeUndefined();
+  });
+
+  it('keeps audio/video/file mapped to url when mediaUrl is a genuine URL', () => {
+    const audio = mapInbound(
+      { type: 'audio', msgId: 'm1', senderId: 'ou_1', conversationId: 'oc_1', mediaUrl: 'https://x/a.ogg', durationMs: 1000 },
+      meta,
+    );
+    expect((audio.message.content[0] as { url?: string }).url).toBe('https://x/a.ogg');
+
+    const video = mapInbound(
+      { type: 'video', msgId: 'm2', senderId: 'ou_1', conversationId: 'oc_1', mediaUrl: 'https://x/v.mp4' },
+      meta,
+    );
+    expect((video.message.content[0] as { url?: string }).url).toBe('https://x/v.mp4');
+
+    const file = mapInbound(
+      { type: 'file', msgId: 'm3', senderId: 'ou_1', conversationId: 'oc_1', mediaUrl: 'https://x/doc.pdf', title: 'doc' },
+      meta,
+    );
+    expect((file.message.content[0] as { url?: string }).url).toBe('https://x/doc.pdf');
+  });
+
+  it('maps an opaque Lark file_key into resourceRef, not url (plan §28/§84)', () => {
+    // The real SDK path routes the file body's opaque file_key through
+    // raw.mediaUrl (lark-sdk-upstream.ts). As with image_key, that opaque
+    // handle must live in resourceRef — never url (plan §9) — so the media
+    // port can resolve it via messageResource.get into localData.
+    const raw = {
+      type: 'file',
+      msgId: 'm_file_key',
+      senderId: 'ou_1',
+      conversationId: 'oc_1',
+      mediaUrl: 'file_v2_abcdef',
+      title: 'report.pdf',
+    };
+    const event = mapInbound(raw, meta);
+    const content = event.message.content as Array<Record<string, unknown>>;
+    expect(content[0]).toEqual({
+      type: 'file',
+      resourceRef: 'file_v2_abcdef',
+      name: 'report.pdf',
+    });
+    // url must not carry the opaque key.
+    expect((content[0] as { url?: string }).url).toBeUndefined();
+  });
+
+  it('maps opaque audio/video file_keys into resourceRef, keeping genuine URLs in url', () => {
+    // SDK audio/video bodies carry opaque file_keys; mirror the file rule
+    // (plan §28). Genuine http(s) URLs stay in url (plan §9).
+    const audio = mapInbound(
+      { type: 'audio', msgId: 'a1', senderId: 'ou_1', conversationId: 'oc_1', mediaUrl: 'file_v2_voice', durationMs: 1200 },
+      meta,
+    );
+    expect(audio.message.content[0]).toEqual({ type: 'audio', resourceRef: 'file_v2_voice', durationMs: 1200 });
+
+    const video = mapInbound(
+      { type: 'video', msgId: 'v1', senderId: 'ou_1', conversationId: 'oc_1', mediaUrl: 'file_v2_movie' },
+      meta,
+    );
+    expect(video.message.content[0]).toEqual({ type: 'video', resourceRef: 'file_v2_movie' });
+
+    // A genuine URL for audio/video continues to use the url carrier.
+    const audioUrl = mapInbound(
+      { type: 'audio', msgId: 'a2', senderId: 'ou_1', conversationId: 'oc_1', mediaUrl: 'https://x/a.ogg' },
+      meta,
+    );
+    expect((audioUrl.message.content[0] as { url?: string }).url).toBe('https://x/a.ogg');
   });
 
   it('maps inbound audio fixture', async () => {

@@ -44,6 +44,7 @@ import {
   type LarkSdkUpstreamOptions,
 } from './lark-sdk-upstream.js';
 import { LarkOpenApiOutbound, type LarkOpenApiClient } from './openapi-outbound.js';
+import { LarkOpenApiMediaPort, type LarkMediaClient, type LarkMediaPort } from './upstream/media-port.js';
 import { InboundProcessor } from './inbound.js';
 import { OutboundSender } from './outbound.js';
 import { LarkCardReply } from './card.js';
@@ -77,6 +78,13 @@ export interface LarkAdapterDeps {
   openApiClient?: LarkOpenApiClient;
   /** Lazy OpenAPI client factory for SDK-mode outbound. */
   openApiClientFactory?: (config: LarkConfig) => LarkOpenApiClient;
+  /**
+   * Injectable media port for inbound image hydration (Milestone M2A). When
+   * absent, the adapter builds a default LarkOpenApiMediaPort from the same
+   * resolved OpenAPI client used for outbound (SDK mode), or disables image
+   * hydration outside SDK mode.
+   */
+  mediaPort?: LarkMediaPort;
   /** Injectable clock (tests). */
   now?: () => number;
 }
@@ -95,7 +103,7 @@ export class LarkAdapter implements ChannelAdapter {
     video: false,
     markdown: true,
     cards: true,
-    reactions: false,
+    reactions: true,
     threads: true,
     streaming: 'edit',
   };
@@ -107,6 +115,8 @@ export class LarkAdapter implements ChannelAdapter {
   private readonly deps: LarkAdapterDeps;
   private inbound!: InboundProcessor;
   private outbound!: OutboundSender;
+  /** Media port used for inbound image hydration (built in start). */
+  private mediaPort?: LarkMediaPort;
   private started = false;
   private stopped = false;
   private receiveLoop?: Promise<void>;
@@ -131,12 +141,14 @@ export class LarkAdapter implements ChannelAdapter {
     this.buildUpstream();
     this.stopController = new AbortController();
     this.receiveSignal = AbortSignal.any([ctx.signal, this.stopController.signal]);
+    this.mediaPort = this.resolveMediaPort();
     this.inbound = new InboundProcessor({
       ctx,
       meta: { channel: this.id as never, accountId: this.config.accountId as never },
       dedupEnabled: this.config.dedup.enabled,
       dedupWindowMs: this.config.dedup.windowMs,
       now: this.now,
+      mediaPort: this.mediaPort,
     });
     this.outbound = new OutboundSender(this.upstream, ctx.logger);
 
@@ -168,6 +180,16 @@ export class LarkAdapter implements ChannelAdapter {
       throw new ChannelError('CHANNEL_NOT_STARTED', 'lark adapter is not started');
     }
     return this.outbound.send(target, message);
+  }
+
+  async startTypingForTarget(target: ChannelTarget): Promise<void> {
+    if (this.config.card.typingIndicator === false || !target.replyToMessageId) return;
+    await this.upstream.startTyping?.(String(target.replyToMessageId));
+  }
+
+  async stopTypingForTarget(target: ChannelTarget): Promise<void> {
+    if (this.config.card.typingIndicator === false || !target.replyToMessageId) return;
+    await this.upstream.stopTyping?.(String(target.replyToMessageId));
   }
 
   async createReply(target: ChannelTarget, _options?: CreateReplyOptions): Promise<ReplyHandle> {
@@ -232,6 +254,27 @@ export class LarkAdapter implements ChannelAdapter {
     return new LarkOpenApiOutbound({
       client: createDefaultOpenApiClient(this.deps.appId, this.deps.appSecret, this.config),
     });
+  }
+
+  /**
+   * Select the media port for inbound image hydration. An explicit dep wins;
+   * otherwise SDK mode builds a default `LarkOpenApiMediaPort` from the
+   * same resolved OpenAPI client used for outbound. Outside SDK mode (legacy
+   * gateway) there is no official client to resolve resources with, so image
+   * hydration stays disabled (parts keep their resourceRef).
+   */
+  private resolveMediaPort(): LarkMediaPort | undefined {
+    if (this.deps.mediaPort) return this.deps.mediaPort;
+    if (this.config.upstream.mode !== 'sdk') return undefined;
+    // In SDK mode the resolved client is the real SDK `Client`, which
+    // structurally satisfies the wider `LarkMediaClient` surface (message
+    // resource + image + file). When a caller injects a fake typed only as
+    // `LarkOpenApiClient`, hydration still safely degrades: a missing
+    // messageResource surfaces as a runtime failure that the hydrator marks.
+    const client = this.deps.openApiClient
+      ?? (this.deps.openApiClientFactory && this.deps.openApiClientFactory(this.config))
+      ?? createDefaultOpenApiClient(this.deps.appId, this.deps.appSecret, this.config);
+    return new LarkOpenApiMediaPort({ client: client as unknown as LarkMediaClient });
   }
 
   private resolveSdkClient(): LarkSdkClient {

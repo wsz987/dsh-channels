@@ -8,22 +8,36 @@
  * channel-core identity types only appear on the channel side, so this package
  * works with plain strings.
  *
- * v2: the binding carries `sessionId` (the unique Agent/Session runtime
- * identity — Harness Agent identity IS `SessionId`) plus a `route` snapshot
- * used to keep create/resume parity, and `schemaVersion: 2`. The old v1
- * `agentId` field has been removed (migrated to `route.model` by
- * `binding-store`).
+ * v3 (plan \u00a755): the binding carries the FULL stable conversation identity the
+ * durable outbox needs — `conversationType: 'dm' | 'group'` (required) and the
+ * optional `senderId` of the peer behind a DM. It also keeps `sessionId` (the
+ * unique Agent/Session runtime identity — Harness Agent identity IS
+ * `SessionId`) plus a `route` snapshot used to keep create/resume parity, and
+ * `schemaVersion: 3`.
+ *
+ * v3 persists ONLY stable identity (plan \u00a756): channel / account /
+ * conversation / type / thread / sender / session / route. Transient platform
+ * state is NEVER stored here — `sessionWebhook`, `replyToMessageId`,
+ * `runId`, `contextToken`, a media URL and an AES key all travel only with the
+ * triggering turn (see `reply-context-store`), never in a binding.
+ *
+ * The old v1 `agentId` field has been removed (migrated to `route.model` by
+ * `binding-store`, then v2 -> v3 adds the legacy-default `conversationType`).
  */
 import { conversationKey, type ChannelConversationKey } from '@wsz987/channel-core';
 import type { AgentRouteSpec } from './agent-router.js';
 
-export const SESSION_BINDING_SCHEMA_VERSION = 2 as const;
+export const SESSION_BINDING_SCHEMA_VERSION = 3 as const;
 
 export interface SessionBinding {
   channelId: string;
   accountId: string;
   conversationId: string;
+  /** `dm` = a one-to-one conversation, `group` = a group/chat (plan \u00a755). Required since v3. */
+  conversationType: 'dm' | 'group';
   threadId?: string;
+  /** Optional stable peer id behind a DM; group conversations usually omit it. */
+  senderId?: string;
   /** Unique Agent/Session runtime identity (Harness Agent id === SessionId). */
   sessionId: string;
   /** Routing snapshot used for create/resume parity. */
@@ -37,6 +51,8 @@ export interface SessionKeyInput {
   channelId: string;
   accountId: string;
   conversationId: string;
+  conversationType?: 'dm' | 'group';
+  senderId?: string;
   threadId?: string;
 }
 

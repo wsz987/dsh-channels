@@ -427,13 +427,16 @@ export class ReplyRouter {
     // Release the active reply context for this turn (v1.1 §20).
     this.options.replyContexts.releaseTurn(active.binding.sessionId, turn);
     // Best-effort typing stop: a typing API failure must never break delivery.
-    this.stopTypingIfSupported(active.binding.channelId, active.binding.conversationId);
+    this.stopTypingIfSupported(active.binding.channelId, active.target);
   }
 
-  private stopTypingIfSupported(channelId: string, conversationId: string): void {
+  private stopTypingIfSupported(channelId: string, target: ChannelTarget): void {
     const adapter = this.options.getAdapter(channelId);
-    if (!adapter?.stopTyping) return;
-    void adapter.stopTyping(conversationId).catch(() => {});
+    if (adapter?.stopTypingForTarget) {
+      void adapter.stopTypingForTarget(target).catch(() => {});
+    } else if (adapter?.stopTyping) {
+      void adapter.stopTyping(target.conversationId).catch(() => {});
+    }
   }
 
   private async deliver(

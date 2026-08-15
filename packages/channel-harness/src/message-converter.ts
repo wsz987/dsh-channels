@@ -22,7 +22,8 @@ import {
   type UserMessage,
 } from '@deepseek-ai/dsh-llm';
 import type { ImageAttachmentRef, ImageMediaType, SaveImageAttachment } from '@deepseek-ai/dsh-attachment';
-import type { ImagePart, MessagePart, MessageReceived } from '@wsz987/channel-core';
+import type { AudioPart, FilePart, ImagePart, MessagePart, MessageReceived, VideoPart } from '@wsz987/channel-core';
+import type { ChannelFileDescriptor } from './file-provider.js';
 
 /** Type-level alias: the bridge always produces Harness user messages. */
 export type UserMessageLike = UserMessage;
@@ -35,11 +36,28 @@ export type UserMessageLike = UserMessage;
  */
 export type SaveImageHook = (input: SaveImageAttachment) => Promise<ImageAttachmentRef>;
 
+/** A binary (file / audio / video) part carrying local bytes. */
+export type StoredBinaryPart = FilePart | AudioPart | VideoPart;
+
+/**
+ * Optional bridge-provided seam that persists a file/audio/video part with
+ * `localData` into the private channel asset store and returns a compact
+ * model descriptor (plan \u00a750/\u00a754). Mirrors `SaveImageHook`: the
+ * converter stays decoupled from the concrete store (injected at the use
+ * site). Absent -> the part falls back to its `[file: name]` placeholder;
+ * a thrown/undefined result also falls back, never breaking delivery.
+ */
+export type FileStoreHook = (
+  part: StoredBinaryPart,
+) => Promise<ChannelFileDescriptor | undefined>;
+
 export interface MessageConvertOptions {
   /** Whether to prepend the `[channel=.. sender=.. message=..]` prefix. Defaults to false. */
   includeMetadataPrefix?: boolean;
   /** Optional image-commit hook enabling the real attachment path. */
   saveImage?: SaveImageHook;
+  /** Optional file/audio/video store hook enabling the private asset path. */
+  fileStore?: FileStoreHook;
 }
 
 /** Convert a channel message-received event into a model-facing user message. */
@@ -57,6 +75,7 @@ export async function toHarnessUserMessage(
   const parts = event.message.content;
   const bodyText = await partsToText(parts, {
     saveImage: options.saveImage,
+    fileStore: options.fileStore,
     onImage: (block) => blocks.push(block),
   });
   // Image blocks are emitted in place; the remaining (non-image) text is one block.
@@ -85,7 +104,11 @@ function metadataPrefix(event: MessageReceived): string {
  */
 export async function partsToText(
   parts: readonly MessagePart[],
-  options: { saveImage?: SaveImageHook; onImage?: (block: ContentBlock) => void } = {},
+  options: {
+    saveImage?: SaveImageHook;
+    fileStore?: FileStoreHook;
+    onImage?: (block: ContentBlock) => void;
+  } = {},
 ): Promise<string> {
   const segments: string[] = [];
   for (const part of parts) {
@@ -103,16 +126,21 @@ export async function partsToText(
         break;
       }
       case 'file':
-        segments.push(part.name ? `[file: ${part.name}]` : part.url ? `[file: ${part.url}]` : '[file]');
+        segments.push(
+          (await storedDescriptor(part, options.fileStore)) ??
+            (part.name ? `[file: ${part.name}]` : part.url ? `[file: ${part.url}]` : '[file]'),
+        );
         break;
       case 'audio':
         segments.push(
-          part.durationMs !== undefined ? `[audio: ${part.durationMs}ms]` : '[audio]',
+          (await storedDescriptor(part, options.fileStore)) ??
+            (part.durationMs !== undefined ? `[audio: ${part.durationMs}ms]` : '[audio]'),
         );
         break;
       case 'video':
         segments.push(
-          part.durationMs !== undefined ? `[video: ${part.durationMs}ms]` : '[video]',
+          (await storedDescriptor(part, options.fileStore)) ??
+            (part.durationMs !== undefined ? `[video: ${part.durationMs}ms]` : '[video]'),
         );
         break;
       case 'location':
@@ -192,4 +220,36 @@ function mimeFromUrl(url?: string): string | undefined {
     case 'gif': return 'image/gif';
     default: return undefined;
   }
+}
+
+/**
+ * Render a stored file/audio/video descriptor line when the optional
+ * `fileStore` hook persists the part's local bytes. Returns `undefined`
+ * (fall back to the placeholder) on no local bytes, a missing hook, an
+ * unrecognized result, or a hook failure — delivery never breaks.
+ */
+async function storedDescriptor(
+  part: StoredBinaryPart,
+  fileStore?: FileStoreHook,
+): Promise<string | undefined> {
+  if (!fileStore || !part.localData || part.localData.byteLength === 0) return undefined;
+  try {
+    const descriptor = await fileStore(part);
+    return descriptor ? renderDescriptor(descriptor) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function renderDescriptor(asset: ChannelFileDescriptor): string {
+  const mime = asset.mimeType ? ' ' + asset.mimeType : '';
+  const readable = asset.readable ? ' readable' : '';
+  return `[attachment ${asset.attachmentId} ${asset.name}${mime} ${humanSize(asset.bytes)}${readable}]`;
+}
+
+function humanSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B';
+  const kb = bytes / 1024;
+  if (kb < 1024) return kb.toFixed(1) + ' KB';
+  return (kb / 1024).toFixed(1) + ' MB';
 }

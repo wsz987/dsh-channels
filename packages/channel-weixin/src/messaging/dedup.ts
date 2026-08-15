@@ -1,4 +1,10 @@
 /**
+ * Classification: A — DSH glue [keep].
+ *
+ * Two-phase inbound dedup (message_id/seq/hash) + durable store + stable hash.
+ * DSH-specific receive reliability, not a platform protocol. Keep.
+ */
+/**
  * Dedup identity for inbound iLink messages.
  *
  * Priority: message_id (first-class) -> seq -> stable hash of the raw payload.

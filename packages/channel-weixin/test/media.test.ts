@@ -19,6 +19,7 @@ import {
   resolveDownloadUrl,
   uploadMedia,
   buildUploadUrlRequest,
+  aesEcbPaddedSize,
   sendMedia,
   buildSendMediaPayload,
   OutboundSender,
@@ -84,6 +85,7 @@ describe('uploadMedia', () => {
   it('encrypts, calls getuploadurl, posts ciphertext, returns refs', async () => {
     const file = Buffer.from('image bytes');
     let posted: FormData | undefined;
+    let uploadRequest: Record<string, unknown> | undefined;
     const uploaded = await uploadMedia(file, {
       cdnBaseUrl: 'https://cdn',
       apiBaseUrl: 'https://api',
@@ -91,29 +93,60 @@ describe('uploadMedia', () => {
       filekey: 'fk-1',
       now: () => 1234,
       getUploadUrl: async (req) => {
+        uploadRequest = req;
         expect(req.to_user_id).toBe('user_1');
         expect(req.filekey).toBe('fk-1');
         return { upload_full_url: 'https://cdn/put', upload_param: 'up-enc', thumb_upload_param: 'th' };
       },
       upload: async (_url, form) => {
         posted = form;
-        return new Response(null, { status: 200 }) as unknown as Response;
+        return new Response(null, { status: 200, headers: { 'x-encrypted-param': 'download-enc' } }) as unknown as Response;
       },
     });
     expect(uploaded.filekey).toBe('fk-1');
     expect(uploaded.uploadFullUrl).toBe('https://cdn/put');
-    expect(uploaded.downloadEncryptedQueryParam).toBe('up-enc');
+    expect(uploaded.downloadEncryptedQueryParam).toBe('download-enc');
     expect(uploaded.aeskey).toMatch(/^[0-9a-f]{32}$/);
+    expect(uploaded.fileSize).toBe(file.length);
     expect(uploaded.fileSizeCiphertext).toBeGreaterThan(file.length); // padded
+    expect(uploadRequest).toMatchObject({
+      media_type: 1,
+      rawsize: file.length,
+      filesize: uploaded.fileSizeCiphertext,
+      aeskey: uploaded.aeskey,
+    });
     expect(posted).toBeDefined();
   });
 
   it('builds the upload url request with a media digest', () => {
     const req = buildUploadUrlRequest(Buffer.from('data'), { cdnBaseUrl: 'c', apiBaseUrl: 'a', now: () => 5 });
-    expect(req.media_type).toBe(2);
+    expect(req.media_type).toBe(1);
     expect(req.rawsize).toBe(4);
+    expect(req.filesize).toBe(16);
+    expect(req.aeskey).toMatch(/^[0-9a-f]{32}$/);
     expect(req.rawfilemd5).toBeTypeOf('string');
     expect(String(req.filekey)).toContain('wx5-');
+  });
+
+  it('calculates AES-ECB PKCS#7 ciphertext sizes', () => {
+    expect(aesEcbPaddedSize(0)).toBe(16);
+    expect(aesEcbPaddedSize(15)).toBe(16);
+    expect(aesEcbPaddedSize(16)).toBe(32);
+  });
+
+  it('derives the CDN upload URL when only upload_param is returned', async () => {
+    let receivedUrl: string | undefined;
+    await uploadMedia(Buffer.from('data'), {
+      cdnBaseUrl: 'https://cdn.example/',
+      apiBaseUrl: 'https://api',
+      filekey: 'file key',
+      getUploadUrl: async () => ({ upload_param: 'upload param' }),
+      upload: async (url) => {
+        receivedUrl = url;
+        return new Response(null, { status: 200, headers: { 'x-encrypted-param': 'download-param' } });
+      },
+    });
+    expect(receivedUrl).toBe('https://cdn.example/upload?encrypted_query_param=upload%20param&filekey=file%20key');
   });
 
   it('rejects empty file with CHANNEL_UNSUPPORTED', async () => {
@@ -158,7 +191,7 @@ describe('OutboundSender image path', () => {
       cdnBaseUrl: 'https://cdn',
       apiBaseUrl: 'https://api',
       getUploadUrl: async () => ({ upload_full_url: 'https://cdn/put', upload_param: 'up-enc' }),
-      upload: async () => new Response(null, { status: 200 }) as unknown as Response,
+      upload: async () => new Response(null, { status: 200, headers: { 'x-encrypted-param': 'download-enc' } }) as unknown as Response,
     });
     const file = Buffer.from('fake-image-bytes');
     const result = await sender.send(target('user_1', 'run-1'), { parts: [{ type: 'image', url: 'u', mimeType: 'image/jpeg', localData: file }] } as any);

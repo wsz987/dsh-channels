@@ -1,4 +1,16 @@
 /**
+ * Classification: C — duplicate protocol implementation [@deprecated upstream-gap].
+ *
+ * iLink HTTP client (QR code, getUpdates long-poll, sendmessage, getconfig,
+ * sendtyping, getuploadurl, notify). Self-implemented because the official
+ * Tencent/openclaw-weixin @ 2.4.6 equivalents for these calls (api/api.js +
+ * auth/login-qr.js) are coupled to the OpenClaw runtime via util/logger.ts /
+ * auth/accounts.ts and execute OpenClaw side effects at import time (plan §18:
+ * do not drag the OpenClaw runtime into DSH). Marked upstream-gap; official
+ * source of truth = @tencent-weixin/openclaw-weixin/dist/src/api/api.js.
+ * DO NOT delete wholesale this milestone (plan §19).
+ */
+/**
  * ILinkClient — thin, endpoint-aware client over the base {@link HttpTransport}.
  *
  * Owns the iLink endpoint paths, request/response shapes and error

@@ -37,6 +37,7 @@ function makeBinding(overrides: Partial<SessionBinding> = {}): SessionBinding {
     channelId: 'weixin',
     accountId: 'main',
     conversationId: 'user_123',
+    conversationType: 'dm',
     sessionId: 's-1',
     route: { model: 'weixin-agent' },
     schemaVersion: SESSION_BINDING_SCHEMA_VERSION,

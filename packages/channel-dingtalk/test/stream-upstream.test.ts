@@ -176,6 +176,65 @@ describe('toGatewayRaw (SDK message → gateway raw shape)', () => {
     expect(file).toMatchObject({ type: 'file', mediaUrl: 'https://example.com/r.pdf', title: 'report.pdf' });
   });
 
+  it('maps official media content (content.downloadCode) for picture/file/audio (M2A fix)', () => {
+    // The real robot callback carries media content in `content` (object or
+    // JSON string) with the actionable `downloadCode` — oracle: official
+    // connector message-handler. picMediaId/pictureUrl are optional extras.
+    const picture = toGatewayRaw(
+      robotDownstream({
+        msgtype: 'picture',
+        content: { picMediaId: '@lADP_1', downloadCode: 'dl-pic', pictureUrl: 'https://cdn.example/p.png' },
+      }),
+    );
+    expect(picture).toMatchObject({
+      type: 'picture',
+      picMediaId: '@lADP_1',
+      picDownloadCode: 'dl-pic',
+      picUrl: 'https://cdn.example/p.png',
+    });
+
+    const file = toGatewayRaw(
+      robotDownstream({ msgtype: 'file', content: { fileName: 'a.pdf', downloadCode: 'dl-file' } }),
+    );
+    expect(file).toMatchObject({ type: 'file', title: 'a.pdf', downloadCode: 'dl-file' });
+
+    const audio = toGatewayRaw(
+      robotDownstream({ msgtype: 'audio', content: JSON.stringify({ duration: 3300, downloadCode: 'dl-audio' }) }),
+    );
+    expect(audio).toMatchObject({ type: 'audio', durationMs: 3300, downloadCode: 'dl-audio' });
+  });
+
+  it('maps current and legacy richText image structures', () => {
+    const current = toGatewayRaw(robotDownstream({
+      msgtype: 'richText',
+      content: {
+        richText: [
+          { type: 'text', text: 'before ' },
+          { type: 'picture', pictureUrl: 'https://cdn.example/a.png' },
+          { type: 'picture', downloadCode: 'dl-rich-1' },
+        ],
+      },
+    }));
+    expect(current).toMatchObject({
+      type: 'richText',
+      content: 'before ',
+      richTextImages: [
+        { pictureUrl: 'https://cdn.example/a.png' },
+        { downloadCode: 'dl-rich-1' },
+      ],
+    });
+
+    const legacy = toGatewayRaw(robotDownstream({
+      msgtype: 'richText',
+      content: undefined,
+      richText: { richTextList: [{ pictureUrl: 'https://cdn.example/legacy.jpg' }] },
+    }));
+    expect(legacy).toMatchObject({
+      type: 'richText',
+      richTextImages: [{ pictureUrl: 'https://cdn.example/legacy.jpg' }],
+    });
+  });
+
   it('falls back to senderId when senderStaffId is absent', () => {
     const raw = toGatewayRaw(robotDownstream({ senderStaffId: undefined, senderId: 'fallback-user' }));
     expect(raw).toMatchObject({ senderId: 'fallback-user' });

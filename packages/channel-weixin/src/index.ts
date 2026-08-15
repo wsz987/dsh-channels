@@ -70,6 +70,22 @@ export { OutboundSender, buildSendTextPayload, type OutboundSenderOptions } from
 export { TypingController, type TypingControllerOptions } from './messaging/typing.js';
 export { FetchTransport, type HttpTransport, type HttpRequestInit } from './transport.js';
 export { manifest, type WeixinManifest } from './manifest.js';
+export {
+  createWeixinUpstream,
+  TencentWeixinUpstream,
+  UpstreamCapabilityError,
+  type WeixinUpstream,
+  type WeixinUpstreamHostEnv,
+  type WeixinQrTicket,
+  type WeixinQrAuthPoll,
+  type WeixinAuthCredential,
+  type WeixinMediaRef,
+  type WeixinDownloadResult,
+  type WeixinTextParams,
+  type WeixinImageParams,
+  type WeixinFileParams,
+  type WeixinSendResult,
+} from './upstream/index.js';
 // WX5 media.
 export { aes128Decrypt } from './media/decrypt.js';
 export { aes128Encrypt } from './media/encrypt.js';
@@ -82,7 +98,11 @@ export {
 export {
   uploadMedia,
   buildUploadUrlRequest,
+  aesEcbPaddedSize,
   WX5_MEDIA_TYPE_IMAGE,
+  WX5_MEDIA_TYPE_VIDEO,
+  WX5_MEDIA_TYPE_FILE,
+  WX5_MEDIA_TYPE_VOICE,
   type UploadedMedia,
   type UploadMediaOptions,
 } from './media/upload.js';

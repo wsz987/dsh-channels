@@ -111,7 +111,7 @@ OpenClaw gateway host emulation
 
 ---
 
-## 2.2 Harness API 只允许存在于 `channel-harness`
+## 2.2 Harness Agent / Session API 只允许存在于 `channel-harness`
 
 DeepSeek Harness 当前处于 developer preview，公开声明可能存在 breaking changes。
 
@@ -126,6 +126,7 @@ channel-dingtalk    ❌ 不访问 ctx.agents
 channel-lark        ❌ 不访问 ctx.agents
 
 channel-harness     ✅ 唯一允许直接依赖 dsh-agent / dsh-session
+channel-files       ✅ 可选扩展，仅依赖公开 Cordis / Tool API
 ```
 
 目标：
@@ -155,6 +156,7 @@ npx @deepseek-ai/dsh plugin --profile default add @wsz987/dsh-channels
 ```text
 @wsz987/channel-core
 @wsz987/channel-harness
+@wsz987/channel-files       # 可选通用文件扩展
 @wsz987/channel-testkit
 @wsz987/channel-compat
 
@@ -1866,17 +1868,34 @@ workspace:
 - `host-cwd`：复用宿主当前工作目录，仅当该目录已注册时关联
 - `disabled`：不接入 WorkspaceRegistry，cwd 回退 `config.cwd ?? process.cwd()`
 
-## 40.2 附件管道（微信图片 real attachment）
+## 40.2 图片管道（Harness 原生 attachment）
 
-入站媒体进入 Harness 真实附件的唯一已落地路径是**微信图片**：
+四个渠道的图片适配器统一产出 `ImagePart.localData`，随后走 Harness 官方附件能力：
 
 ```
-Weixin CDN 下载 + AES 解密 → MessagePart.localData（明文字节）
+渠道官方 SDK / API 下载 → ImagePart.localData（明文字节）
         → channel-harness message-converter → ctx.attachments.saveImage
         → { type: 'image', attachment: ref }（真实 ImageBlock）
 ```
 
-出站同理：`ImagePart.localData` 存在时走 CDN 上传 + 发送。
+适配器负责各平台的下载/解密和上传，`channel-harness` 不复制平台 SDK 实现。
 
-其余渠道（QQ / 钉钉 / 飞书）的入站媒体目前仍映射为文本占位符（`[image: …]` / `[file: …]` 等），尚未接入 Harness 真实附件；file / audio / video 需等 Harness 官方扩展。统一附件与主动消息（outbox）的完整设计见
-`docs/dsh-channels-unified-attachments-outbox-final-execution-plan-2026-08-16.md`。
+## 40.3 通用文件是可替换扩展
+
+Harness `0.1.0-rc.6` 的 `ctx.attachments` 只提供栅格图片的验证、保存和读取，
+当前 `ContentBlock` 也没有通用 `FileBlock`。因此 PDF / DOCX / XLSX / 文本
+暂由 `@wsz987/channel-files` 补充：
+
+```text
+四渠道 FilePart.localData
+  → channel-harness 的可选 ChannelFileProvider 端口
+  → channel-files 私有存储 + 成熟解析库 + read_channel_attachment
+```
+
+`channel-core` 与四个适配器不知道解析格式；`channel-harness` 也不依赖扩展包，
+只通过 `ctx.get('channelFiles')` 尝试获取 provider。bundle 默认加载该扩展，但可
+删除 `channels-files` 配置行。未来 Harness 提供官方通用文件能力时，只替换或移除
+provider，不修改适配器、Channel Contract 和会话路由。
+
+PDF 解析使用 `unpdf`（PDF.js），DOCX 使用 `mammoth`，XLSX 使用 `xlsx`；这些
+依赖全部归属 `channel-files`，禁止重新加入 `channel-harness`。

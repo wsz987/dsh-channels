@@ -33,12 +33,14 @@ import type {
   ReplyHandle,
   SendResult,
 } from '@wsz987/channel-core';
-import { ChannelError } from '@wsz987/channel-core';
+import { ChannelError, SecureRemoteMediaFetcher } from '@wsz987/channel-core';
+import type { RemoteMediaFetchLike } from './image-hydrator.js';
 import { DWClient } from 'dingtalk-stream';
 import type { DingTalkConfig } from './config.js';
 import { FetchTransport, type HttpTransport } from './transport.js';
 import { HttpDingTalkUpstream, type DingTalkUpstream } from './upstream.js';
-import { DingTalkOfficialUpstream } from './official-upstream.js';
+import { DingTalkOpenApiPortImpl } from './official-upstream.js';
+import type { MediaResolverLike, OutboxCapabilities } from './openapi-port.js';
 import {
   DingTalkStreamUpstream,
   type DingTalkStreamClient,
@@ -65,6 +67,18 @@ export interface DingTalkAdapterDeps {
   sdkClient?: DingTalkStreamClient;
   /** Lazy stream client factory for SDK mode; overrides the default DWClient. */
   sdkClientFactory?: (config: DingTalkConfig) => DingTalkStreamClient;
+  /**
+   * Secure remote media fetcher used to hydrate inbound image URLs (plan
+   * §32A). Injectable for offline tests; defaults to a real
+   * `SecureRemoteMediaFetcher` bound to the global fetch.
+   */
+  secureFetch?: RemoteMediaFetchLike;
+  /**
+   * DingTalk OpenAPI media resolver used to hydrate opaque file mediaIds into
+   * trusted bytes during inbound file ingress (plan §32A / §86). Injectable for
+   * offline tests; defaults to the running official port in sdk mode.
+   */
+  resolveMedia?: MediaResolverLike;
   /** Injectable clock (tests). */
   now?: () => number;
 }
@@ -93,8 +107,19 @@ export class DingTalkAdapter implements ChannelAdapter {
   private upstream!: DingTalkUpstream;
   private readonly transport: HttpTransport;
   private readonly deps: DingTalkAdapterDeps;
+  private readonly secureFetch: RemoteMediaFetchLike;
   private inbound!: InboundProcessor;
   private outbound!: OutboundSender;
+  /**
+   * Official OpenAPI port built in sdk mode (proactive path for the outbox).
+   * Undefined in gateway mode — proactive capabilities then fail CLOSED.
+   */
+  private officialPort?: DingTalkOpenApiPortImpl;
+  /**
+   * Proactive outbox capabilities (plan §71). Read by the harness outbox;
+   * fails CLOSED (all-false) in gateway mode / when not wired.
+   */
+  private capProactive: OutboxCapabilities = { proactiveText: false, proactiveMedia: false };
   private started = false;
   private stopped = false;
   private receiveLoop?: Promise<void>;
@@ -109,6 +134,7 @@ export class DingTalkAdapter implements ChannelAdapter {
   constructor(private readonly config: DingTalkConfig, deps: DingTalkAdapterDeps = {}) {
     this.now = deps.now ?? Date.now;
     this.deps = deps;
+    this.secureFetch = deps.secureFetch ?? new SecureRemoteMediaFetcher();
     this.transport = deps.transport ?? new FetchTransport(config.baseUrl, { timeoutMs: config.timeoutMs });
   }
 
@@ -125,8 +151,16 @@ export class DingTalkAdapter implements ChannelAdapter {
       dedupEnabled: this.config.dedup.enabled,
       dedupWindowMs: this.config.dedup.windowMs,
       now: this.now,
+      secureFetch: this.secureFetch,
+      resolveMedia: this.deps.resolveMedia ?? this.officialPort,
     });
-    this.outbound = new OutboundSender(this.upstream, ctx.logger);
+    // REPLY keeps the sessionWebhook upstream; PROACTIVE uses the official port.
+    this.outbound = new OutboundSender({
+      reply: this.upstream,
+      logger: ctx.logger,
+      proactive: this.officialPort,
+      capabilities: this.capProactive,
+    });
 
     this.connected = false;
     this.authState = 'unknown';
@@ -200,19 +234,37 @@ export class DingTalkAdapter implements ChannelAdapter {
     });
     if (this.config.upstream.mode !== 'sdk') {
       this.upstream = httpUpstream;
+      // Gateway mode has no official proactive path — capabilities fail CLOSED.
+      this.officialPort = undefined;
+      this.capProactive = { proactiveText: false, proactiveMedia: false };
       return;
     }
-    const officialUpstream = new DingTalkOfficialUpstream({
+    // The official OpenAPI port implements BOTH the `DingTalkUpstream` outbound
+    // surface (sessionWebhook reply, plan §35) and the `DingTalkOpenApiPort`
+    // proactive/media surface (plan §33). Proactive is implemented in sdk mode,
+    // so the outbox capabilities are enabled (plan §69: capability true only when
+    // actually implemented — never faked).
+    this.officialPort = new DingTalkOpenApiPortImpl({
       transport: this.transport,
       clientId: this.config.upstream.clientId,
       clientSecret: this.deps.clientSecret,
+      now: this.now,
     });
+    this.capProactive = { proactiveText: true, proactiveMedia: true };
     const options: DingTalkStreamUpstreamOptions = {
       client: this.resolveStreamClient(),
-      outbound: officialUpstream,
+      outbound: this.officialPort,
       onConnected: () => this.markConnected(),
     };
     this.upstream = new DingTalkStreamUpstream(options);
+  }
+
+  /**
+   * Proactive outbox capabilities (plan §71) exposed for the harness outbox.
+   * Fails CLOSED: all-false in gateway mode / when not wired.
+   */
+  get outboxCapabilities(): OutboxCapabilities {
+    return { ...this.capProactive };
   }
 
   private resolveStreamClient(): DingTalkStreamClient {

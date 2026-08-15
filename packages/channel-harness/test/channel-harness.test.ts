@@ -221,6 +221,7 @@ function makeBinding(overrides: Partial<SessionBinding> = {}): SessionBinding {
     channelId: 'weixin',
     accountId: 'main',
     conversationId: 'user_123',
+    conversationType: 'dm',
     sessionId: 's1',
     route: defaultRoute,
     schemaVersion: SESSION_BINDING_SCHEMA_VERSION,
@@ -655,7 +656,7 @@ describe('ChannelHarnessBridge end-to-end', () => {
     const binding = await bindingStore.get('weixin:main:user_123');
     expect(binding?.sessionId).toBe(gateway.createCalls[0]);
     expect(binding?.route).toEqual({ model: 'weixin-agent' });
-    expect(binding?.schemaVersion).toBe(2);
+    expect(binding?.schemaVersion).toBe(3);
     expect(manager.bindingFor(binding!.sessionId)).toEqual(binding);
     const messageId = (gateway.followups[0]!.message as { id: string }).id;
     const context = replyContexts.claim({ sessionId: binding!.sessionId, messageId, turn: 0 });
@@ -942,5 +943,57 @@ describe('bridge integration with ChannelService events', () => {
     });
     expect(gateway.followups[0]?.sessionId).toBeTruthy();
     stopInbound();
+  });
+
+  it('logs inbound binary attachment storage and missing local bytes at the common bridge boundary', async () => {
+    const ctx = new Context();
+    const gateway = new FakeGateway();
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const fileProvider = {
+      store: vi.fn(async () => ({
+        attachmentId: 'att-pdf-1',
+        name: 'stored.pdf',
+        mimeType: 'application/pdf',
+        bytes: 4,
+        durable: true,
+        readable: true,
+      })),
+      installTools: async () => {},
+      resolveAttachment: async () => ({ data: new Uint8Array(), name: 'stored.pdf' }),
+    };
+    const bridge = new ChannelHarnessBridge({
+      config: baseConfig(),
+      bindingStore: new MemoryBindingStore(),
+      agentManager: new AgentManager(gateway, logger, 4),
+      agentRouter: new AgentRouter(baseConfig()),
+      getAdapter: () => undefined,
+      replyContexts: new ReplyContextStore(),
+      logger,
+      fileProvider,
+      ctx,
+      commandDeps: { startNewSession: async () => {} },
+      workspaceResolver: noopResolver,
+    });
+
+    await bridge.handleChannelEvent(makeMessageEvent({
+      message: {
+        id: 'attachment-message',
+        content: [
+          { type: 'file', name: 'stored.pdf', mimeType: 'application/pdf', localData: new Uint8Array([1, 2, 3, 4]) },
+          { type: 'file', name: 'remote.pdf', url: 'https://example.invalid/report.pdf', mimeType: 'application/pdf' },
+        ],
+      },
+    }));
+
+    expect(fileProvider.store).toHaveBeenCalledTimes(1);
+    const stored = logger.info.mock.calls.find((call) => call[0] === '[channel-harness] inbound attachment stored');
+    expect(stored?.[1]).toMatchObject({ attachmentId: 'att-pdf-1', bytes: 4, kind: 'file' });
+    const missing = logger.warn.mock.calls.find((call) => call[0] === '[channel-harness] inbound attachment has no local bytes');
+    expect(missing?.[1]).toMatchObject({ name: 'remote.pdf', hasUrl: true });
   });
 });

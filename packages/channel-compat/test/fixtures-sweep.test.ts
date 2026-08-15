@@ -21,9 +21,18 @@ interface ChannelCase {
   path: string;
 }
 
+/**
+ * The M0 upstream contract-fixture skeleton (plan §73) lives at
+ * `fixtures/upstream/<channel>/<version>/` — a different layout from the
+ * legacy `fixtures/<channel>/*.json` channel cases. It is not a channel root
+ * and must not be swept here.
+ */
+const UPSTREAM_SKELETON_DIR = 'upstream';
+
 function discoverChannels(): string[] {
   return readdirSync(FIXTURES_DIR)
     .filter((name) => statSync(join(FIXTURES_DIR, name)).isDirectory())
+    .filter((name) => name !== UPSTREAM_SKELETON_DIR)
     .sort();
 }
 

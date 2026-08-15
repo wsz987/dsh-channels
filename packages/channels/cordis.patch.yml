@@ -13,6 +13,11 @@
     - id: channels-service
       name: '@wsz987/channel-core/plugin'
 
+    # Optional generic-file extension. Remove this line to keep placeholders
+    # only; Harness-native image attachments remain available either way.
+    - id: channels-files
+      name: '@wsz987/channel-files'
+
     - id: channels-harness
       name: '@wsz987/channel-harness'
       inject:

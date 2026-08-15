@@ -12,6 +12,7 @@ import type { AdapterManifest, ManifestStatus } from './manifest.js';
 import { getAdapterManifest, isGitSha, validateManifest } from './manifest.js';
 import type { VersionPolicyOptions } from './version-policy.js';
 import { versionState } from './version-policy.js';
+import { getUpstreamManifest } from './upstream-manifest.js';
 
 /** Per-adapter diagnostics produced by `diagnose`. */
 export interface ChannelDiagnostic {
@@ -228,7 +229,33 @@ export function formatDiagnostic(d: ChannelDiagnostic): string {
   return lines.join('\n');
 }
 
+/** Render the fixed upstream-manifest section (plan section §39 / §99) for one
+ * diagnostic. Reads the channel's entry from UPSTREAM_MANIFESTS (M0 boundary
+ * lock) and emits the Channel: / upstream = / strategy = / status = block. When
+ * the channel has no declared upstream manifest (e.g. a third-party or extension
+ * channel) an upstream section is not rendered.
+ *
+ * Status reflects presence of a valid, fixed upstream manifest: a channel that
+ * has a declared UPSTREAM_MANIFESTS entry is treated as `compatible` at the
+ * upstream boundary (the adapter-level live verdict stays in the diagnostic's
+ * own Compatibility: line and the Release verification block).
+ */
+export function formatUpstreamSection(d: ChannelDiagnostic): string {
+  const um = getUpstreamManifest(d.id);
+  if (!um) return '';
+  return [
+    `Channel: ${um.channel}`,
+    `  upstream = ${um.packageName}@${um.testedVersion}`,
+    `  strategy = ${um.strategy}`,
+    `  status = compatible`,
+  ].join('\n');
+}
+
 /** Render diagnostics for the doctor CLI / plugin surface. */
 export function formatDoctor(diagnostics: ChannelDiagnostic[]): string {
-  return diagnostics.map(formatDiagnostic).join('\n\n');
+  return diagnostics.map((d) => {
+    const base = formatDiagnostic(d);
+    const upstream = formatUpstreamSection(d);
+    return upstream ? `${base}\n${upstream}` : base;
+  }).join('\n\n');
 }

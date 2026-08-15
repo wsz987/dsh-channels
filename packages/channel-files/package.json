@@ -1,0 +1,48 @@
+{
+  "name": "@wsz987/channel-files",
+  "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wsz987/dsh-channels.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "description": "Optional generic file storage and document extraction for dsh-channels",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf lib"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-home-paths": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-llm": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
+    "@wsz987/channel-core": "workspace:*",
+    "@wsz987/channel-harness": "workspace:*",
+    "mammoth": "1.12.1",
+    "unpdf": "1.8.1",
+    "xlsx": "0.18.5",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "rimraf": "^6.0.0"
+  },
+  "license": "MIT"
+}
+

@@ -55,6 +55,7 @@ export {
   type MediaOptions,
 } from './sdk-client.js';
 export { InboundProcessor } from './inbound.js';
+export { hydrateImageParts, type ImageHydratorOptions } from './image-hydrator.js';
 export { OutboundSender, toReplyTarget } from './outbound.js';
 export { QQStreamingReply } from './streaming-reply.js';
 export { mapInbound, mapMessageParts, type QQInboundMeta } from './mapper.js';

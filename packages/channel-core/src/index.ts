@@ -19,6 +19,7 @@ export * from './events.js';
 export * from './file-secret-store.js';
 export * from './file-storage.js';
 export * from './health.js';
+export * from './media/index.js';
 export * from './messages.js';
 export * from './mount.js';
 export * from './paths.js';

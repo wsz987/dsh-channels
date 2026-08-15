@@ -148,7 +148,7 @@ export function mediaOpts(message: OutboundMessage): MediaOptions {
   for (const part of message.parts ?? []) {
     switch (part.type) {
       case 'image':
-        if (part.url || part.dataUri) {
+        if (part.url || part.dataUri || part.localData !== undefined) {
           return {
             fileType: MediaFileType.IMAGE,
             ...mediaSource(part),
@@ -157,17 +157,17 @@ export function mediaOpts(message: OutboundMessage): MediaOptions {
         }
         break;
       case 'audio':
-        if (part.url || part.dataUri) {
+        if (part.url || part.dataUri || part.localData !== undefined) {
           return { fileType: MediaFileType.VOICE, ...mediaSource(part) };
         }
         break;
       case 'video':
-        if (part.url || part.dataUri) {
+        if (part.url || part.dataUri || part.localData !== undefined) {
           return { fileType: MediaFileType.VIDEO, ...mediaSource(part) };
         }
         break;
       case 'file':
-        if (part.url || part.dataUri) {
+        if (part.url || part.dataUri || part.localData !== undefined) {
           return {
             fileType: MediaFileType.FILE,
             ...mediaSource(part),
@@ -185,8 +185,20 @@ export function mediaOpts(message: OutboundMessage): MediaOptions {
   return { fileType: MediaFileType.FILE, content: message.text };
 }
 
-/** Resolve a media part to the SDK's single-source shape (`url` or `fileData`). */
-function mediaSource(part: { url?: string; dataUri?: string }): { url?: string; fileData?: string } {
+/**
+ * Resolve a media part to the SDK's single-source shape (`url` or `fileData`).
+ *
+ * Carrier precedence (plan §65 / §85): trusted bytes in hand win, then an
+ * inline data URI, then a genuine `http(s)` `url`. `localData` /
+ * `dataUri` are both base64-encoded for the QQ `uploadMedia` `fileData`
+ * field — never sent as `url` (the QQ upload API fetches `url` over HTTP and
+ * cannot resolve inline/raw bytes). Only a real `http(s)` `url` is passed
+ * through as `url`.
+ */
+function mediaSource(part: { url?: string; dataUri?: string; localData?: Uint8Array }): { url?: string; fileData?: string } {
+  if (part.localData !== undefined) {
+    return { fileData: Buffer.from(part.localData).toString('base64') };
+  }
   if (part.dataUri) {
     return { fileData: decodeDataUri(part.dataUri) };
   }

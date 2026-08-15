@@ -1,4 +1,12 @@
 /**
+ * Classification: C — duplicate send-media payload [@deprecated upstream-gap].
+ *
+ * Builds an iLink sendmessage image item + dispatches. The official composed
+ * messaging/send.js (sendImageMessageWeixin) is OpenClaw coupled (imports
+ * api/api + util/logger). Kept behind the facade as an upstream-gap; send
+ * routing now lives in upstream/tencent-upstream.ts sendImage().
+ */
+/**
  * WX5 media — send a media sendmessage (WX5.1 Image outbound).
  *
  * Embeds a CDN media reference (encrypt_query_param / aes_key) into a real

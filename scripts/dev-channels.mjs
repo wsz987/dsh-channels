@@ -35,6 +35,7 @@ const BUNDLE_PATCH = 'packages/channels/cordis.patch.yml';
 /** Infrastructure rows that must always be linked for every channel selection. */
 const INFRASTRUCTURE_ROWS = new Set([
   'channels-service',
+  'channels-files',
   'channels-harness',
   'channels-control',
   'channels-web',

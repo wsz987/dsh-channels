@@ -8,8 +8,8 @@
  *   the adapter never sees or logs them (architecture §21 / red line 3).
  * - `DingTalkStreamUpstream` (stream-upstream.ts) — inbound via the official
  *   `dingtalk-stream` SDK; outbound delegates to a separately injected driver.
- * - `DingTalkOfficialUpstream` (official-upstream.ts) — SDK-mode outbound via
- *   the message-scoped webhook and DingTalk AI Card OpenAPI.
+ * - `DingTalkOpenApiPortImpl` (official-upstream.ts) — SDK-mode outbound via
+ *   the message-scoped webhook, AI Card OpenAPI, and proactive/media OAPI.
  *
  * Endpoints (protocol-level, self-hosted gateway):
  * - GET  /stream        — long-poll for inbound payloads

@@ -1,4 +1,12 @@
 /**
+ * Classification: A — DSH glue [keep].
+ *
+ * `base_info` payload builder. The official equivalent is api/api.js
+ * buildBaseInfo() but is OpenClaw coupled (reads bot_agent from OpenClaw config).
+ * DSH keeps its own neutral builder (DSH-specific bot_agent), which is pure
+ * glue, not protocol duplication.
+ */
+/**
  * `base_info` payload attached to every iLink request.
  */
 import type { ILinkBaseInfo } from './types.js';

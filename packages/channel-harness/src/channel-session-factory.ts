@@ -105,7 +105,11 @@ export class ChannelSessionFactory {
       channelId: conversation.channelId,
       accountId: conversation.accountId,
       conversationId: conversation.conversationId,
+      // v3: stable conversation identity. The bridge populates this from the
+      // event; when a caller omits it we fall back to the legacy dm default.
+      conversationType: conversation.conversationType ?? 'dm',
       ...(conversation.threadId ? { threadId: conversation.threadId } : {}),
+      ...(conversation.senderId ? { senderId: conversation.senderId } : {}),
       sessionId,
       route,
       schemaVersion: SESSION_BINDING_SCHEMA_VERSION,

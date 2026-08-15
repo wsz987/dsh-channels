@@ -26,7 +26,7 @@ import type {
   SendResult,
   StreamingMode,
 } from '@wsz987/channel-core';
-import { ChannelError } from '@wsz987/channel-core';
+import { ChannelError, SecureRemoteMediaFetcher } from '@wsz987/channel-core';
 import type { QQBotInboundMessage } from '@tencent-connect/qqbot-nodejs';
 import type { QQConfig } from './config.js';
 import { InboundProcessor } from './inbound.js';
@@ -40,6 +40,14 @@ export interface QQAdapterDeps {
   sdkClient?: QQSdkClient;
   /** Resolved QQ AppSecret credential value (injected by the plugin). Tests using the Fake client may omit it. */
   appSecret?: string;
+  /**
+   * Optional secure remote media fetcher used to hydrate inbound image bytes
+   * before emit (plan §23 / §79A). Tests inject a fake so the inbound path is
+   * fully offline; production defaults to a real `SecureRemoteMediaFetcher`.
+   * Configurable here (not in config) because it is a low-level seam, not a
+   * user-facing knob.
+   */
+  secureFetch?: SecureRemoteMediaFetcher;
   /** Injectable clock (tests). */
   now?: () => number;
 }
@@ -119,6 +127,7 @@ export class QQAdapter implements ChannelAdapter {
       meta: { channel: this.id as never, accountId: this.config.accountId as never },
       dedupEnabled: this.config.dedup.enabled,
       dedupWindowMs: this.config.dedup.windowMs,
+      secureFetch: this.deps.secureFetch,
       now: this.now,
     });
     this.outbound = new OutboundSender(this.client, ctx.logger);

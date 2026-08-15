@@ -83,10 +83,12 @@ function packageJsonPath(dir: string): string {
 // Test file: packages/channels/test/bundle.test.ts — the patch lives one
 // directory up (packages/channels/cordis.patch.yml).
 const PATCH_URL = new URL('../cordis.patch.yml', import.meta.url);
+const DEV_INSTALLER_URL = new URL('../../../scripts/dev-channels.mjs', import.meta.url);
 
 // Expected bundle result — the exact plugins cordis.patch.yml inserts.
 const EXPECTED_ITEMS: PatchItem[] = [
   { id: 'channels-service', name: '@wsz987/channel-core/plugin' },
+  { id: 'channels-files', name: '@wsz987/channel-files' },
   // channel-harness injects the command-plane capabilities: the Harness
   // `commands` registry plus the default-model selection it resolves routes against.
   { id: 'channels-harness', name: '@wsz987/channel-harness', inject: ['channels', 'agents', 'agentDefaultModel', 'commands'] },
@@ -107,7 +109,7 @@ describe('DSH bundle patch (cordis.patch.yml)', () => {
   const patchSource = readFileSync(fileURLToPath(PATCH_URL), 'utf8');
   const items = parsePatch(patchSource);
 
-  it('inserts exactly the eight expected plugins, in order, with the right names and inject lists', () => {
+  it('inserts exactly the expected plugins, in order, with the right names and inject lists', () => {
     expect(items.map((i) => i.id)).toEqual(EXPECTED_ITEMS.map((i) => i.id));
     expect(items.map((i) => i.name)).toEqual(EXPECTED_ITEMS.map((i) => i.name));
     expect(items.map((i) => i.inject)).toEqual(EXPECTED_ITEMS.map((i) => i.inject));
@@ -178,4 +180,33 @@ describe('every channel adapter can be disabled through its config', () => {
       expect(config.dict?.enabled?.type).toBe('boolean');
     },
   );
+});
+
+describe('optional generic-file package boundary', () => {
+  it('links channel-files as shared infrastructure in source installs', () => {
+    const installer = readFileSync(fileURLToPath(DEV_INSTALLER_URL), 'utf8');
+    const infrastructure = installer.match(/const INFRASTRUCTURE_ROWS = new Set\(\[([\s\S]*?)\]\);/)?.[1];
+    expect(infrastructure).toContain("'channels-files'");
+  });
+
+  it('keeps document parsers out of channel-harness', () => {
+    const harness = JSON.parse(readFileSync(packageJsonPath('channel-harness'), 'utf8')) as {
+      dependencies?: Record<string, string>;
+    };
+    expect(harness.dependencies).not.toHaveProperty('@wsz987/channel-files');
+    expect(harness.dependencies).not.toHaveProperty('unpdf');
+    expect(harness.dependencies).not.toHaveProperty('mammoth');
+    expect(harness.dependencies).not.toHaveProperty('xlsx');
+  });
+
+  it('owns mature document parsers in channel-files', () => {
+    const files = JSON.parse(readFileSync(packageJsonPath('channel-files'), 'utf8')) as {
+      dependencies?: Record<string, string>;
+    };
+    expect(files.dependencies).toMatchObject({
+      unpdf: '1.8.1',
+      mammoth: '1.12.1',
+      xlsx: '0.18.5',
+    });
+  });
 });

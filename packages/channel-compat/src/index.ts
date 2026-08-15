@@ -12,6 +12,7 @@
  * top of `diagnose`/`formatDoctor` later.
  */
 export * from './manifest.js';
+export * from './upstream-manifest.js';
 export * from './version-policy.js';
 export * from './doctor.js';
 export * from './compatibility.js';

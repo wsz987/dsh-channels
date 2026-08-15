@@ -1,4 +1,13 @@
 /**
+ * Classification: C — duplicate protocol wire types [@deprecated upstream-gap].
+ *
+ * iLink message / media / QR wire shapes self-maintained. The official
+ * @tencent-weixin/openclaw-weixin has equivalent internal enums and types, but
+ * its package is OpenClaw-coupled. These are therefore DSH-side structural
+ * mirrors used by the mapper and send paths, kept as an explicit upstream-gap
+ * until Tencent exports a host-neutral API.
+ */
+/**
  * Tencent Weixin iLink wire types.
  *
  * Ported from the upstream Tencent/openclaw-weixin proto mirror. Bytes fields

@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import {
   diagnose,
   formatDoctor,
+  formatUpstreamSection,
   manifestVerdict,
 } from '../src/index.ts';
 import { WeixinAdapter } from '../../channel-weixin/src/adapter.ts';
@@ -110,5 +111,28 @@ describe('doctor — all four official channels (M4 surface)', () => {
 
     // The doctor surface CI prints via `pnpm doctor`.
     console.log(text);
+  });
+
+  it('renders a fixed upstream section per official channel (M8, plan §99)', async () => {
+    const diagnostics = await diagnose([weixin, qq, dingtalk, lark]);
+    const text = formatDoctor(diagnostics);
+
+    const expected: Record<string, { pkg: string; strategy: string }> = {
+      weixin: { pkg: '@tencent-weixin/openclaw-weixin@2.4.6', strategy: 'source-port' },
+      qq: { pkg: '@tencent-connect/qqbot-nodejs@1.0.4', strategy: 'official-sdk' },
+      lark: { pkg: '@larksuiteoapi/node-sdk@1.73.0', strategy: 'official-sdk' },
+      dingtalk: { pkg: 'dingtalk-stream@2.1.5', strategy: 'minimal-official-api-port' },
+    };
+    for (const [id, want] of Object.entries(expected)) {
+      expect(text).toContain(`Channel: ${id}`);
+      expect(text).toContain(`upstream = ${want.pkg}`);
+      expect(text).toContain(`strategy = ${want.strategy}`);
+      expect(text).toContain('status = compatible');
+    }
+
+    // What each channel's own upstream section looks like.
+    for (const d of diagnostics) {
+      expect(formatUpstreamSection(d)).toContain(`Channel: ${d.id}`);
+    }
   });
 });

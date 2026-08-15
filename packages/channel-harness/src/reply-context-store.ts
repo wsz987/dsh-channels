@@ -74,6 +74,11 @@ export class ReplyContextStore {
     return this.pendingByMessageId.get(messageId)?.sessionId;
   }
 
+  /** Pending context before discard, used to stop target-bound indicators. */
+  pendingContext(messageId: string): ChannelReplyContext | undefined {
+    return this.pendingByMessageId.get(messageId)?.context;
+  }
+
   /** Active context for sessionId+turn, if any. */
   getTurn(sessionId: string, turn: number): ChannelReplyContext | undefined {
     return this.activeByTurn.get(`${sessionId}:${turn}`);

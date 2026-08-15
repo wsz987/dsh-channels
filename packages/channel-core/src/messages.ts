@@ -7,6 +7,72 @@
  * on structured content.
  */
 
+/**
+ * Stable, de-identified reason a binary asset failed to ingress. Adapters set
+ * this on a part (instead of a platform-specific exception) so the host can
+ * degrade gracefully and diagnose without leaking upstream internals.
+ */
+export type BinaryIngressFailureCode =
+  | 'too-large'
+  | 'download-failed'
+  | 'decrypt-failed'
+  | 'integrity-failed'
+  | 'mime-invalid'
+  | 'resource-unavailable';
+
+/**
+ * Common fields shared by every binary part (image / file / audio / video).
+ *
+ * Exactly one carrier should carry the bytes that actually reach the host:
+ *
+ * - `url` — ONLY a genuine `http(s)` URL. This is the only carrier the
+ *   secure remote fetcher may ingest. Any other string (image_key,
+ *   file_key, file_id, mediaId, …) is a platform-opaque handle and MUST NOT
+ *   be put in `url`.
+ * - `resourceRef` — a platform-opaque handle (Lark image_key/file_key,
+ *   Telegram file_id, DingTalk mediaId, …). It is resolved ONLY by the
+ *   platform upstream into bytes. It is NEVER passed to a generic fetch and
+ *   never accepted by the secure fetcher.
+ * - `dataUri` — an inline data URL.
+ * - `localData` — trusted bytes already downloaded/decrypted by the
+ *   adapter. It is preferred over `url` / `dataUri` / `resourceRef` when
+ *   the adapter has the raw binary in hand.
+ *
+ * See the M2 contract (plan §8/§9) for the url-vs-resourceRef rule.
+ */
+export interface BinaryPartBase {
+  /**
+   * Only a genuine `http(s)` URL may be placed here. A string that is not a
+   * real http(s) URL (e.g. a platform opaque handle) belongs in
+   * `resourceRef`, never here.
+   */
+  url?: string;
+  /**
+   * Platform opaque handle (Lark image_key/file_key, Telegram file_id,
+   * DingTalk mediaId, …). Resolved to bytes exclusively via the platform
+   * upstream — NEVER via a generic `fetch`, and never accepted by the
+   * secure remote media fetcher.
+   */
+  resourceRef?: string;
+  /** Inline data URL. */
+  dataUri?: string;
+  /**
+   * Trusted bytes already downloaded/decrypted by the adapter. Preferred over
+   * `url` / `dataUri` / `resourceRef` when the adapter has the raw binary
+   * in hand. Core never decodes or persists these — the Harness bridge turns
+   * them into real attachments.
+   */
+  localData?: Uint8Array;
+  /** Optional MIME type hint. */
+  mimeType?: string;
+  /** Optional human-readable filename. */
+  name?: string;
+  /** Optional byte size, when known in advance. */
+  size?: number;
+  /** Stable de-identified reason a binary asset failed to ingress. */
+  ingressFailure?: BinaryIngressFailureCode;
+}
+
 /** Plain text. */
 export interface TextPart {
   type: 'text';
@@ -14,48 +80,28 @@ export interface TextPart {
 }
 
 /** A raster image reference (url or inline data uri). */
-export interface ImagePart {
+export interface ImagePart extends BinaryPartBase {
   type: 'image';
-  url?: string;
-  dataUri?: string;
-  mimeType?: string;
+  /** Alt text or caption describing the image content. */
   alt?: string;
-  /**
-   * Bytes the adapter already downloaded and decrypted (e.g. an encrypted CDN
-   * body). Core never decodes or persists these — the Harness bridge turns
-   * them into a real image attachment. Prefer over `url`/`dataUri` when the
-   * adapter has the raw image in hand.
-   */
-  localData?: Uint8Array;
 }
 
 /** A generic file reference. */
-export interface FilePart {
+export interface FilePart extends BinaryPartBase {
   type: 'file';
-  url?: string;
-  dataUri?: string;
-  mimeType?: string;
-  name?: string;
-  size?: number;
-  /** Downloaded/decrypted bytes (see ImagePart.localData). */
-  localData?: Uint8Array;
 }
 
 /** An audio reference (e.g. voice message, ASR input). */
-export interface AudioPart {
+export interface AudioPart extends BinaryPartBase {
   type: 'audio';
-  url?: string;
-  dataUri?: string;
-  mimeType?: string;
+  /** Duration in milliseconds, when known. */
   durationMs?: number;
 }
 
 /** A video reference. */
-export interface VideoPart {
+export interface VideoPart extends BinaryPartBase {
   type: 'video';
-  url?: string;
-  dataUri?: string;
-  mimeType?: string;
+  /** Duration in milliseconds, when known. */
   durationMs?: number;
 }
 

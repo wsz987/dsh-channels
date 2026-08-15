@@ -19,6 +19,7 @@
 | `channels` | 对外 bundle（`@wsz987/dsh-channels`） |
 | `channel-core` | Channel Contract / `defineChannelAdapter` |
 | `channel-harness` | 渠道 ↔ Harness 桥 |
+| `channel-files` | 可选通用文件扩展（存储 / 解析 / `read_channel_attachment`） |
 | `channel-weixin` / `-qq` / `-dingtalk` / `-lark` | 四个内置渠道适配器 |
 | `channel-telegram` | 扩展性示例（未正式支持） |
 | `channel-compat` / `-testkit` / `-verify` / `-web` | 校验 / 测试 / 契约验证 / Web 可视化 |

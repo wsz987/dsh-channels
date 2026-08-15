@@ -13,6 +13,19 @@ export interface HttpRequestInit {
   body?: unknown;
   headers?: Record<string, string>;
   timeoutMs?: number;
+  /**
+   * Raw binary body (media upload). When set, `body` is ignored and `raw` is
+   * sent verbatim with `contentType` (default `application/octet-stream`).
+   */
+  raw?: Uint8Array | string;
+  /** Content-Type to send alongside a `raw` binary body. */
+  contentType?: string;
+  /**
+   * Response decoding. `'json'` (default) parses the response body as JSON;
+   * `'arraybuffer'` returns the raw bytes as a `Uint8Array` (media download,
+   * where the body is binary and not JSON).
+   */
+  responseType?: 'json' | 'arraybuffer';
 }
 
 export interface HttpTransport {
@@ -47,14 +60,36 @@ export class FetchTransport implements HttpTransport {
     signal?.addEventListener('abort', onOuterAbort, { once: true });
     try {
       const url = /^https?:\/\//i.test(path) ? path : `${this.baseUrl}${path}`;
+      const headers: Record<string, string> = { ...init.headers };
+      // fetch accepts strings and Uint8Array as body ('BodyInit' isn't in the
+      // lib scope here, so type the wire body minimally).
+      const body: string | Uint8Array | undefined =
+        init.raw !== undefined
+          ? (typeof init.raw === 'string' ? init.raw : new Uint8Array(init.raw.buffer, init.raw.byteOffset, init.raw.byteLength))
+          : init.body !== undefined
+            ? JSON.stringify(init.body)
+            : undefined;
+      if (init.raw !== undefined) {
+        headers['content-type'] = init.contentType ?? 'application/octet-stream';
+      } else if (init.body !== undefined) {
+        headers['content-type'] = headers['content-type'] ?? 'application/json';
+      }
       const response = await this.fetchImpl(url, {
         method: init.method ?? 'GET',
-        headers: { 'content-type': 'application/json', ...init.headers },
-        body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
+        headers,
+        body,
         signal: controller.signal,
       });
       if (!response.ok) {
-        throw new ChannelError('CHANNEL_ERROR', `dingtalk http ${response.status} on ${path}`);
+        const detail = (await response.text()).replace(/\s+/g, ' ').slice(0, 500);
+        throw new ChannelError(
+          'CHANNEL_ERROR',
+          `dingtalk http ${response.status} on ${path}${detail ? `: ${detail}` : ''}`,
+        );
+      }
+      if (init.responseType === 'arraybuffer') {
+        const buffer = await response.arrayBuffer();
+        return new Uint8Array(buffer);
       }
       const text = await response.text();
       return text ? JSON.parse(text) : undefined;

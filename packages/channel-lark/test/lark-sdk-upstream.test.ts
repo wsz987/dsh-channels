@@ -68,6 +68,10 @@ class FakeOutbound implements LarkUpstream {
     return Promise.resolve({});
   }
 
+  sendFile(): Promise<unknown> {
+    return Promise.resolve({});
+  }
+
   createCard(): Promise<CardCreateResult> {
     return Promise.resolve({ cardId: 'fake-card' });
   }
@@ -518,13 +522,23 @@ describe('LarkSdkUpstream outbound (delegated to the HTTP driver)', () => {
     await expect(
       upstream.sendMedia('oc_456', { type: 'image', url: 'https://x/p.png', alt: 'pic' }),
     ).resolves.toEqual({ id: 'out-1' });
-    expect(transport.calls.map((c) => c.path)).toEqual(['/message/send', '/message/send']);
+    await expect(
+      upstream.sendFile('oc_456', { type: 'file', localData: new Uint8Array([1, 2]), name: 'a.bin' }),
+    ).resolves.toEqual({ id: 'out-1' });
+    expect(transport.calls.map((c) => c.path)).toEqual(['/message/send', '/message/send', '/message/send']);
     expect(transport.calls[0]?.init?.body).toEqual({ to: 'oc_456', type: 'text', content: 'hello' });
     expect(transport.calls[1]?.init?.body).toEqual({
       to: 'oc_456',
       type: 'image',
       url: 'https://x/p.png',
       name: 'pic',
+    });
+    // M7A: generic file delegation posts the bytes + name to the gateway.
+    expect(transport.calls[2]?.init?.body).toMatchObject({
+      to: 'oc_456',
+      type: 'file',
+      name: 'a.bin',
+      data: [1, 2],
     });
   });
 

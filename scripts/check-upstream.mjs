@@ -174,8 +174,66 @@ function readInstalledVersion(pkg) {
 }
 
 /* ------------------------------------------------------------------ */
+/* M8 — upstream-discipline smoke (plan §17/§72/§87)                   */
+/* ------------------------------------------------------------------ */
+// Local-only governance that ALWAYS runs (independent of npm registry reach):
+//   1. channel-weixin must pin @tencent-weixin/openclaw-weixin EXACTLY (no
+//      caret/tilde/range) — plan section 17 / 72 ("exact pin").
+//   2. every official channel's package.json must pin the declared upstream
+//      package to the same testedVersion as the M0 UPSTREAM_MANIFESTS boundary
+//      (plan section 39) — a manifest version drifting from package.json fails.
+// These values mirror packages/channel-compat/src/upstream-manifest.ts and the
+// plan baseline; the plan doc remains the authority if they ever disagree.
+const UPSTREAM_DISCIPLINE = [
+  { dir: 'channel-qq', pkg: '@tencent-connect/qqbot-nodejs', tested: '1.0.4', exactPin: true },
+  { dir: 'channel-lark', pkg: '@larksuiteoapi/node-sdk', tested: '1.73.0', exactPin: true },
+  { dir: 'channel-dingtalk', pkg: 'dingtalk-stream', tested: '2.1.5', exactPin: true },
+];
+
+const EXACT_VERSION_RE = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+
+function checkUpstreamDiscipline() {
+  let failed = false;
+  for (const { dir, pkg, tested, exactPin } of UPSTREAM_DISCIPLINE) {
+    const pjPath = path.join(ROOT, 'packages', dir, 'package.json');
+    let json;
+    try {
+      json = JSON.parse(fs.readFileSync(pjPath, 'utf8'));
+    } catch (err) {
+      console.error(`[upstream-discipline] ERROR ${dir}: cannot read package.json — ${err.message}`);
+      failed = true;
+      continue;
+    }
+    const deps = { ...(json.dependencies ?? {}), ...(json.devDependencies ?? {}), ...(json.peerDependencies ?? {}) };
+    const range = deps[pkg];
+    if (range === undefined) {
+      console.error(`[upstream-discipline] FAIL ${dir}: dependency ${pkg} is not declared`);
+      failed = true;
+      continue;
+    }
+    const exact = typeof range === 'string' && EXACT_VERSION_RE.test(range.trim());
+    if (exactPin && !exact) {
+      console.error(`[upstream-discipline] FAIL ${dir}: ${pkg} must be EXACT-pinned (a bare x.y.z), got '${range}'`);
+      failed = true;
+    } else if (range.trim() !== tested) {
+      console.error(`[upstream-discipline] FAIL ${dir}: ${pkg} pinned at '${range}' but UPSTREAM_MANIFESTS testedVersion is '${tested}'`);
+      failed = true;
+    } else {
+      console.log(`[upstream-discipline] ok ${dir}: ${pkg} pinned exactly at ${tested}`);
+    }
+  }
+  if (failed) {
+    console.error('\n[upstream-discipline] upstream pin discipline violated — fix package.json before release.');
+    process.exit(1);
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* Main                                                                */
 /* ------------------------------------------------------------------ */
+
+// Local-only upstream pin discipline runs first (independent of the registry).
+checkUpstreamDiscipline();
 
 const declared = scanDeclared();
 if (declared.size === 0) {

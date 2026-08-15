@@ -115,6 +115,8 @@ export interface ChannelAdapter {
    */
   startTyping?(conversationId: string): Promise<void>;
   stopTyping?(conversationId: string): Promise<void>;
+  startTypingForTarget?(target: ChannelTarget): Promise<void>;
+  stopTypingForTarget?(target: ChannelTarget): Promise<void>;
 
   createReply?(target: ChannelTarget, options?: CreateReplyOptions): Promise<ReplyHandle>;
 

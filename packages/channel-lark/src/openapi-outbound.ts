@@ -9,6 +9,7 @@
  *
  * - `sendText`    → `im.v1.message.create` (`msg_type: 'text'`)
  * - `sendMedia`   → `im.v1.image.create` (upload → `image_key`) + `im.v1.message.create` (`msg_type: 'image'`)
+ * - `sendFile`    → `im.v1.file.create` (upload → `file_key`) + `im.v1.message.create` (`msg_type: 'file'`)
  * - `createCard`  → `im.v1.message.create` (`msg_type: 'interactive'`), card id = `message_id`
  * - `updateCard`  → `im.v1.message.patch` (update card content)
  * - `failCard`    → `im.v1.message.patch` (rewrite the card to a failure state)
@@ -20,10 +21,14 @@
  * never referenced here — the `Client` is built elsewhere from config.
  */
 import { ChannelError } from '@wsz987/channel-core';
-import type { CardCreateResult, LarkMediaRef, LarkOutbound } from './upstream.js';
+import { z } from 'zod';
+import type { CardCreateResult, LarkFileRef, LarkMediaRef, LarkOutbound } from './upstream.js';
 
 /** The SDK `receive_id_type` union (matches the real `Client` type). */
 export type LarkReceiveIdType = 'open_id' | 'user_id' | 'union_id' | 'email' | 'chat_id';
+
+/** SDK `file_type` union for im.v1.file.create (matches the SDK type). */
+export type LarkFileType = 'opus' | 'mp4' | 'pdf' | 'doc' | 'xls' | 'ppt' | 'stream';
 
 /** Minimal `im.v1.message.create` payload/result shapes consumed here. */
 export interface LarkCreateMessagePayload {
@@ -50,6 +55,20 @@ export interface LarkCreateImageResult {
   image_key?: string;
 }
 
+/** Minimal im.v1.file.create payload/result shapes consumed here (M7A). */
+export interface LarkCreateFilePayload {
+  data: {
+    file_type: 'opus' | 'mp4' | 'pdf' | 'doc' | 'xls' | 'ppt' | 'stream';
+    file_name: string;
+    duration?: number;
+    file: Buffer;
+  };
+}
+
+export interface LarkCreateFileResult {
+  file_key?: string;
+}
+
 /** Common OpenAPI envelope: `code` 0 means success. */
 export interface LarkApiResponse<T = Record<string, unknown>> {
   code?: number;
@@ -72,9 +91,22 @@ export interface LarkOpenApiClient {
       image: {
         create(payload: LarkCreateImagePayload): Promise<LarkCreateImageResult | null>;
       };
+      file: {
+        create(payload: LarkCreateFilePayload): Promise<LarkCreateFileResult | null>;
+      };
     };
+    messageReaction?: unknown;
   };
+  addReaction?(messageId: string, emojiType: string): Promise<string>;
+  removeReaction?(messageId: string, reactionId: string): Promise<void>;
 }
+
+interface ReactionClient {
+  addReaction(messageId: string, emojiType: string): Promise<string>;
+  removeReaction(messageId: string, reactionId: string): Promise<void>;
+}
+
+const reactionIdSchema = z.string().trim().min(1);
 
 export interface LarkOpenApiOutboundOptions {
   /** Official OpenAPI client (real `Client` or injected fake). */
@@ -90,6 +122,8 @@ export interface LarkOpenApiOutboundOptions {
  */
 export class LarkOpenApiOutbound implements LarkOutbound {
   private readonly fetchImage: (url: string) => Promise<Buffer>;
+  private readonly typingReactions = new Map<string, string>();
+  private readonly typingOperations = new Map<string, Promise<void>>();
 
   constructor(private readonly options: LarkOpenApiOutboundOptions) {
     this.fetchImage = options.fetchImage ?? defaultFetchImage;
@@ -117,6 +151,30 @@ export class LarkOpenApiOutbound implements LarkOutbound {
         receive_id: to,
         msg_type: 'image',
         content: JSON.stringify({ image_key: imageKey }),
+      },
+    });
+  }
+
+  async sendFile(to: string, file: LarkFileRef): Promise<unknown> {
+    const bytes = await this.resolveFileBytes(file);
+    const name = file.name ?? 'file';
+    const uploaded = await this.options.client.im.v1.file.create({
+      data: {
+        file_type: fileTypeFromName(name),
+        file_name: name,
+        file: bytes,
+      },
+    });
+    const fileKey = uploaded?.file_key;
+    if (!fileKey) {
+      throw new ChannelError('CHANNEL_ERROR', 'lark file upload returned no file_key');
+    }
+    return this.options.client.im.v1.message.create({
+      params: { receive_id_type: receiveIdType(to) },
+      data: {
+        receive_id: to,
+        msg_type: 'file',
+        content: JSON.stringify({ file_key: fileKey }),
       },
     });
   }
@@ -154,10 +212,67 @@ export class LarkOpenApiOutbound implements LarkOutbound {
     });
   }
 
+  async startTyping(messageId: string): Promise<void> {
+    if (!messageId || this.typingReactions.has(messageId)) return;
+    await this.serializeTyping(messageId, async () => {
+      if (this.typingReactions.has(messageId)) return;
+      const reaction = this.reactionClient();
+      if (!reaction) return;
+      const result = reactionIdSchema.safeParse(await reaction.addReaction(messageId, 'Typing'));
+      if (!result.success) {
+        throw new ChannelError('CHANNEL_ERROR', 'lark typing reaction returned an invalid reaction id');
+      }
+      this.typingReactions.set(messageId, result.data);
+    });
+  }
+
+  async stopTyping(messageId: string): Promise<void> {
+    await this.serializeTyping(messageId, async () => {
+      const reactionId = this.typingReactions.get(messageId);
+      if (!reactionId) return;
+      const reaction = this.reactionClient();
+      if (reaction) await reaction.removeReaction(messageId, reactionId);
+      this.typingReactions.delete(messageId);
+    });
+  }
+
+  private async serializeTyping(messageId: string, operation: () => Promise<void>): Promise<void> {
+    const previous = this.typingOperations.get(messageId) ?? Promise.resolve();
+    const current = previous.then(operation, operation);
+    this.typingOperations.set(messageId, current);
+    try {
+      await current;
+    } finally {
+      if (this.typingOperations.get(messageId) === current) this.typingOperations.delete(messageId);
+    }
+  }
+
+  private reactionClient(): ReactionClient | undefined {
+    if (this.options.client.addReaction && this.options.client.removeReaction) {
+      return {
+        addReaction: this.options.client.addReaction.bind(this.options.client),
+        removeReaction: this.options.client.removeReaction.bind(this.options.client),
+      };
+    }
+    const nested = this.options.client.im.messageReaction as ReactionClient | undefined;
+    return nested && typeof nested.addReaction === 'function' && typeof nested.removeReaction === 'function'
+      ? nested
+      : undefined;
+  }
+
   private async resolveImageBytes(media: LarkMediaRef): Promise<Buffer> {
     if (media.dataUri) return dataUriToBuffer(media.dataUri);
     if (media.url) return this.fetchImage(media.url);
     throw new ChannelError('CHANNEL_ERROR', 'lark sendMedia requires an image url or dataUri');
+  }
+
+  private async resolveFileBytes(file: LarkFileRef): Promise<Buffer> {
+    if (file.localData) {
+      return Buffer.isBuffer(file.localData) ? file.localData : Buffer.from(file.localData);
+    }
+    if (file.dataUri) return dataUriToBuffer(file.dataUri);
+    if (file.url) return this.fetchImage(file.url);
+    throw new ChannelError('CHANNEL_ERROR', 'lark sendFile requires localData, url, or dataUri');
   }
 }
 
@@ -168,6 +283,26 @@ export class LarkOpenApiOutbound implements LarkOutbound {
  */
 export function receiveIdType(to: string): LarkReceiveIdType {
   return to.startsWith('oc_') ? 'chat_id' : 'open_id';
+}
+
+/**
+ * Derive the SDK `file_type` from a filename extension, defaulting to
+ * 'stream' for anything unrecognised. Matches the SDK union for im.v1.file.create.
+ */
+export function fileTypeFromName(name: string): LarkFileType {
+  const ext = (name.split('.').pop() ?? '').toLowerCase();
+  switch (ext) {
+    case 'opus': return 'opus';
+    case 'mp4': return 'mp4';
+    case 'pdf': return 'pdf';
+    case 'doc':
+    case 'docx': return 'doc';
+    case 'xls':
+    case 'xlsx': return 'xls';
+    case 'ppt':
+    case 'pptx': return 'ppt';
+    default: return 'stream';
+  }
 }
 
 /** Build the minimal interactive card JSON used for streaming replies. */

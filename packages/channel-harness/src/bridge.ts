@@ -44,8 +44,11 @@ import {
   type SessionKeyInput,
 } from './session-router.js';
 import type { ChannelWorkspaceResolver } from './workspace-resolver.js';
-import { toHarnessUserMessage, type SaveImageHook } from './message-converter.js';
+import { toHarnessUserMessage, type SaveImageHook, type FileStoreHook, type StoredBinaryPart } from './message-converter.js';
+import type { ChannelFileProvider } from './file-provider.js';
 import { ReplyContextStore } from './reply-context-store.js';
+import type { ChannelOutboxService } from './outbox/service.js';
+import { installSendChannelMessageTool } from './outbox/tool-send.js';
 import {
   installChannelCommands,
   type ChannelCommandDependencies,
@@ -63,6 +66,8 @@ export interface ChannelHarnessBridgeOptions {
   logger: ChannelLogger;
   /** Optional attachment-commit seam (WX5 real image path). */
   saveImage?: SaveImageHook;
+  /** Optional generic-file extension. Absent keeps ordinary file placeholders. */
+  fileProvider?: ChannelFileProvider;
   /**
    * The Cordis context on which the official `commands` registry is mounted.
    * `ctx.commands.execute` is the official command dispatcher (plan §8).
@@ -75,6 +80,11 @@ export interface ChannelHarnessBridgeOptions {
    * applicable) a Harness `WorkspaceRegistry` member (plan §6 / §9 / M3).
    */
   workspaceResolver: ChannelWorkspaceResolver;
+  /**
+   * Optional durable outbox (plan M6 / §60-§71 / §95). Presence enables the
+   * Model-facing `send_channel_message` tool. Absent -> no proactive send tool.
+   */
+  outbox?: ChannelOutboxService;
 }
 
 /**
@@ -175,6 +185,26 @@ export class ChannelHarnessBridge {
   // bridge instance.
   private commandSetup = async (agentCtx: Context): Promise<void> => {
     await installChannelCommands(agentCtx, this.options.commandDeps);
+    // M4: Agent-scoped read_channel_attachment tool (plan §81). Registered on
+    // the agent's own scope so it is disposed with the agent. Best-effort: a
+    // tool-install failure must never roll back the agent setup.
+    if (this.options.fileProvider) {
+      try {
+        await this.options.fileProvider.installTools(agentCtx);
+      } catch (error) {
+        this.options.logger.warn('[channel-harness] failed to install read_channel_attachment tool', error);
+      }
+    }
+    // M6: Agent-scoped send_channel_message tool (plan §62/§95). Only installed
+    // when the durable outbox is wired. Best-effort (never rolls back the agent
+    // setup), mirroring the attachment tool.
+    if (this.options.outbox) {
+      try {
+        await installSendChannelMessageTool(agentCtx, { outbox: this.options.outbox });
+      } catch (error) {
+        this.options.logger.warn('[channel-harness] failed to install send_channel_message tool', error);
+      }
+    }
   };
 
   private conversationKey(event: MessageReceived): string {
@@ -192,6 +222,9 @@ export class ChannelHarnessBridge {
       channelId: event.channel,
       accountId: event.accountId,
       conversationId: event.conversation.id,
+      // v3: stable conversation identity captured for the durable binding.
+      conversationType: event.conversation.type,
+      ...(event.sender.id ? { senderId: event.sender.id } : {}),
       ...(event.conversation.threadId ? { threadId: event.conversation.threadId } : {}),
     };
   }
@@ -305,9 +338,11 @@ export class ChannelHarnessBridge {
 
     // --- Ordinary message path (unchanged) ---------------------------------------
     const runId = randomUUID();
+    this.logInboundBinaryAvailability(event, binding.sessionId);
     const userMessage = await toHarnessUserMessage(event, {
       includeMetadataPrefix: this.options.config.includeMetadataPrefix,
       saveImage: this.options.saveImage,
+      fileStore: this.fileStoreHook(event, binding.sessionId),
     });
     // Register the reply context keyed by the Harness UserMessage id strictly
     // BEFORE followup.
@@ -323,6 +358,78 @@ export class ChannelHarnessBridge {
       },
     });
     agentRef!.followup(userMessage);
+  }
+
+  /**
+   * Build the converter's optional file/audio/video store hook (plan \u00a750).
+   * Absent `fileProvider` -> no hook -> the converter keeps `[file: name]`
+   * placeholders (unchanged fallback). The hook binds the current binding's
+   * session + event identity so a stored asset is correctly session-ACL'd.
+   */
+  private fileStoreHook(event: MessageReceived, sessionId: string): FileStoreHook | undefined {
+    if (!this.options.fileProvider) return undefined;
+    const provider = this.options.fileProvider;
+    return async (part: StoredBinaryPart) => {
+      const fields = this.attachmentLogFields(event, sessionId, part);
+      try {
+        const descriptor = await provider.store(
+          {
+            sessionId,
+            channelId: event.channel,
+            accountId: event.accountId,
+            conversationId: event.conversation.id,
+            ...(event.conversation.type ? { conversationType: event.conversation.type } : {}),
+            ...(event.conversation.threadId ? { threadId: event.conversation.threadId } : {}),
+            messageId: event.message.id,
+          },
+          part,
+        );
+        if (!descriptor) {
+          this.options.logger.warn('[channel-harness] inbound attachment was not stored', fields);
+          return undefined;
+        }
+        this.options.logger.info('[channel-harness] inbound attachment stored', {
+          ...fields,
+          attachmentId: descriptor.attachmentId,
+          bytes: descriptor.bytes,
+          readable: descriptor.readable,
+        });
+        return descriptor;
+      } catch (error) {
+        this.options.logger.warn('[channel-harness] inbound attachment storage failed', {
+          ...fields,
+          error: toLoggableError(error),
+        });
+        return undefined;
+      }
+    };
+  }
+
+  /** Log the adapter-to-asset-store boundary once for every binary inbound part. */
+  private logInboundBinaryAvailability(event: MessageReceived, sessionId: string): void {
+    for (const part of event.message.content) {
+      if (part.type !== 'file' && part.type !== 'audio' && part.type !== 'video') continue;
+      if (part.localData?.byteLength) continue;
+      this.options.logger.warn('[channel-harness] inbound attachment has no local bytes', {
+        ...this.attachmentLogFields(event, sessionId, part),
+        hasUrl: Boolean(part.url),
+        reason: 'adapter did not provide downloaded bytes',
+      });
+    }
+  }
+
+  private attachmentLogFields(event: MessageReceived, sessionId: string, part: StoredBinaryPart): Record<string, unknown> {
+    return {
+      channel: event.channel,
+      accountId: event.accountId,
+      conversationId: event.conversation.id,
+      sessionId,
+      messageId: event.message.id,
+      kind: part.type,
+      name: part.type === 'file' ? part.name : undefined,
+      mimeType: part.mimeType,
+      localBytes: part.localData?.byteLength,
+    };
   }
 
   /**
@@ -356,6 +463,8 @@ export class ChannelHarnessBridge {
         channelId: oldBinding.channelId,
         accountId: oldBinding.accountId,
         conversationId: oldBinding.conversationId,
+        conversationType: oldBinding.conversationType,
+        ...(oldBinding.senderId ? { senderId: oldBinding.senderId } : {}),
         ...(oldBinding.threadId ? { threadId: oldBinding.threadId } : {}),
       },
       route,

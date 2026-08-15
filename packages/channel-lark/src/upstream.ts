@@ -26,8 +26,24 @@ export interface LarkMediaRef {
   url?: string;
   dataUri?: string;
   name?: string;
-  /** Human-readable description; used as the send name when `name` is absent. */
+  /** Human-readable description; used as the send name when the part has none. */
   alt?: string;
+}
+
+/**
+ * Outbound generic-file reference (M7A). localData carries the trusted bytes
+ * (preferred; the adapter never re-downloads), url/dataUri are fallbacks. The
+ * file_type sent to the SDK is derived from name by the outbound driver.
+ */
+export interface LarkFileRef {
+  type: 'file';
+  /** Trusted bytes already held by the adapter (preferred over url/dataUri). */
+  localData?: Uint8Array;
+  url?: string;
+  dataUri?: string;
+  /** Human-readable filename; drives the SDK file_name + derived file_type. */
+  name?: string;
+  mimeType?: string;
 }
 
 /**
@@ -44,6 +60,9 @@ export interface LarkOutbound {
   /** Send a basic media message (e.g. a plain image). */
   sendMedia(to: string, media: LarkMediaRef): Promise<unknown>;
 
+  /** Send a generic file message (M7A). */
+  sendFile(to: string, file: LarkFileRef): Promise<unknown>;
+
   /** Create an editable card in the given conversation with initial content. */
   createCard(conversationId: string, text: string): Promise<CardCreateResult>;
 
@@ -55,6 +74,8 @@ export interface LarkOutbound {
 
   /** Mark an editable card as failed, optionally with a reason. */
   failCard(cardId: string, reason?: string): Promise<unknown>;
+  startTyping?(messageId: string): Promise<void>;
+  stopTyping?(messageId: string): Promise<void>;
 }
 
 /** Full upstream driver: inbound receive + outbound (extends {@link LarkOutbound}). */
@@ -117,6 +138,19 @@ export class HttpLarkUpstream implements LarkUpstream {
         type: 'image',
         url: media.url ?? media.dataUri,
         name: media.name ?? media.alt,
+      },
+    });
+  }
+
+  sendFile(to: string, file: LarkFileRef): Promise<unknown> {
+    return this.options.transport.request('/message/send', {
+      method: 'POST',
+      body: {
+        to,
+        type: 'file',
+        name: file.name,
+        mimeType: file.mimeType,
+        data: file.localData ? Array.from(file.localData) : undefined,
       },
     });
   }

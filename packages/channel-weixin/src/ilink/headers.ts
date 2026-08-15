@@ -1,4 +1,13 @@
 /**
+ * Classification: C — duplicate protocol header assembly [@deprecated upstream-gap].
+ *
+ * iLink request headers (Authorization, X-WECHAT-UIN, iLink-App-Id,
+ * ClientVersion, SKRouteTag). The official buildHeaders lives inside
+ * api/api.js (OpenClaw coupled — imports util/logger + auth/accounts). Kept as
+ * an upstream-gap; reusable primitives (client-version encoding, base-info) are
+ * DSH glue that stays.
+ */
+/**
  * iLink HTTP header construction.
  *
  * Every endpoint shares the same header set; building them here avoids

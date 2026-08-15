@@ -122,6 +122,7 @@ function makeBinding(sessionId = 's1'): SessionBinding {
     channelId: 'edit-fake',
     accountId: 'main',
     conversationId: 'u1',
+    conversationType: 'dm',
     sessionId,
     route: { preset: 'default' },
     schemaVersion: SESSION_BINDING_SCHEMA_VERSION,

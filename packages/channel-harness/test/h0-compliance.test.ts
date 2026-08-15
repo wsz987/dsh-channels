@@ -226,8 +226,8 @@ describe('optional persistence capability (no error-regex)', () => {
   });
 });
 
-describe('binding v1 -> v2 migration', () => {
-  it('MemoryBindingStore migrates a v1 (agentId) entry to route.model + schemaVersion 2', async () => {
+describe('binding v1 -> v2 -> v3 migration', () => {
+  it('MemoryBindingStore migrates a v1 (agentId) entry to route.model + schemaVersion 3 + dm default', async () => {
     const store = new MemoryBindingStore();
     (store as unknown as { store: Map<string, unknown> }).store.set('weixin:main:user_123', {
       channelId: 'weixin',
@@ -239,8 +239,9 @@ describe('binding v1 -> v2 migration', () => {
       updatedAt: 11,
     });
     const migrated = await store.get('weixin:main:user_123');
-    expect(migrated?.schemaVersion).toBe(2);
+    expect(migrated?.schemaVersion).toBe(3);
     expect(migrated?.route).toEqual({ model: 'legacy-model' });
+    expect(migrated?.conversationType).toBe('dm');
     expect('agentId' in (migrated as unknown as SessionBinding)).toBe(false);
     expect(migrated?.sessionId).toBe('ch-old');
   });
@@ -267,9 +268,10 @@ describe('binding v1 -> v2 migration', () => {
       const migrated = await store.get('weixin:main:user_123');
       expect(migrated?.schemaVersion).toBe(SESSION_BINDING_SCHEMA_VERSION);
       expect(migrated?.route).toEqual({ model: 'v1-model' });
+      expect(migrated?.conversationType).toBe('dm');
       const raw = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
       const stored = raw['weixin:main:user_123'] as Partial<SessionBinding>;
-      expect(stored.schemaVersion).toBe(2);
+      expect(stored.schemaVersion).toBe(3);
       expect((stored.route as { model?: string }).model).toBe('v1-model');
       expect('agentId' in stored).toBe(false);
     } finally {
@@ -294,6 +296,7 @@ describe('durable unload reconcile', () => {
       channelId: 'weixin',
       accountId: 'main',
       conversationId: 'user_123',
+      conversationType: 'dm',
       sessionId: 's1',
       route: { preset: 'default' },
       schemaVersion: SESSION_BINDING_SCHEMA_VERSION,
@@ -339,6 +342,7 @@ describe('durable unload reconcile', () => {
       channelId: 'weixin',
       accountId: 'main',
       conversationId: 'user_123',
+      conversationType: 'dm',
       sessionId: 's1',
       route: { preset: 'default' },
       schemaVersion: SESSION_BINDING_SCHEMA_VERSION,
@@ -377,6 +381,7 @@ describe('durable unload reconcile', () => {
       channelId: 'weixin',
       accountId: 'main',
       conversationId: 'user_123',
+      conversationType: 'dm',
       sessionId: 's1',
       route: { preset: 'default' },
       schemaVersion: SESSION_BINDING_SCHEMA_VERSION,

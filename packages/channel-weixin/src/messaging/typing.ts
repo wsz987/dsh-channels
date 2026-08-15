@@ -1,4 +1,10 @@
 /**
+ * Classification: A — DSH glue [keep].
+ *
+ * Best-effort typing indicator over client.sendTyping. Pure DSH wrapper; no
+ * duplicated platform algorithm. Keep; driven by upstream startTyping().
+ */
+/**
  * TypingController — best-effort typing indicator (WX6-grade).
  *
  * Calls `client.sendTyping` when enabled; failures NEVER fail the main

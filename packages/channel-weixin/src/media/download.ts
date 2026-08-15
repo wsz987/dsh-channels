@@ -1,4 +1,15 @@
 /**
+ * Classification: C — duplicate media download orchestration [@deprecated upstream-gap].
+ *
+ * CDN download + AES decrypt for inbound media. The official composed flow
+ * cdn/pic-decrypt.js is OpenClaw coupled (imports util/logger). The developer
+ * AES remains a small local source-port because the Tencent plugin is coupled
+ * to OpenClaw. The URL
+ * resolution here (legacy <cdnBaseUrl>/<encrypt_query_param>) is DSH glue kept
+ * for the verified CDN path (official buildCdnDownloadUrl uses a different URL
+ * form). Marked upstream-gap for the orchestration; DO NOT delete wholesale.
+ */
+/**
  * WX5 media — CDN download (WX5.1 Image).
  *
  * Resolves the download URL from `full_url` (server-returned) or the CDN base

@@ -19,6 +19,7 @@
     "verify": "pnpm --filter @wsz987/channel-verify run verify",
     "channels": "node scripts/dev-channels.mjs",
     "web:debug": "node scripts/dev-web-debug.mjs",
+    "web:kill": "kill-port 3080",
     "check:upstream": "node scripts/check-upstream.mjs",
     "check:bundle": "pnpm --filter @wsz987/dsh-channels run test",
     "clean": "turbo run clean",
@@ -29,6 +30,7 @@
   "devDependencies": {
     "@changesets/cli": "^2.27.0",
     "@types/node": "^22.0.0",
+    "kill-port": "2.0.1",
     "turbo": "^2.0.0",
     "typescript": "^5.9.0",
     "vitest": "^3.2.0"
