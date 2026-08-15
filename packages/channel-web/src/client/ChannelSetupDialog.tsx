@@ -188,7 +188,15 @@ function CredentialsForm({
   t: (key: string) => string;
   onComplete: () => void;
 }) {
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  // Seed non-secret fields with their current values (appId/clientId are
+  // viewable); secret fields start empty so an untouched secret is never resent.
+  const [drafts, setDrafts] = useState<Record<string, string>>(() => {
+    const seed: Record<string, string> = {};
+    for (const field of descriptor.fields) {
+      if (!field.secret && field.value) seed[field.name] = field.value;
+    }
+    return seed;
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

@@ -74,13 +74,18 @@ function snapshotOf(config: LarkConfig): LarkConfig {
  * Feishu/Lark open-platform console "Apps" URL derived from the configured API
  * domain (doc §39/§40). Mirrors `resolveDomain`: the well-known 'feishu' and
  * 'lark' map to their official consoles; any other value is treated as a custom
- * base domain and prefixed with https + '/app'.
+ * base domain and prefixed with https + '/app'. When the app's appId is known
+ * the link deep-links to that app (`/app/<appId>`), mirroring openclaw-toolkit.
  */
-export function larkConsoleAppUrl(domain: string | undefined): string {
-  if (domain === 'lark') return 'https://open.larksuite.com/app';
-  if (!domain || domain === 'feishu') return 'https://open.feishu.cn/app';
-  const base = domain.replace(originRE, '').replace(trailRE, '');
-  return `https://${base}/app`;
+export function larkConsoleAppUrl(domain: string | undefined, appId?: string): string {
+  const base =
+    domain === 'lark'
+      ? 'https://open.larksuite.com/app'
+      : domain && domain !== 'feishu'
+        ? `https://${domain.replace(originRE, '').replace(trailRE, '')}/app`
+        : 'https://open.feishu.cn/app';
+  const id = appId?.trim();
+  return id ? `${base}/${encodeURIComponent(id)}` : base;
 }
 
 const originRE = /^https?:\/\//;
@@ -120,7 +125,7 @@ export function createLarkDefinition(
       },
     ],
     authMethods: [],
-    setupUrl: larkConsoleAppUrl(state.upstream.domain),
+    setupUrl: larkConsoleAppUrl(state.upstream.domain, state.upstream.appId),
   };
 
   const configuredState = async (): Promise<ConfiguredState> => {
@@ -131,7 +136,7 @@ export function createLarkDefinition(
       return {
         configured: true,
         fields: {
-          appId: { configured: appIdConfigured, writable: true },
+          appId: { configured: appIdConfigured, writable: true, value: state.upstream.appId },
           appSecret: { configured: true, writable: true },
         },
       };
@@ -177,7 +182,7 @@ export function createLarkDefinition(
     if (typeof patch.appId === 'string') state.upstream.appId = patch.appId;
     if (patch.accountId !== undefined) state.accountId = String(patch.accountId);
     if (patch.enabled !== undefined) state.enabled = Boolean(patch.enabled);
-    setup.setupUrl = larkConsoleAppUrl(state.upstream.domain);
+    setup.setupUrl = larkConsoleAppUrl(state.upstream.domain, state.upstream.appId);
   };
 
   const createAdapter = async () => {

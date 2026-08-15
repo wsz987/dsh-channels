@@ -105,7 +105,8 @@ describe('createQQDefinition', () => {
     expect(definition.enabled).toBe(true);
     expect(definition.autoStart).toBe(true);
     expect(definition.setup.authMethods).toEqual([]);
-    expect(definition.setup.setupUrl).toBe('https://q.qq.com/');
+    // The configured appId deep-links into the QQ openclaw console.
+    expect(definition.setup.setupUrl).toBe('https://q.qq.com/qqbot/openclaw/?appid=dummy-app-id');
     expect(definition.beginAuth).toBeUndefined();
     expect(definition.pollAuth).toBeUndefined();
     expect(definition.submitAuthInput).toBeUndefined();
@@ -136,6 +137,17 @@ describe('createQQDefinition', () => {
     expect(appId.configured).toBe(false);
   });
 
+  it('setupUrl falls back to the openclaw console when appId is not configured', () => {
+    const { definition } = makeDefinition({ config: { appId: '' } });
+    expect(definition.setup.setupUrl).toBe('https://q.qq.com/qqbot/openclaw/');
+  });
+
+  it('saveConfig keeps the console deep-link in sync with the patched appId', async () => {
+    const { definition } = makeDefinition({ config: { appId: '' } });
+    await definition.saveConfig({ appId: 'patched-app-id' });
+    expect(definition.setup.setupUrl).toBe('https://q.qq.com/qqbot/openclaw/?appid=patched-app-id');
+  });
+
   it('uses the default writable credential ref when appSecretRef is blank', () => {
     const { definition } = makeDefinition({ config: { appSecretRef: '' } });
     const appSecret = definition.setup.fields.find((field) => field.name === 'appSecret');
@@ -147,7 +159,7 @@ describe('createQQDefinition', () => {
     seam.set('QQBOT_APP_SECRET', 'top-secret');
     const state = await definition.getConfiguredState();
     expect(state.configured).toBe(true);
-    expect(state.fields.appId).toEqual({ configured: true, writable: true });
+    expect(state.fields.appId).toEqual({ configured: true, writable: true, value: 'dummy-app-id' });
     expect(state.fields.appSecret).toMatchObject({
       configured: true,
       writable: true,

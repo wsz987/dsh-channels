@@ -15,6 +15,7 @@
  */
 import type { ChannelAdapterContext } from './context.js';
 import type { ChannelCapabilities, StreamingMode } from './capabilities.js';
+import { channelAdapterShapeSchema } from './schema.js';
 import type { AuthState, ChannelEvent } from './events.js';
 import type { ChannelConversationKey, MessageId } from './account.js';
 import type { OutboundMessage, SendResult } from './messages.js';
@@ -128,12 +129,5 @@ export interface ChannelAdapter {
 
 /** Emit a message event through the adapter context helper. */
 export function isChannelAdapter(value: unknown): value is ChannelAdapter {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as ChannelAdapter).id === 'string' &&
-    typeof (value as ChannelAdapter).start === 'function' &&
-    typeof (value as ChannelAdapter).stop === 'function' &&
-    typeof (value as ChannelAdapter).send === 'function'
-  );
+  return channelAdapterShapeSchema.safeParse(value).success;
 }

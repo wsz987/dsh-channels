@@ -48,6 +48,11 @@ export interface ChannelSetupField {
   secret: boolean;
   configured: boolean;
   writable: boolean;
+  /**
+   * Current value for NON-secret fields only (e.g. appId/clientId). Secret
+   * fields never carry it — the host omits secret values entirely.
+   */
+  value?: string;
 }
 
 /** v2 setup descriptor (GET /channels/:id/setup). */

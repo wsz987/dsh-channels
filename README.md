@@ -11,7 +11,8 @@
 - **内置渠道 + Web 可视化，一个 Bundle 装完**：聚合为 `@wsz987/dsh-channels`，含 Harness Web「设置 → 渠道」面板
 - **官方 SDK / 协议直连**：QQ / 钉钉 / 飞书走各平台官方 SDK，微信直连腾讯 iLink（扫码登录 + 长轮询）
 - **流式回复**：QQ C2C 原生流式、钉钉 / 飞书卡片流式（edit）、群聊 buffered
-- **微信图片**：入站图片 CDN 下载解密 + 出站上传，附 typing 生命周期（不再只是 Text-only）
+- **微信图片（唯一已接入的真实附件）**：入站图片 CDN 下载解密 → `localData` → Harness 真实图片附件，出站图片上传，附 typing 生命周期（不再只是 Text-only）
+- **附件接入（其余渠道待接入）**：QQ / 钉钉 / 飞书的入站媒体目前仍以文本占位符（`[image: …]` / `[file: …]` 等）进入模型，尚未接入 Harness 真实附件——Harness 附件服务 v1 仅支持图片，file / audio / video 需等官方扩展；详见「渠道总览」
 - **模型路由**：按 channel / account / conversation 分发不同模型，`agent.default` 兜底
 - **渠道指令**：会话内斜杠指令（`/new`），官方命令注册器承载，未知指令不下发模型
 - **凭据安全**：密钥走 `ctx.credentials`（不落盘、不入 git）；微信扫码凭据持久化，重启免登录
@@ -62,8 +63,8 @@ pnpm web:debug             # 调试模式启动 dsh web
 | 渠道 | 必需配置 | 登录方式 |
 | --- | --- | --- |
 | **微信** | 无需配置 | 通过 Web 面板或 `beginAuth()` 触发**扫码**登录（启动不会自动弹码），凭据持久化免登录 |
-| **QQ** | `appId` + `appSecretRef`（默认 `QQBOT_APP_SECRET`） | [QQ 开放平台](https://q.qq.com/) 创建机器人；AppSecret 存 `ctx.credentials` |
-| **钉钉** | `upstream.clientId` + `clientSecretRef`（默认 `DSH_CHANNEL_DINGTALK_MAIN_CLIENT_SECRET`） | [钉钉开放平台](https://open.dingtalk.com/) 创建应用，取 AppKey / AppSecret |
+| **QQ** | `appId` + `appSecretRef`（默认 `QQBOT_APP_SECRET`） | [QQ 开放平台](https://q.qq.com/qqbot/openclaw/) 创建机器人；AppSecret 存 `ctx.credentials` |
+| **钉钉** | `upstream.clientId` + `clientSecretRef`（默认 `DSH_CHANNEL_DINGTALK_MAIN_CLIENT_SECRET`） | [钉钉开放平台](https://open-dev.dingtalk.com/) 创建应用，取 AppKey / AppSecret |
 | **飞书** | `upstream.appId` + `appSecretRef`（默认 `DSH_CHANNEL_LARK_MAIN_APP_SECRET`） | [飞书开放平台](https://open.feishu.cn/) 创建应用，取 AppId / AppSecret |
 
 配置通过 profile patch（`cordis.patch.yml`）下发，patch 会**整体替换**目标插件配置，需写全字段；完整示例见 [apps/example/minimal-profile/](apps/example/minimal-profile/)。
@@ -130,7 +131,7 @@ QQ / 钉钉 / 飞书的设置页只显示凭证表单和官方开放平台入口
 
 内置渠道（均通过契约 / fixtures / SDK 模拟离线测试；live 平台 E2E 需真实应用凭据，尚未执行）：
 
-| 渠道 | 适配器包 | 接入方式 | 能力（已核验） | 状态 |
+| 渠道 | 适配器包 | 接入方式 | 能力（传输层）† | 状态 |
 | --- | --- | --- | --- | --- |
 | 微信 | `@wsz987/channel-weixin` | 直连腾讯 iLink（扫码 + 长轮询） | text / image · buffered | ⚠️ Experimental |
 | QQ | `@wsz987/channel-qq` | 官方 SDK | text / image / file / audio / video / markdown* · native(C2C) / buffered | ✅ |
@@ -138,6 +139,19 @@ QQ / 钉钉 / 飞书的设置页只显示凭证表单和官方开放平台入口
 | 飞书 | `@wsz987/channel-lark` | 官方 Node SDK | text / image / file / audio / markdown / cards / threads · edit | ✅ |
 
 `*` markdown 由 `markdownSupport` 配置开启。
+
+† **传输层能力 ≠ 模型真实附件**：指适配器能在平台侧收发该媒体；**入站媒体尚未接入 Harness 真实附件**（Harness 附件服务 `ctx.attachments` v1 仅接受图片，且当前只有微信图片走通真实附件路径）。QQ / 钉钉 / 飞书的入站图片 / 文件 / 音频 / 视频进入模型时仍为 `[image: …]` / `[file: …]` 等文本占位符；出站媒体能力见下方「附件 / 媒体接入状态」。
+
+### 📎 附件 / 媒体接入状态
+
+| 渠道 | 入站（用户消息 → 模型） | 出站（回复 → 用户） |
+| --- | --- | --- |
+| 微信 | ✅ 图片：CDN 下载解密 → `localData` → Harness 真实附件（`ImageBlock`） | ✅ 图片上传 |
+| QQ | ⏳ 未接入：图片 / 文件 / 音频 / 视频仅携带 URL，模型收到 `[image: url]` 等占位符 | 部分：image / audio / video / file 经 url / dataUri 发送 |
+| 钉钉 | ⏳ 未接入：仅携带 URL，模型收到占位符 | ❌ 仅文本：媒体渲染为 `[image]` / `[file]` 占位符 |
+| 飞书 | ⏳ 未接入：`image_key` / `file_key` 未解析，模型收到 `[image: img_xxx]` 占位符 | 部分：仅纯图片（OpenAPI 上传）；文件 / 音频 / 视频为占位符 |
+
+> file / audio / video 的模型侧附件接入需要 Harness 官方扩展（`@deepseek-ai/dsh-attachment` 明确列为 deferred）；各渠道的 file / audio / video 目前仅为**平台传输层**能力，不代表模型已能接收真实附件。接入计划见 [docs/dsh-channels-release-verification-execution-plan.md](docs/dsh-channels-release-verification-execution-plan.md)（R5）。
 
 **更多渠道**：`@wsz987/channel-telegram` 已作为扩展性证明存在（未正式支持）；Slack / Discord 等欢迎贡献，接入不改核心。
 

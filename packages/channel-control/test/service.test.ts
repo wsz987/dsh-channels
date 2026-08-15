@@ -122,8 +122,10 @@ describe('ChannelControlService', () => {
       getConfiguredState: async () => ({
         configured: true,
         fields: {
-          appId: { configured: true, writable: true },
-          appSecret: { configured: true, writable: true, source: 'test' },
+          appId: { configured: true, writable: true, value: 'cli_123' },
+          // A buggy definition must never be able to leak a secret: the
+          // control plane strips value for secret fields regardless.
+          appSecret: { configured: true, writable: true, source: 'test', value: 'SHOULD_NEVER_LEAK' },
         },
       }),
     });
@@ -131,13 +133,14 @@ describe('ChannelControlService', () => {
     const setup = await service.getSetup('lark');
     expect(setup).toMatchObject({
       fields: [
-        { name: 'appId', kind: 'text', secret: false, configured: true },
+        { name: 'appId', kind: 'text', secret: false, configured: true, value: 'cli_123' },
         { name: 'appSecret', kind: 'secret', secret: true, configured: true },
       ],
       authMethods: [],
       setupUrl: 'https://open.feishu.cn/app',
     });
     expect(JSON.stringify(setup)).not.toContain('LARK_APP_SECRET');
+    expect(JSON.stringify(setup)).not.toContain('SHOULD_NEVER_LEAK');
   });
 
   it('listChannels merges registry + runtime status', async () => {

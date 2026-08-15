@@ -112,7 +112,8 @@ describe('lark ChannelDefinition', () => {
     expect(definition.enabled).toBe(true);
     expect(definition.autoStart).toBe(true);
     expect(definition.setup.authMethods).toEqual([]);
-    expect(definition.setup.setupUrl).toBe('https://open.feishu.cn/app');
+    // The configured appId deep-links into the Feishu console app page.
+    expect(definition.setup.setupUrl).toBe('https://open.feishu.cn/app/cli_abc');
     expect(definition.setup.fields).toHaveLength(2);
 
     const appId = definition.setup.fields.find((f) => f.name === 'appId');
@@ -133,7 +134,15 @@ describe('lark ChannelDefinition', () => {
       config: makeConfig({ upstream: { mode: 'sdk', appId: 'cli_abc', domain: 'lark' } }),
       credentials: { resolve: async () => undefined, describe: async () => ({ configured: true, writable: true }), set: async () => {} },
     });
-    expect(definition.setup.setupUrl).toBe('https://open.larksuite.com/app');
+    expect(definition.setup.setupUrl).toBe('https://open.larksuite.com/app/cli_abc');
+  });
+
+  it('falls back to the app list URL when appId is not configured', () => {
+    const definition = createLarkDefinition({
+      config: makeConfig({ upstream: { mode: 'sdk' } }),
+      credentials: { resolve: async () => undefined, describe: async () => ({ configured: true, writable: true }), set: async () => {} },
+    });
+    expect(definition.setup.setupUrl).toBe('https://open.feishu.cn/app');
   });
 
   it('reports sdk configured state from appId (config) AND appSecret (credential)', async () => {

@@ -144,6 +144,12 @@ export interface ChannelSetupField {
    * calls ctx.credentials. Non-secret fields omit it.
    */
   ref?: string;
+  /**
+   * Current value for NON-secret fields only (doc §29). Populated dynamically
+   * by ChannelControlService.getSetup from ConfiguredState; secret fields never
+   * carry it, and static definition.setup.fields leave it undefined.
+   */
+  value?: string;
 }
 
 /** Static setup descriptor advertising a channel's editable surface (doc §29). */
@@ -166,10 +172,14 @@ export interface ChannelSetupResult {
   connection: ChannelRuntimeStatus['connection'];
 }
 
-/** Dynamic configured state: never returns secret values (doc §14/§29). */
+/**
+ * Dynamic configured state: never returns secret values (doc §14/§29).
+ * Per-field `value` carries non-secret config values only (e.g. appId/clientId);
+ * secret fields never set it.
+ */
 export interface ConfiguredState {
   configured: boolean;
-  fields: Record<string, { configured: boolean; writable: boolean; source?: string }>;
+  fields: Record<string, { configured: boolean; writable: boolean; source?: string; value?: string }>;
 }
 
 /**

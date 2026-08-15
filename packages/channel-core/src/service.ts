@@ -16,6 +16,7 @@ import { MemorySecretStore } from './secrets.js';
 import { MemoryStorage } from './storage.js';
 import type { ChannelAdapterContext } from './context.js';
 import type { ChannelRuntimeResources } from './runtime-resources.js';
+import { channelEventEnvelopeSchema } from './schema.js';
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -134,11 +135,5 @@ export class ChannelService extends Service {
 
 /** Runtime type guard for events entering the service. */
 export function isChannelEvent(value: unknown): value is ChannelEvent {
-  if (typeof value !== 'object' || value === null) return false;
-  const event = value as Partial<ChannelEvent>;
-  return (
-    typeof event.type === 'string' &&
-    typeof event.channel === 'string' &&
-    typeof event.accountId === 'string'
-  );
+  return channelEventEnvelopeSchema.safeParse(value).success;
 }

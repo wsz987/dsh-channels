@@ -27,7 +27,8 @@ import {
   versionState,
 } from '@wsz987/channel-compat';
 import { resolveFixturesDir, validateFixture } from '@wsz987/channel-testkit/fixture-loader';
-import type { ChannelAdapter } from '@wsz987/channel-core';
+import { capabilitiesSchema, channelAdapterShapeSchema, type ChannelAdapter } from '@wsz987/channel-core';
+import { z } from 'zod';
 
 export type VerifySeverity = 'ok' | 'warning' | 'fail';
 
@@ -74,20 +75,6 @@ export interface VerifyOptions {
   runTests?: (dir: string) => Promise<number | null>;
 }
 
-const CAPABILITY_FLAGS = [
-  'text',
-  'image',
-  'file',
-  'audio',
-  'video',
-  'markdown',
-  'cards',
-  'reactions',
-  'threads',
-] as const;
-
-const STREAMING_MODES = ['native', 'edit', 'buffered'] as const;
-
 /** Structural adapter shape the verifier accepts (class or object form). */
 interface AdapterShape {
   id: string;
@@ -96,6 +83,15 @@ interface AdapterShape {
   stop: unknown;
   send: unknown;
 }
+
+/** Required release-surface fields of an adapter package.json. */
+const packageJsonSchema = z.object({
+  name: z.string().min(1),
+  version: z.string().min(1),
+  main: z.string().min(1),
+  types: z.string().min(1),
+  exports: z.record(z.string(), z.unknown()),
+}).loose();
 
 function ok(code: string, message: string): VerifyItem {
   return { severity: 'ok', code, message };
@@ -190,14 +186,17 @@ async function readPackage(dir: string): Promise<{ check: VerifyCheck; info: Pac
   }
 
   const items: VerifyItem[] = [];
-  const push = (predicate: boolean, code: string, message: string): void => {
-    if (!predicate) items.push(fail(code, message));
-  };
-  push(typeof record.name === 'string' && record.name.length > 0, 'package-name-missing', 'package.json name must be a non-empty string');
-  push(typeof record.version === 'string' && record.version.length > 0, 'package-version-missing', 'package.json version must be a non-empty string');
-  push(typeof record.main === 'string' && record.main.length > 0, 'package-main-missing', 'package.json main entry is missing');
-  push(typeof record.types === 'string' && record.types.length > 0, 'package-types-missing', 'package.json types entry is missing');
-  push(typeof record.exports === 'object' && record.exports !== null, 'package-exports-missing', 'package.json exports map is missing');
+  const pkgParsed = packageJsonSchema.safeParse(record);
+  if (!pkgParsed.success) {
+    for (const issue of pkgParsed.error.issues) {
+      const path = issue.path.join('.');
+      if (path === 'name') items.push(fail('package-name-missing', 'package.json name must be a non-empty string'));
+      else if (path === 'version') items.push(fail('package-version-missing', 'package.json version must be a non-empty string'));
+      else if (path === 'main') items.push(fail('package-main-missing', 'package.json main entry is missing'));
+      else if (path === 'types') items.push(fail('package-types-missing', 'package.json types entry is missing'));
+      else if (path === 'exports') items.push(fail('package-exports-missing', 'package.json exports map is missing'));
+    }
+  }
 
   // dsh.bundle.patch: when declared, the referenced patch file must exist.
   const dsh = record.dsh as Record<string, unknown> | undefined;
@@ -337,14 +336,7 @@ interface FoundAdapter {
 }
 
 function isAdapterShape(value: unknown): value is AdapterShape {
-  if (typeof value !== 'object' || value === null) return false;
-  const record = value as Record<string, unknown>;
-  return (
-    typeof record.id === 'string' &&
-    typeof record.start === 'function' &&
-    typeof record.stop === 'function' &&
-    typeof record.send === 'function'
-  );
+  return channelAdapterShapeSchema.safeParse(value).success;
 }
 
 /**
@@ -430,19 +422,19 @@ function checkCapabilities(adapter: AdapterShape | undefined): VerifyCheck {
   if (typeof caps !== 'object' || caps === null) {
     return { id: 'capabilities', items: [fail('capabilities-missing', 'adapter.capabilities is missing or not an object')] };
   }
-  const record = caps as Record<string, unknown>;
-  let problems = 0;
-  for (const flag of CAPABILITY_FLAGS) {
-    if (typeof record[flag] !== 'boolean') {
-      items.push(fail('capabilities-flag-invalid', `capabilities.${flag} must be a boolean`));
-      problems += 1;
+  const parsed = capabilitiesSchema.safeParse(caps);
+  if (!parsed.success) {
+    for (const issue of parsed.error.issues) {
+      const path = issue.path.join('.');
+      if (path === 'streaming') {
+        items.push(fail('capabilities-streaming-invalid', "capabilities.streaming must be one of 'native' | 'edit' | 'buffered'"));
+      } else {
+        items.push(fail('capabilities-flag-invalid', `capabilities.${path} must be a boolean`));
+      }
     }
+    return { id: 'capabilities', items };
   }
-  if (!STREAMING_MODES.includes(record.streaming as (typeof STREAMING_MODES)[number])) {
-    items.push(fail('capabilities-streaming-invalid', "capabilities.streaming must be one of 'native' | 'edit' | 'buffered'"));
-    problems += 1;
-  }
-  if (problems === 0) items.push(ok('capabilities-ok', 'capabilities shape is valid'));
+  items.push(ok('capabilities-ok', 'capabilities shape is valid'));
   return { id: 'capabilities', items };
 }
 

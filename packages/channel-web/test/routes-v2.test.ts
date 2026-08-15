@@ -32,7 +32,7 @@ const SETUP: ChannelSetupDescriptor = {
     { name: 'appSecret', kind: 'secret', secret: true, configured: true, writable: true },
   ],
   authMethods: [],
-  setupUrl: 'https://q.qq.com/',
+  setupUrl: 'https://q.qq.com/qqbot/openclaw/',
 };
 
 const CONFIGURED = {

@@ -16,7 +16,7 @@
  */
 import type { ChannelAdapter } from './adapter.js';
 import type { ChannelAdapterContext } from './context.js';
-import type { ChannelCapabilities, StreamingMode } from './capabilities.js';
+import type { ChannelCapabilities } from './capabilities.js';
 import type { ChannelHealth } from './health.js';
 import type { OutboundMessage, SendResult } from './messages.js';
 import type {
@@ -26,6 +26,8 @@ import type {
   CreateReplyOptions,
   ReplyHandle,
 } from './adapter.js';
+import type { z } from 'zod';
+import { defineChannelAdapterInputSchema } from './schema.js';
 
 /**
  * Structural input accepted by `defineChannelAdapter`.
@@ -71,27 +73,6 @@ export interface DefineChannelAdapterInput {
   manifest?: unknown;
 }
 
-/** Capability flags that must be plain booleans. */
-const CAPABILITY_FLAGS = [
-  'text',
-  'image',
-  'file',
-  'audio',
-  'video',
-  'markdown',
-  'cards',
-  'reactions',
-  'threads',
-] as const;
-
-const STREAMING_MODES: readonly StreamingMode[] = ['native', 'edit', 'buffered'];
-
-/** Required function members of the adapter contract. */
-const REQUIRED_METHODS = ['start', 'stop', 'send'] as const;
-
-/** Optional function members of the adapter contract. */
-const OPTIONAL_METHODS = ['createReply', 'beginAuth', 'pollAuth', 'getHealth'] as const;
-
 /**
  * Register an adapter built with the authoring helper.
  *
@@ -110,6 +91,9 @@ export function defineChannelAdapter<A extends ChannelAdapter>(adapter: A): A {
  * Dev-time structural validation. Collects every problem it can find and
  * throws one `TypeError` listing all of them, so a broken adapter is fixed
  * in one pass instead of one error per run.
+ *
+ * The check runs `defineChannelAdapterInputSchema` and maps each zod issue
+ * back to the stable legacy problem strings the tests and docs rely on.
  */
 function assertAdapterShape(value: unknown): asserts value is ChannelAdapter {
   if (typeof value !== 'object' || value === null) {
@@ -117,44 +101,41 @@ function assertAdapterShape(value: unknown): asserts value is ChannelAdapter {
       'defineChannelAdapter: expected an adapter object with id, capabilities, start, stop and send',
     );
   }
-  const adapter = value as Record<string, unknown>;
+  const parsed = defineChannelAdapterInputSchema.safeParse(value);
+  if (parsed.success) return;
   const problems: string[] = [];
-
-  if (typeof adapter.id !== 'string' || adapter.id.length === 0) {
-    problems.push('id must be a non-empty string');
-  }
-
-  const caps = adapter.capabilities;
-  if (typeof caps !== 'object' || caps === null) {
-    problems.push('capabilities must be a ChannelCapabilities object');
-  } else {
-    const record = caps as Record<string, unknown>;
-    for (const flag of CAPABILITY_FLAGS) {
-      if (typeof record[flag] !== 'boolean') {
-        problems.push(`capabilities.${flag} must be a boolean`);
-      }
-    }
-    if (!STREAMING_MODES.includes(record.streaming as StreamingMode)) {
-      problems.push("capabilities.streaming must be one of 'native' | 'edit' | 'buffered'");
+  for (const issue of parsed.error.issues) {
+    const problem = problemForIssue(issue);
+    if (problem !== undefined && !problems.includes(problem)) {
+      problems.push(problem);
     }
   }
+  if (problems.length === 0) {
+    problems.push(parsed.error.issues[0]?.message ?? 'adapter does not satisfy the ChannelAdapter contract');
+  }
+  const id = typeof (value as { id?: unknown }).id === 'string' ? (value as { id: string }).id : '<unknown>';
+  throw new TypeError(
+    `defineChannelAdapter: invalid adapter '${id}' — ${problems.join('; ')}`,
+  );
+}
 
-  for (const method of REQUIRED_METHODS) {
-    if (typeof adapter[method] !== 'function') {
-      problems.push(`${method} must be a function`);
+/** Map one zod issue back to the legacy problem string for the field. */
+function problemForIssue(issue: z.ZodIssue): string | undefined {
+  const path = issue.path.map(String).join('.');
+  if (path === 'capabilities.streaming') {
+    return "capabilities.streaming must be one of 'native' | 'edit' | 'buffered'";
+  }
+  if (issue.code === 'invalid_type') {
+    if (path === 'id') return 'id must be a non-empty string';
+    if (path === 'capabilities') return 'capabilities must be a ChannelCapabilities object';
+    if (path.startsWith('capabilities.')) {
+      return `capabilities.${path.slice('capabilities.'.length)} must be a boolean`;
+    }
+    if (path === 'start' || path === 'stop' || path === 'send') return `${path} must be a function`;
+    if (path === 'createReply' || path === 'beginAuth' || path === 'pollAuth' || path === 'getHealth') {
+      return `${path} must be a function when present`;
     }
   }
-
-  for (const method of OPTIONAL_METHODS) {
-    if (adapter[method] !== undefined && typeof adapter[method] !== 'function') {
-      problems.push(`${method} must be a function when present`);
-    }
-  }
-
-  if (problems.length > 0) {
-    const id = typeof adapter.id === 'string' ? adapter.id : '<unknown>';
-    throw new TypeError(
-      `defineChannelAdapter: invalid adapter '${id}' — ${problems.join('; ')}`,
-    );
-  }
+  if (issue.code === 'too_small' && path === 'id') return 'id must be a non-empty string';
+  return undefined;
 }

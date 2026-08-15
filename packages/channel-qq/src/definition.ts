@@ -20,6 +20,7 @@ import { ControlError } from '@wsz987/channel-control';
 import type {
   ChannelAdapter,
   ChannelDefinition,
+  ChannelSetupDescriptor,
   ConfiguredState,
   ChannelSetupField,
 } from '@wsz987/channel-control';
@@ -73,6 +74,18 @@ function cloneSnapshot(config: QQConfig): QQConfig {
     streaming: { ...config.streaming },
     dedup: { ...config.dedup },
   };
+}
+
+/**
+ * Official QQ bot console — one-step entry straight to the QQ openclaw bot page
+ * (not the q.qq.com homepage). When the bot's appId is known the link deep-links
+ * to that bot (`?appid=`), mirroring the openclaw-toolkit desktop console.
+ */
+export const QQ_OPEN_PLATFORM_URL = 'https://q.qq.com/qqbot/openclaw/';
+
+export function qqConsoleUrl(appId: string | undefined): string {
+  const id = appId?.trim();
+  return id ? `${QQ_OPEN_PLATFORM_URL}?appid=${encodeURIComponent(id)}` : QQ_OPEN_PLATFORM_URL;
 }
 
 /** Validate + clamp one non-secret patch value onto the snapshot. */
@@ -145,10 +158,16 @@ export function createQQDefinition(options: QQDefinitionOptions): ChannelDefinit
     },
   ];
 
+  const setup: ChannelSetupDescriptor = {
+    fields,
+    authMethods: [],
+    setupUrl: qqConsoleUrl(snapshot.appId),
+  };
+
   return {
     id: 'qq',
     enabled: snapshot.enabled,
-    setup: { fields, authMethods: [], setupUrl: 'https://q.qq.com/' },
+    setup,
     autoStart: true,
 
     async getConfiguredState(): Promise<ConfiguredState> {
@@ -168,7 +187,7 @@ export function createQQDefinition(options: QQDefinitionOptions): ChannelDefinit
       return {
         configured: appId && appSecret.configured,
         fields: {
-          appId: { configured: appId, writable: true },
+          appId: { configured: appId, writable: true, value: snapshot.appId },
           appSecret: {
             configured: appSecret.configured,
             writable: appSecret.writable,
@@ -186,6 +205,8 @@ export function createQQDefinition(options: QQDefinitionOptions): ChannelDefinit
         // Unknown (incl. secret) keys are ignored; the control plane already
         // rejects secret field names before reaching the definition.
       }
+      // Keep the console deep-link in sync with the configured appId.
+      setup.setupUrl = qqConsoleUrl(snapshot.appId);
     },
 
     async createAdapter(): Promise<ChannelAdapter> {

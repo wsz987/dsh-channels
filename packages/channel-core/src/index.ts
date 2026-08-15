@@ -25,6 +25,7 @@ export * from './paths.js';
 export * from './registry.js';
 export * from './reply.js';
 export * from './runtime-resources.js';
+export * from './schema.js';
 export * from './secrets.js';
 export * from './service.js';
 export * from './storage.js';

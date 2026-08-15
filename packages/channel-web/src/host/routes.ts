@@ -18,6 +18,7 @@ import type {
   ChannelHealth,
 } from '@wsz987/channel-core';
 import { errorBody } from './security.js';
+import { authInputSchema } from './routes-v2.js';
 
 /** Client-safe view status enum (spec §23). */
 export type ChannelStatus = 'connected' | 'degraded' | 'unconfigured' | 'error';
@@ -252,7 +253,7 @@ export class ChannelApi {
     if (!adapter.submitAuthInput) {
       return { status: 400, body: errorBody('AUTH_NOT_SUPPORTED', 'channel does not support auth input') };
     }
-    if (!input || input.kind !== 'verification-code' || typeof input.value !== 'string' || !input.value) {
+    if (!input || !authInputSchema.safeParse(input).success) {
       return { status: 400, body: errorBody('INVALID_INPUT', 'input must be { kind: "verification-code", value: string }') };
     }
     const stored = this.storedChallenge(id, challengeId);

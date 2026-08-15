@@ -17,6 +17,7 @@
  */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { z } from 'zod';
 import { resolveDefaultBindingStorePath } from './dsh-home.js';
 import { bindingKey, SESSION_BINDING_SCHEMA_VERSION, type SessionBinding } from './session-router.js';
 
@@ -38,15 +39,26 @@ export interface SessionBindingV1 {
   updatedAt: number;
 }
 
+/**
+ * Structural v1 shape used to detect a legacy stored binding: it carries
+ * `agentId` + `sessionId`, and `schemaVersion` is absent (or explicitly
+ * undefined). A v2 entry fails this schema, so it is never misread as v1.
+ */
+const V1_BINDING_SCHEMA = z.object({
+  channelId: z.string(),
+  accountId: z.string(),
+  conversationId: z.string(),
+  threadId: z.string().optional(),
+  agentId: z.string(),
+  sessionId: z.string(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+  schemaVersion: z.undefined().optional(),
+}).loose();
+
 /** Whether a raw stored value is a v1 binding needing migration. */
 export function isV1Binding(value: unknown): value is SessionBindingV1 {
-  if (!value || typeof value !== 'object') return false;
-  const record = value as Record<string, unknown>;
-  return (
-    record.schemaVersion === undefined &&
-    typeof record.agentId === 'string' &&
-    typeof record.sessionId === 'string'
-  );
+  return V1_BINDING_SCHEMA.safeParse(value).success;
 }
 
 /**

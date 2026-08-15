@@ -26,6 +26,7 @@ import type {
   AuthInput,
   ChannelDefinition,
   ChannelSetupDescriptor,
+  ChannelSetupField,
   ChannelSetupInput,
   ChannelSetupResult,
   ChannelSummary,
@@ -126,13 +127,19 @@ export class ChannelControlService extends Service {
       setupUrl: definition.setup.setupUrl,
       fields: definition.setup.fields.map((field) => {
         const dynamic = state.fields[field.name];
-        return {
+        const publicField: ChannelSetupField = {
           name: field.name,
           kind: field.kind,
           secret: field.secret,
           configured: dynamic?.configured ?? field.configured,
           writable: dynamic?.writable ?? field.writable,
         };
+        // Surface the current value for non-secret fields only (doc §29).
+        // Secret values and the credential ref are never echoed here.
+        if (!field.secret && typeof dynamic?.value === 'string') {
+          publicField.value = dynamic.value;
+        }
+        return publicField;
       }),
     };
   }

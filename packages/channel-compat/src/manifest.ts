@@ -5,9 +5,11 @@
  * `readonly manifest` field whose declared type is structurally compatible
  * with `AdapterManifest` (see `packages/channel-weixin/src/manifest.ts`,
  * `packages/channel-dingtalk/src/manifest.ts`). `getAdapterManifest` reads it
- * through a structural type guard so `channels doctor` can inspect any
- * adapter without a package dependency or platform special-casing.
+ * through a zod schema so `channels doctor` can inspect any adapter without a
+ * package dependency or platform special-casing; `validateManifest` reuses
+ * the same schema pieces for the release-gate checks.
  */
+import { z } from 'zod';
 
 /** Compatibility state of an adapter against its upstream (Task 13.3). */
 export type ManifestStatus = 'tested' | 'compatible' | 'untested' | 'unsupported' | 'experimental';
@@ -52,9 +54,45 @@ export interface AdapterManifest {
   status: ManifestStatus;
 }
 
+export const MANIFEST_STATUSES = [
+  'tested',
+  'compatible',
+  'untested',
+  'unsupported',
+  'experimental',
+] as const;
+
+export const manifestStatusSchema = z.enum(MANIFEST_STATUSES);
+
+const adapterSdkSchema = z.object({
+  package: z.string(),
+  testedVersion: z.string(),
+});
+
+const adapterUpstreamSchema = z.object({
+  reference: z.string(),
+  testedVersion: z.string(),
+  testedCommit: z.string().optional(),
+  versionRange: z.string(),
+  strategy: z.string(),
+});
+
+/**
+ * Structural manifest schema used by `getAdapterManifest`: strings stay
+ * strings (empty allowed), `status` must be a known enum and `sdk` may be
+ * absent. Unknown keys pass through.
+ */
+export const adapterManifestSchema = z.object({
+  id: z.string(),
+  adapterVersion: z.string(),
+  upstream: adapterUpstreamSchema,
+  sdk: adapterSdkSchema.optional(),
+  status: manifestStatusSchema,
+}).loose();
+
 /** Narrow `unknown` to a `ManifestStatus`. */
 export function isManifestStatus(value: unknown): value is ManifestStatus {
-  return value === 'tested' || value === 'compatible' || value === 'untested' || value === 'unsupported' || value === 'experimental';
+  return manifestStatusSchema.safeParse(value).success;
 }
 
 /** A pending placeholder such as `<pending-live-verification>` or empty. */
@@ -69,93 +107,41 @@ export function isGitSha(value: string): boolean {
 }
 
 /**
- * Structural type guard over an arbitrary adapter instance. Returns the
- * adapter's manifest when it exposes a structurally valid `manifest` field,
- * otherwise `undefined` (e.g. for a plain `ChannelAdapter`).
+ * Structural guard over an arbitrary adapter instance. Returns the adapter's
+ * manifest when it exposes a structurally valid `manifest` field, otherwise
+ * `undefined` (e.g. for a plain `ChannelAdapter`).
  */
 export function getAdapterManifest(adapter: unknown): AdapterManifest | undefined {
   if (typeof adapter !== 'object' || adapter === null) return undefined;
   const raw = (adapter as Record<string, unknown>).manifest;
-  if (typeof raw !== 'object' || raw === null) return undefined;
-  const m = raw as Record<string, unknown>;
-
-  if (typeof m.id !== 'string') return undefined;
-  if (typeof m.adapterVersion !== 'string') return undefined;
-  if (!isManifestStatus(m.status)) return undefined;
-
-  const upstream = m.upstream;
-  if (typeof upstream !== 'object' || upstream === null) return undefined;
-  const u = upstream as Record<string, unknown>;
-  if (typeof u.reference !== 'string') return undefined;
-  if (typeof u.testedVersion !== 'string') return undefined;
-  if (u.testedCommit !== undefined && typeof u.testedCommit !== 'string') return undefined;
-  if (typeof u.versionRange !== 'string') return undefined;
-  if (typeof u.strategy !== 'string') return undefined;
-
-  if (m.sdk !== undefined) {
-    if (typeof m.sdk !== 'object' || m.sdk === null) return undefined;
-    const sdk = m.sdk as Record<string, unknown>;
-    if (typeof sdk.package !== 'string') return undefined;
-    if (typeof sdk.testedVersion !== 'string') return undefined;
-  }
-
-  return raw as AdapterManifest;
+  const parsed = adapterManifestSchema.safeParse(raw);
+  if (!parsed.success) return undefined;
+  return parsed.data as AdapterManifest;
 }
 
 /**
  * Validate a candidate manifest value. Returns a list of field errors (empty
  * when valid). Accepts `unknown` so loosely-typed manifests can be checked
  * before being trusted by the doctor.
+ *
+ * Unlike the structural reader this tolerates a missing `status` (reported
+ * only when present and invalid) and enforces non-empty strings, matching the
+ * historical contract. The `tested` release-gate (R6) requires REAL values —
+ * never placeholders, a wildcard range, or an invalid source commit —
+ * while `experimental` is allowed to stay pending.
  */
 export function validateManifest(value: unknown): string[] {
-  const errors: string[] = [];
   if (typeof value !== 'object' || value === null) {
     return ['manifest is not an object'];
   }
   const m = value as Record<string, unknown>;
+  const errors: string[] = [];
 
-  if (typeof m.id !== 'string' || m.id.length === 0) {
-    errors.push('manifest.id must be a non-empty string');
-  }
-  if (typeof m.adapterVersion !== 'string' || m.adapterVersion.length === 0) {
-    errors.push('manifest.adapterVersion must be a non-empty string');
-  }
-  if (m.status !== undefined && !isManifestStatus(m.status)) {
-    errors.push('manifest.status must be one of tested|compatible|untested|unsupported|experimental');
-  }
-
-  if (typeof m.upstream !== 'object' || m.upstream === null) {
-    errors.push('manifest.upstream must be an object');
-  } else {
-    const u = m.upstream as Record<string, unknown>;
-    if (typeof u.reference !== 'string' || u.reference.length === 0) {
-      errors.push('manifest.upstream.reference must be a non-empty string');
-    }
-    if (typeof u.testedVersion !== 'string' || u.testedVersion.length === 0) {
-      errors.push('manifest.upstream.testedVersion must be a non-empty string');
-    }
-    if (typeof u.versionRange !== 'string' || u.versionRange.length === 0) {
-      errors.push('manifest.upstream.versionRange must be a non-empty string');
-    }
-    if (typeof u.strategy !== 'string' || u.strategy.length === 0) {
-      errors.push('manifest.upstream.strategy must be a non-empty string');
-    }
-    if (u.testedCommit !== undefined && typeof u.testedCommit !== 'string') {
-      errors.push('manifest.upstream.testedCommit must be a string when present');
-    }
-  }
-
-  if (m.sdk !== undefined) {
-    if (typeof m.sdk !== 'object' || m.sdk === null) {
-      errors.push('manifest.sdk must be an object when present');
-    } else {
-      const sdk = m.sdk as Record<string, unknown>;
-      if (typeof sdk.package !== 'string' || sdk.package.length === 0) {
-        errors.push('manifest.sdk.package must be a non-empty string');
-      }
-      if (typeof sdk.testedVersion !== 'string' || sdk.testedVersion.length === 0) {
-        errors.push('manifest.sdk.testedVersion must be a non-empty string');
-      }
+  const parsed = manifestValidationSchema.safeParse(value);
+  if (!parsed.success) {
+    for (const issue of parsed.error.issues) {
+      if (issue.path.length === 0) continue;
+      errors.push(issue.message);
     }
   }
 
@@ -181,3 +167,30 @@ export function validateManifest(value: unknown): string[] {
 
   return errors;
 }
+
+/** Non-empty string with a stable per-field message. */
+function nonEmpty(message: string): z.ZodString {
+  return z.string(message).min(1, message);
+}
+
+/**
+ * Tolerant field schema behind `validateManifest`: every field is checked
+ * with the exact legacy message, `status` stays optional and unknown keys
+ * pass through.
+ */
+const manifestValidationSchema = z.object({
+  id: nonEmpty('manifest.id must be a non-empty string'),
+  adapterVersion: nonEmpty('manifest.adapterVersion must be a non-empty string'),
+  status: z.enum(MANIFEST_STATUSES, 'manifest.status must be one of tested|compatible|untested|unsupported|experimental').optional(),
+  upstream: z.object({
+    reference: nonEmpty('manifest.upstream.reference must be a non-empty string'),
+    testedVersion: nonEmpty('manifest.upstream.testedVersion must be a non-empty string'),
+    versionRange: nonEmpty('manifest.upstream.versionRange must be a non-empty string'),
+    strategy: nonEmpty('manifest.upstream.strategy must be a non-empty string'),
+    testedCommit: z.string('manifest.upstream.testedCommit must be a string when present').optional(),
+  }, 'manifest.upstream must be an object'),
+  sdk: z.object({
+    package: nonEmpty('manifest.sdk.package must be a non-empty string'),
+    testedVersion: nonEmpty('manifest.sdk.testedVersion must be a non-empty string'),
+  }, 'manifest.sdk must be an object when present').optional(),
+}).loose();

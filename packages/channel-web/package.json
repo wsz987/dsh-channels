@@ -41,8 +41,8 @@
     "lib"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && node build.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.host.json && node build.mjs",
+    "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "clean": "rimraf lib"
   },
@@ -50,11 +50,15 @@
     "@wsz987/channel-core": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
     "qrcode": "^1.5.4",
-    "@wsz987/channel-control": "workspace:*"
+    "@wsz987/channel-control": "workspace:*",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.6",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^18.3.1",
     "esbuild": "^0.28.2",
+    "react": "^18.3.1",
     "rimraf": "^6.0.0",
     "typescript": "^5.9.0",
     "vitest": "^3.2.0"

@@ -49,6 +49,20 @@ const SAVABLE_KEYS = [
   'upstream.clientId',
 ] as const;
 
+/**
+ * Official DingTalk developer console (open-dev) — one-step entry to the app
+ * list, not the marketing homepage. When the app's clientId is known the link
+ * deep-links to that app (`#/app?clientId=`), mirroring openclaw-toolkit.
+ */
+export const DINGTALK_OPEN_PLATFORM_URL = 'https://open-dev.dingtalk.com';
+
+export function dingtalkConsoleUrl(clientId: string | undefined): string {
+  const id = clientId?.trim();
+  return id
+    ? `${DINGTALK_OPEN_PLATFORM_URL}/#/app?clientId=${encodeURIComponent(id)}`
+    : `${DINGTALK_OPEN_PLATFORM_URL}/#/app`;
+}
+
 export function createDingTalkDefinition(options: DingTalkDefinitionOptions): ChannelDefinition {
   const { config, deps, credentials } = options;
   // Internal mutable snapshot that saveConfig patches and createAdapter reads,
@@ -63,7 +77,7 @@ export function createDingTalkDefinition(options: DingTalkDefinitionOptions): Ch
       { name: 'clientSecret', kind: 'secret', secret: true, configured: false, writable: true, ref: clientSecretRef() },
     ],
     authMethods: [],
-    setupUrl: 'https://open.dingtalk.com/',
+    setupUrl: dingtalkConsoleUrl(state.upstream.clientId),
   };
 
   return {
@@ -86,7 +100,7 @@ export function createDingTalkDefinition(options: DingTalkDefinitionOptions): Ch
       const clientIdConfigured = Boolean(state.upstream.clientId);
       const secretDescribed = await credentials.describe(clientSecretRef());
       const fields: ConfiguredState['fields'] = {
-        clientId: { configured: clientIdConfigured, writable: true },
+        clientId: { configured: clientIdConfigured, writable: true, value: state.upstream.clientId },
         clientSecret: {
           configured: secretDescribed.configured,
           writable: secretDescribed.writable,
@@ -103,6 +117,8 @@ export function createDingTalkDefinition(options: DingTalkDefinitionOptions): Ch
         { name: 'clientId', kind: 'text', secret: false, configured: Boolean(state.upstream.clientId), writable: true },
         { name: 'clientSecret', kind: 'secret', secret: true, configured: false, writable: true, ref: clientSecretRef() },
       ];
+      // Keep the console deep-link in sync with the configured clientId.
+      setup.setupUrl = dingtalkConsoleUrl(state.upstream.clientId);
     },
 
     async createAdapter() {

@@ -101,7 +101,7 @@ describe('createDingTalkDefinition setup descriptor', () => {
     expect(def.enabled).toBe(true);
     expect(def.autoStart).toBe(true);
     expect(def.setup.authMethods).toEqual([]);
-    expect(def.setup.setupUrl).toBe('https://open.dingtalk.com/');
+    expect(def.setup.setupUrl).toBe('https://open-dev.dingtalk.com/#/app');
     expect(def.beginAuth).toBeUndefined();
     expect(def.pollAuth).toBeUndefined();
     expect(def.submitAuthInput).toBeUndefined();
@@ -115,6 +115,25 @@ describe('createDingTalkDefinition setup descriptor', () => {
       ref: DINGTALK_CLIENT_SECRET_REF,
     });
     expect(byName.clientSecret.ref).toBe(DINGTALK_CLIENT_SECRET_REF);
+  });
+
+  it('deep-links to the configured app when clientId is set', () => {
+    const def = createDingTalkDefinition({
+      config: makeConfig({ upstream: { mode: 'sdk', clientId: 'app-key' } }),
+      deps: {},
+      credentials: new FakeSeam({ values: {} }),
+    });
+    expect(def.setup.setupUrl).toBe('https://open-dev.dingtalk.com/#/app?clientId=app-key');
+  });
+
+  it('saveConfig keeps the console deep-link in sync with the patched clientId', async () => {
+    const def = createDingTalkDefinition({
+      config: makeConfig({ upstream: { mode: 'gateway' } }),
+      deps: {},
+      credentials: new FakeSeam({ values: {} }),
+    });
+    await def.saveConfig({ clientId: 'new-key' });
+    expect(def.setup.setupUrl).toBe('https://open-dev.dingtalk.com/#/app?clientId=new-key');
   });
 
   it('defaults the secret ref to DINGTALK_CLIENT_SECRET_REF when unset', () => {

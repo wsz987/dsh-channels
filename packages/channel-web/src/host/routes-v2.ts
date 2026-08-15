@@ -21,7 +21,6 @@
 import type {
   AuthBeginInput,
   AuthInput,
-  AuthMethod,
   ChannelSetupDescriptor,
   ChannelSetupInput,
   ChannelSetupResult,
@@ -32,6 +31,7 @@ import type {
 } from '@wsz987/channel-control';
 import { isChannelError } from '@wsz987/channel-core';
 import { isControlError } from '@wsz987/channel-control';
+import { z } from 'zod';
 import { errorBody } from './security.js';
 
 /** Minimal structural view of the ChannelControlService surface we consume. */
@@ -61,13 +61,7 @@ export interface ApiResultV2 {
   body: unknown;
 }
 
-const AUTH_METHODS: readonly AuthMethod[] = [
-  'qr',
-  'device',
-  'portal-login',
-  'credentials',
-  'hybrid',
-] as const;
+const AUTH_METHODS = ['qr', 'device', 'portal-login', 'credentials', 'hybrid'] as const;
 
 /** URL-decode safety: decodeURIComponent of malformed escapes is a URIError. */
 function safeDecode(s: string): string {
@@ -78,8 +72,15 @@ function safeDecode(s: string): string {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+/** Any JSON object (never an array / null / primitive). */
+const jsonObjectSchema = z.object({}).loose();
+
+/** Non-empty string check shared by path params. */
+const nonEmptyString = z.string().min(1);
+
+/** A 400 INVALID_INPUT result for a malformed body/path value. */
+function badInput(message: string): { ok: false; result: ApiResultV2 } {
+  return { ok: false, result: { status: 400, body: errorBody('INVALID_INPUT', message) } };
 }
 
 /** Validate that a value is a non-empty string, or a 400 result. */
@@ -87,13 +88,9 @@ function requireString(
   value: unknown,
   field: string,
 ): { ok: true; value: string } | { ok: false; result: ApiResultV2 } {
-  if (typeof value !== 'string' || !value) {
-    return {
-      ok: false,
-      result: { status: 400, body: errorBody('INVALID_INPUT', field + ' must be a non-empty string') },
-    };
-  }
-  return { ok: true, value };
+  const parsed = nonEmptyString.safeParse(value);
+  if (!parsed.success) return badInput(field + ' must be a non-empty string');
+  return { ok: true, value: parsed.data };
 }
 
 /**
@@ -316,67 +313,89 @@ export class ChannelApiV2 {
 
   /** PATCH config body: a flat JSON object (never nested). */
   private configPatch(value: unknown): { ok: true; value: Record<string, unknown> } | { ok: false; result: ApiResultV2 } {
-    if (!isRecord(value)) {
-      return { ok: false, result: { status: 400, body: errorBody('INVALID_INPUT', 'config patch must be a JSON object') } };
-    }
-    return { ok: true, value };
+    const parsed = jsonObjectSchema.safeParse(value);
+    if (!parsed.success) return badInput('config patch must be a JSON object');
+    return { ok: true, value: parsed.data };
   }
 
   /** PUT credentials body: `{ value: string }`. */
   private credentialValue(body: unknown): { ok: true; value: string } | { ok: false; result: ApiResultV2 } {
-    const parsed = isRecord(body) ? body : {};
-    return requireString(parsed.value, 'value');
+    const parsed = credentialValueSchema.safeParse(body);
+    if (!parsed.success) return badInput('value must be a non-empty string');
+    return { ok: true, value: parsed.data.value };
   }
 
   /** PUT setup body: `{ config: object, credentials: Record<string,string> }`. */
   private setupInput(body: unknown): { ok: true; value: ChannelSetupInput } | { ok: false; result: ApiResultV2 } {
-    if (!isRecord(body)) {
-      return { ok: false, result: { status: 400, body: errorBody('INVALID_INPUT', 'setup must be a JSON object') } };
+    const root = jsonObjectSchema.safeParse(body);
+    if (!root.success) return badInput('setup must be a JSON object');
+    // Legacy tolerance: an absent or null config/credentials section means `{}`.
+    const record = root.data;
+    const config = record.config ?? {};
+    const credentials = record.credentials ?? {};
+
+    const parsedConfig = jsonObjectSchema.safeParse(config);
+    if (!parsedConfig.success) {
+      return badInput('config and credentials must be JSON objects');
     }
-    const config = body.config ?? {};
-    const credentials = body.credentials ?? {};
-    if (!isRecord(config) || !isRecord(credentials)) {
-      return { ok: false, result: { status: 400, body: errorBody('INVALID_INPUT', 'config and credentials must be JSON objects') } };
-    }
-    const secretValues: Record<string, string> = {};
-    for (const [field, value] of Object.entries(credentials)) {
-      if (typeof value !== 'string' || !value.trim()) {
-        return { ok: false, result: { status: 400, body: errorBody('INVALID_INPUT', `credential ${field} must be a non-empty string`) } };
+    const parsedCredentials = credentialsRecordSchema.safeParse(credentials);
+    if (!parsedCredentials.success) {
+      const first = parsedCredentials.error.issues[0];
+      if (first && first.path.length === 1) {
+        return badInput(`credential ${String(first.path[0])} must be a non-empty string`);
       }
-      secretValues[field] = value.trim();
+      return badInput('config and credentials must be JSON objects');
     }
-    return { ok: true, value: { config, credentials: secretValues } };
+    return { ok: true, value: { config: parsedConfig.data, credentials: parsedCredentials.data } };
   }
 
   /** POST auth/sessions body: `{ method: AuthMethod, accountId?: string }`. */
   private authBeginInput(body: unknown): { ok: true; value: AuthBeginInput } | { ok: false; result: ApiResultV2 } {
-    const parsed = isRecord(body) ? body : {};
-    const method = parsed.method;
-    if (typeof method !== 'string' || !(AUTH_METHODS as readonly string[]).includes(method)) {
-      return {
-        ok: false,
-        result: { status: 400, body: errorBody('INVALID_INPUT', 'method must be one of ' + AUTH_METHODS.join(', ')) },
-      };
+    const parsed = authBeginSchema.safeParse(body);
+    if (!parsed.success) {
+      const first = parsed.error.issues[0];
+      const message =
+        first?.path[0] === 'accountId'
+          ? 'accountId must be a non-empty string when present'
+          : 'method must be one of ' + AUTH_METHODS.join(', ');
+      return badInput(message);
     }
-    const account = parsed.accountId;
-    if (account !== undefined && (typeof account !== 'string' || !account)) {
-      return {
-        ok: false,
-        result: { status: 400, body: errorBody('INVALID_INPUT', 'accountId must be a non-empty string when present') },
-      };
-    }
-    return { ok: true, value: { method: method as AuthMethod, accountId: account as string | undefined } };
+    return { ok: true, value: parsed.data };
   }
 
   /** POST session/input body: `{ kind: 'verification-code', value: string }`. */
   private authInput(body: unknown): { ok: true; value: AuthInput } | { ok: false; result: ApiResultV2 } {
-    const parsed = isRecord(body) ? body : {};
-    if (parsed.kind !== 'verification-code') {
-      return { ok: false, result: { status: 400, body: errorBody('INVALID_INPUT', 'kind must be "verification-code"') } };
+    const parsed = authInputSchema.safeParse(body);
+    if (!parsed.success) {
+      const first = parsed.error.issues[0];
+      const message =
+        first?.path[0] === 'value' ? 'value must be a non-empty string' : 'kind must be "verification-code"';
+      return badInput(message);
     }
-    const value = requireString(parsed.value, 'value');
-    if (!value.ok) return value;
-    return { ok: true, value: { kind: 'verification-code', value: value.value } };
+    return { ok: true, value: parsed.data };
   }
 
 }
+
+/**
+ * POST session/input body: `{ kind: 'verification-code', value: string }`.
+ * Shared with the v1 routes so both API generations check the same shape.
+ */
+export const authInputSchema = z.object({
+  kind: z.literal('verification-code'),
+  value: z.string().min(1),
+}, 'kind must be "verification-code"').loose();
+
+/** PUT credentials body: `{ value: string }`. */
+const credentialValueSchema = z.object({
+  value: z.string().min(1),
+}, 'value must be a non-empty string').loose();
+
+/** setup `credentials`: map of field name → non-empty (trimmed) string. */
+const credentialsRecordSchema = z.record(z.string(), z.string().trim().min(1));
+
+/** POST auth/sessions body: `{ method: AuthMethod, accountId?: string }`. */
+const authBeginSchema = z.object({
+  method: z.enum(AUTH_METHODS),
+  accountId: z.string().min(1).optional(),
+}, 'method must be one of ' + AUTH_METHODS.join(', ')).loose();

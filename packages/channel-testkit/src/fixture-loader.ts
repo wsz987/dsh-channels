@@ -19,6 +19,7 @@
 import { basename, dirname, join, resolve } from 'node:path';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { z } from 'zod';
 
 /** A single channel fixture case. */
 export interface FixtureCase {
@@ -34,6 +35,15 @@ export interface FixtureCase {
   expected: unknown;
 }
 
+/** Fixture shape: `name`/`upstreamVersion` must be strings, `payload` and `expected` must be present (any JSON value), `channel` optional. */
+const FIXTURE_SCHEMA = z.object({
+  name: z.string(),
+  channel: z.string().optional(),
+  upstreamVersion: z.string(),
+  payload: z.unknown(),
+  expected: z.unknown(),
+}).loose();
+
 /**
  * Validate that a parsed fixture carries all required fields.
  * Throws with the list of missing fields when invalid.
@@ -42,13 +52,9 @@ export function validateFixture(fixture: unknown): asserts fixture is FixtureCas
   if (typeof fixture !== 'object' || fixture === null) {
     throw new Error('invalid fixture: expected a JSON object');
   }
-  const record = fixture as Record<string, unknown>;
-  const missing: string[] = [];
-  if (typeof record.name !== 'string') missing.push('name');
-  if (typeof record.upstreamVersion !== 'string') missing.push('upstreamVersion');
-  if (!('payload' in record)) missing.push('payload');
-  if (!('expected' in record)) missing.push('expected');
-  if (missing.length > 0) {
+  const parsed = FIXTURE_SCHEMA.safeParse(fixture);
+  if (!parsed.success) {
+    const missing = parsed.error.issues.map((issue) => issue.path.join('.')).filter((path) => path.length > 0);
     throw new Error(`invalid fixture: missing required field(s): ${missing.join(', ')}`);
   }
 }
