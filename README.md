@@ -18,6 +18,7 @@
 - [🛠 开发](#-开发)
 - [📚 文档](#-文档)
 - [🤝 二次开发规范](#-二次开发规范)
+- [🙏 致谢](#-致谢)
 
 ## ✨ 特性
 
@@ -163,7 +164,7 @@ pnpm web:debug             # 启动 dsh web
 | 钉钉 | 文本对话 · 流式回复 | ✅ |
 | 飞书 | 文本对话 · 流式回复 | ✅ |
 
-> 入站媒体（图片 / 文件 / 音频 / 视频）尚未接入 Harness 真实附件——除微信图片外，其余渠道进入模型时仍为文本占位符；file / audio / video 需等 Harness 官方扩展（见 [接入计划](docs/dsh-channels-release-verification-execution-plan.md)）。
+> 入站媒体（图片 / 文件 / 音频 / 视频）尚未接入 Harness 真实附件——除微信图片外，其余渠道进入模型时仍为文本占位符；file / audio / video 需等 Harness 官方扩展（见 [接入计划](docs/dsh-channels-unified-attachments-outbox-final-execution-plan-2026-08-16.md)）。
 
 **第三方渠道**：如 Telegram 等，待接入。
 
@@ -278,6 +279,16 @@ export function createResetCommand(deps: ChannelCommandDependencies): CommandDef
 - **Commit**：Conventional Commits（`feat(scope): ...` / `fix(scope): ...` / `docs: ...`），scope 用包名（如 `channel-qq`）
 - **PR**：过 CI（build + typecheck + test + 契约验证 + live gate 前检）
 - **发布**：`pnpm changeset` 记录变更 → CI 合入后 `pnpm release`（Changesets 自动发版，见 [docs/release.md](docs/release.md)）
+
+## 🙏 致谢
+
+本项目基于以下开源项目：
+
+- [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) —— DeepSeek Harness（`@deepseek-ai/*`）
+- [DingTalk-Real-AI/dingtalk-openclaw-connector](https://github.com/DingTalk-Real-AI/dingtalk-openclaw-connector) —— 钉钉渠道插件（`@dingtalk-real-ai/dingtalk-connector`）
+- [tencent-connect/openclaw-qqbot](https://github.com/tencent-connect/openclaw-qqbot) —— QQ 机器人渠道插件（`@tencent-connect/openclaw-qqbot`）
+- [larksuite/openclaw-lark](https://github.com/larksuite/openclaw-lark) —— 飞书渠道插件（`@larksuite/openclaw-lark`）
+- [Tencent/openclaw-weixin](https://github.com/Tencent/openclaw-weixin) —— 微信渠道插件（`@tencent-weixin/openclaw-weixin`）
 
 ## License
 

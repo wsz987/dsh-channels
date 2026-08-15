@@ -449,8 +449,7 @@ export function apply(
 
 # 6.5 通用 Channel Control Plane（`channel-control`）
 
-多渠道配置与 Harness Web 接入的最终形态（见
-`docs/dsh-channels 多渠道扫码授权与 Harness Web 接入最终执行方案.md`）：不按渠道各写一套
+多渠道配置与 Harness Web 接入的最终形态：不按渠道各写一套
 Web 业务代码。Weixin、钉钉、飞书/Lark 使用真实 Auth Session；QQ 使用 AppID/AppSecret 凭证表单和官方控制台入口。钉钉可直接扫码注册并回填凭证；飞书/Lark 必须先保存应用凭证，再扫码完成增量授权。
 
 ## 6.5.1 职责分层
@@ -1843,3 +1842,41 @@ DSH Bundle
 而是：
 
 > **第五个、第十个、第三十个渠道加入时，不修改 Channel Core；Harness breaking change 发生时，优先只修改 channel-harness。**
+
+---
+
+# 40. 已落地设计补遗（v1.1 之后）
+
+v1.1 正文成稿后，以下两项设计已随实现落地，补充记录于此（避免后续维护者误判为未设计）。
+
+## 40.1 工作区隔离（channel-account workspace）
+
+`channel-harness` 内置 workspace resolver：默认 `mode: 'channel-account'`，为每个**渠道 / 账号**对分配一个独立 Harness Workspace，路径 `<dsh-home>/workspaces/channels/<channel>/<account-key>`，缺失时自动创建。各渠道会话的 cwd 与文件互不串扰。
+
+配置位于 `channels-harness` 的 `config.workspace`：
+
+```yaml
+workspace:
+  mode: channel-account   # channel-account（默认）| host-cwd | disabled
+  root: <可选，默认 <dsh-home>/workspaces/channels>
+  autoCreate: true        # 默认 true
+```
+
+- `channel-account`：每渠道 / 账号一对独立 Workspace（默认）
+- `host-cwd`：复用宿主当前工作目录，仅当该目录已注册时关联
+- `disabled`：不接入 WorkspaceRegistry，cwd 回退 `config.cwd ?? process.cwd()`
+
+## 40.2 附件管道（微信图片 real attachment）
+
+入站媒体进入 Harness 真实附件的唯一已落地路径是**微信图片**：
+
+```
+Weixin CDN 下载 + AES 解密 → MessagePart.localData（明文字节）
+        → channel-harness message-converter → ctx.attachments.saveImage
+        → { type: 'image', attachment: ref }（真实 ImageBlock）
+```
+
+出站同理：`ImagePart.localData` 存在时走 CDN 上传 + 发送。
+
+其余渠道（QQ / 钉钉 / 飞书）的入站媒体目前仍映射为文本占位符（`[image: …]` / `[file: …]` 等），尚未接入 Harness 真实附件；file / audio / video 需等 Harness 官方扩展。统一附件与主动消息（outbox）的完整设计见
+`docs/dsh-channels-unified-attachments-outbox-final-execution-plan-2026-08-16.md`。
