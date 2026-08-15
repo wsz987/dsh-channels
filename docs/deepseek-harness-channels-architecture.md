@@ -451,7 +451,7 @@ export function apply(
 
 多渠道配置与 Harness Web 接入的最终形态（见
 `docs/dsh-channels 多渠道扫码授权与 Harness Web 接入最终执行方案.md`）：不按渠道各写一套
-Web 业务代码。只有 Weixin 使用真实 QR Auth Session；QQ、钉钉、飞书使用统一凭证表单和官方控制台入口。
+Web 业务代码。Weixin、钉钉、飞书/Lark 使用真实 Auth Session；QQ 使用 AppID/AppSecret 凭证表单和官方控制台入口。钉钉可直接扫码注册并回填凭证；飞书/Lark 必须先保存应用凭证，再扫码完成增量授权。
 
 ## 6.5.1 职责分层
 
@@ -485,9 +485,11 @@ AuthState  = pending | authenticated | expired | failed   （M1 兼容）
   会 cancel 旧 pending session；session id 用 `crypto.randomUUID()`（§19）。
 - 轮询节流由 Host 控制：`nextPollAt` 之前不真正访问 Provider（§20）。
 - QR 是结构化对象 `{ kind: 'content' | 'data-url' | 'external-url', value, expiresAt }`（§17）。
-- Auth Session 只用于平台确实提供、且 Host 能轮询验证的授权流程。当前内置渠道只有 Weixin；
-  QQ / DingTalk / Lark 的 Definition 均声明 `authMethods: []`，官方控制台 URL 通过
-  `setupUrl` 作为普通链接展示，不伪装成 QR 或授权状态机。
+- Auth Session 只用于平台确实提供、且 Host 能轮询验证的授权流程。当前内置渠道的
+  Weixin、DingTalk、Lark 均有对应的 Host `beginAuth()` / `pollAuth()` 实现；QQ 使用
+  AppID/AppSecret 凭证设置，不创建 Auth Session。各渠道的前置条件和完成语义不同，
+  不能把扫码成功统一解释为 Channel 已连接。
+  官方控制台 URL 仍通过 `setupUrl` 作为普通链接展示，不冒充 provider 授权二维码。
 
 ## 6.5.3 Runtime 生命周期（§21–§24）
 

@@ -6,8 +6,8 @@
  *
  * Strategy: 'sdk' — inbound rides the official `dingtalk-stream` SDK
  * (WebSocket stream mode). Outbound (message send / AI Card) is not part of
- * the stream SDK; it uses the DingTalk OpenAPI HTTP surface via the
- * transport (self-hosted gateway endpoints in this iteration).
+ * the stream SDK; it uses the message-scoped `sessionWebhook` and DingTalk's
+ * official AI Card OpenAPI through the shared HTTP transport.
  *
  * Status 'tested' is justified by the Channel Contract + fixture tests plus
  * the SDK-mode offline tests (fake stream client) passing — fully offline.

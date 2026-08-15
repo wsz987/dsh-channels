@@ -35,6 +35,7 @@ interface DingTalkRaw {
   eventId?: string;
   senderId?: string;
   conversationId?: string;
+  conversationType?: string;
   content?: string;
   picUrl?: string;
   mediaUrl?: string;
@@ -70,9 +71,7 @@ export function mapInbound(raw: unknown, meta: DingTalkInboundMeta): MessageRece
     accountId: meta.accountId,
     conversation: {
       id: conversationId,
-      // v1 convention: every inbound message is a DM keyed by its conversation.
-      // Group conversations can be modeled later without changing the contract.
-      type: 'dm',
+      type: value.conversationType === '2' ? 'group' : 'dm',
     },
     sender: { id: sender },
     message: {

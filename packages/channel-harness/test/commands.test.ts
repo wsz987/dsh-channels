@@ -26,7 +26,7 @@ import CommandRuntime, { parseCommand } from '@deepseek-ai/dsh-commands';
 import { createScope } from '@deepseek-ai/dsh-scope';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import { AgentRegistry } from '@deepseek-ai/dsh-agent';
-import type { MessageReceived } from '@wsz987/channel-core';
+import type { ChannelTarget, MessageReceived } from '@wsz987/channel-core';
 import {
   AgentManager,
   HarnessAgentGateway,
@@ -71,10 +71,15 @@ class FakeAdapter {
   id: string;
   capabilities = { text: true, image: false, file: false, audio: false, video: false, markdown: true, cards: false, reactions: false, threads: false, streaming: 'buffered' } as const;
   sent: { text?: string }[] = [];
+  targets: ChannelTarget[] = [];
   constructor(id = 'fake') { this.id = id; }
   async start() {}
   async stop() {}
-  async send(_target: unknown, message: { text?: string }) { this.sent.push(message); return { delivered: true }; }
+  async send(target: ChannelTarget, message: { text?: string }) {
+    this.targets.push(target);
+    this.sent.push(message);
+    return { delivered: true };
+  }
 }
 
 function makeMessageEvent(overrides: Partial<MessageReceived> = {}): MessageReceived {
@@ -614,6 +619,21 @@ describe('F. command result rendering', () => {
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m3', '/new')));
     expect(adapter.sent.map((s) => s.text)).toContain('当前会话仍在运行，请稍后再执行 /new。');
     expect(gateway.followups.length).toBe(beforeFollowups);
+  });
+
+  it('preserves message-scoped reply context for direct command replies', async () => {
+    const rootCtx = new Context();
+    new CommandRuntime(rootCtx);
+    const { bridge, adapter } = makeBridge(rootCtx);
+    const raw = { sessionWebhook: 'https://example.dingtalk.com/session/reply' };
+
+    await bridge.handleChannelEvent(makeMessageEvent({
+      ...textEvent('m1', '/not-exist'),
+      raw,
+    }));
+
+    expect(adapter.targets).toHaveLength(1);
+    expect(adapter.targets[0]?.raw).toBe(raw);
   });
 });
 

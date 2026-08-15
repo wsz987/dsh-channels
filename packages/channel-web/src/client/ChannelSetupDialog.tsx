@@ -14,6 +14,14 @@ import {
 import { CredentialField } from './components/CredentialField.js';
 import { QrCodeDisplay } from './components/QrCodeDisplay.js';
 import { AuthProgress } from './components/AuthProgress.js';
+import { channelDisplayName } from './channelNames.js';
+import {
+  isLarkCredentialStep,
+  isSetupMethodAvailable,
+  setupIntroKey,
+  setupMethods,
+  type SetupMethod,
+} from './authSetup.js';
 import { injectSetupDialogStyles } from './components/setupDialogStyles.js';
 
 export interface ChannelSetupDialogProps {
@@ -39,6 +47,7 @@ export function ChannelSetupDialog(props: ChannelSetupDialogProps) {
   const authMethodRef = useRef<AuthMethod | undefined>(method);
   const timer = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const [completedMessage, setCompletedMessage] = useState('success');
+  const [selectedMethod, setSelectedMethod] = useState<SetupMethod | null>(null);
 
   // Collapse the primitives Modal body's default top gap (see setupDialogStyles).
   useEffect(() => {
@@ -62,6 +71,10 @@ export function ChannelSetupDialog(props: ChannelSetupDialogProps) {
     setError(null);
     authMethodRef.current = authMethod;
     try {
+      const previous = sessionRef.current;
+      if (previous?.id) await cancelAuth(channelId, previous.id).catch(() => {});
+      sessionRef.current = null;
+      setSession(null);
       const next = await beginAuth(channelId, authMethod);
       if (!alive.current) return;
       sessionRef.current = next;
@@ -73,6 +86,7 @@ export function ChannelSetupDialog(props: ChannelSetupDialogProps) {
         expiresAt: next.expiresAt,
       });
       if (next.phase === 'authorized') complete('success');
+      else if (next.phase === 'credentials-required') setStep('credentials');
       else setStep(next.phase === 'verification-required' ? 'verification' : 'qr');
     } catch (cause) {
       if (alive.current) setError(cause instanceof Error ? cause.message : String(cause));
@@ -86,9 +100,13 @@ export function ChannelSetupDialog(props: ChannelSetupDialogProps) {
         const setup = await fetchSetup(channelId);
         if (!alive.current) return;
         setDescriptor(setup);
-        if (method) await startAuth(method);
-        else if (setup.fields.length > 0) setStep('credentials');
-        else if (setup.authMethods.length > 0) await startAuth(setup.authMethods[0]!);
+        const requestedMethod = method ?? setupMethods(setup)[0];
+        const initialMethod = requestedMethod && isSetupMethodAvailable(channelId, requestedMethod, setup)
+          ? requestedMethod
+          : setupMethods(setup).find((candidate) => isSetupMethodAvailable(channelId, candidate, setup));
+        setSelectedMethod(initialMethod ?? null);
+        if (initialMethod && initialMethod !== 'credentials') await startAuth(initialMethod);
+        else if (initialMethod === 'credentials' || setup.fields.length > 0) setStep('credentials');
         else setStep('completed');
       } catch (cause) {
         if (alive.current) setError(cause instanceof Error ? cause.message : String(cause));
@@ -114,6 +132,12 @@ export function ChannelSetupDialog(props: ChannelSetupDialogProps) {
         if (!alive.current) return;
         setStatus(next);
         if (next.phase === 'authorized' || next.state === 'authenticated') complete('success');
+        else if (next.phase === 'credentials-required') {
+          clearTimer();
+          await cancelAuth(channelId, session.id).catch(() => {});
+          sessionRef.current = null;
+          setStep('credentials');
+        }
         else if (next.phase === 'verification-required') setStep('verification');
         else if (next.phase === 'expired' || next.phase === 'failed') clearTimer();
       } catch (cause) {
@@ -132,7 +156,7 @@ export function ChannelSetupDialog(props: ChannelSetupDialogProps) {
     <Modal
       open
       onClose={close}
-      title={t('title') + ' · ' + channelId}
+      title={t('title') + ' · ' + channelDisplayName(channelId, t)}
       closeLabel={t('close')}
       contentClassName="dsc-setup-dialog"
       footer={
@@ -165,18 +189,69 @@ export function ChannelSetupDialog(props: ChannelSetupDialogProps) {
           </div>
         )}
 
+        {descriptor && descriptor.authMethods.length > 0 && step !== 'completed' && (
+          <AuthMethodTabs
+            descriptor={descriptor}
+            channelId={channelId}
+            selected={selectedMethod}
+            onSelect={(next) => {
+              if (!isSetupMethodAvailable(channelId, next, descriptor)) return;
+              setSelectedMethod(next);
+              setError(null);
+              if (next === 'credentials') {
+                clearTimer();
+                const active = sessionRef.current;
+                if (active?.id) void cancelAuth(channelId, active.id).catch(() => {});
+                sessionRef.current = null;
+                setSession(null);
+                setStep('credentials');
+              } else {
+                void startAuth(next);
+              }
+            }}
+            t={t}
+          />
+        )}
+
         {step === 'credentials' && descriptor && (
           <CredentialsForm
             channelId={channelId}
             descriptor={descriptor}
             t={t}
-            onComplete={(configured) => complete(configured ? 'setupSaved' : 'setupDisabled')}
+            authorizeAfterSave={isLarkCredentialStep(channelId, descriptor)}
+            introKey={setupIntroKey(channelId)}
+            onComplete={async (configured, action) => {
+              if (!configured) {
+                complete('setupDisabled');
+                return;
+              }
+              if (action === 'connect' || !isLarkCredentialStep(channelId, descriptor)) {
+                complete('setupSaved');
+                return;
+              }
+              try {
+                const updated = await fetchSetup(channelId);
+                if (!alive.current) return;
+                setDescriptor(updated);
+                const scanMethod = updated.authMethods.find((candidate) => candidate !== 'credentials');
+                if (!scanMethod || !isSetupMethodAvailable(channelId, scanMethod, updated)) {
+                  complete('setupSaved');
+                  return;
+                }
+                setSelectedMethod(scanMethod);
+                await startAuth(scanMethod);
+              } catch (cause) {
+                if (alive.current) setError(cause instanceof Error ? cause.message : String(cause));
+              }
+            }}
           />
         )}
 
         {(step === 'qr' || step === 'verification') && (
           <div data-testid="auth-flow" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
-            {session?.qr && <QrCodeDisplay payload={session.qr} width={208} t={t} />}
+            {session?.qr && status?.phase !== 'expired' && status?.state !== 'expired' && (
+              <QrCodeDisplay payload={session.qr} width={208} t={t} />
+            )}
             {status && (
               <div style={{ width: '100%' }}>
                 <AuthProgress
@@ -206,16 +281,79 @@ export function ChannelSetupDialog(props: ChannelSetupDialogProps) {
   );
 }
 
+function AuthMethodTabs({
+  descriptor,
+  channelId,
+  selected,
+  onSelect,
+  t,
+}: {
+  descriptor: ChannelSetupDescriptor;
+  channelId: string;
+  selected: SetupMethod | null;
+  onSelect: (method: SetupMethod) => void;
+  t: (key: string) => string;
+}) {
+  const methods = setupMethods(descriptor);
+  if (methods.length < 2) return null;
+
+  const label = (method: SetupMethod) => {
+    if (method === 'credentials') return t('credentialsTab');
+    if (method === 'portal-login') return t('portalLoginTab');
+    if (method === 'device' || method === 'hybrid') return t('scanAuthTab');
+    return t('scanTab');
+  };
+
+  return (
+    <div
+      role="tablist"
+      aria-label={t('authMethodTabs')}
+      style={{
+        display: 'flex',
+        gap: 6,
+        padding: 4,
+        marginBottom: 14,
+        borderRadius: 10,
+        background: 'var(--dsw-alias-bg-layer-2)',
+      }}
+      data-testid="auth-method-tabs"
+    >
+      {methods.map((method) => {
+        const available = isSetupMethodAvailable(channelId, method, descriptor);
+        return (
+          <Button
+            key={method}
+            type="button"
+            size="sm"
+            variant={selected === method ? 'primary' : 'ghost'}
+            role="tab"
+            aria-selected={selected === method}
+            disabled={!available}
+            onClick={() => onSelect(method)}
+            style={{ flex: 1, minWidth: 0 }}
+          >
+            {label(method)}
+          </Button>
+        );
+      })}
+    </div>
+  );
+}
+
 function CredentialsForm({
   channelId,
   descriptor,
   t,
+  authorizeAfterSave,
+  introKey,
   onComplete,
 }: {
   channelId: string;
   descriptor: ChannelSetupDescriptor;
   t: (key: string) => string;
-  onComplete: (configured: boolean) => void;
+  authorizeAfterSave: boolean;
+  introKey: string;
+  onComplete: (configured: boolean, action: 'connect' | 'authorize') => Promise<void> | void;
 }) {
   // Seed non-secret fields with their current values (appId/clientId are
   // viewable); secret fields start empty so an untouched secret is never resent.
@@ -238,7 +376,7 @@ function CredentialsForm({
   );
   const canSubmit = changed.length > 0 && missing.length === 0 && !saving;
 
-  const submit = async () => {
+  const submit = async (action: 'connect' | 'authorize') => {
     const config: Record<string, unknown> = {};
     const credentials: Record<string, string> = {};
     for (const field of changed) {
@@ -250,7 +388,11 @@ function CredentialsForm({
     setSaving(true);
     setError(null);
     try {
-      const result = await applySetup(channelId, { config, credentials });
+      const result = await applySetup(channelId, {
+        config,
+        credentials,
+        reconcile: action === 'connect',
+      });
       setDrafts((current) => {
         const next = { ...current };
         for (const field of descriptor.fields) {
@@ -258,7 +400,7 @@ function CredentialsForm({
         }
         return next;
       });
-      onComplete(result.configured);
+      await onComplete(result.configured, action);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -269,7 +411,7 @@ function CredentialsForm({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }} data-testid="credentials-form">
       <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: 'var(--dsw-alias-label-secondary)' }}>
-        {t('setupIntro')}
+        {t(introKey)}
       </p>
       {descriptor.setupUrl && (
         <a
@@ -303,13 +445,24 @@ function CredentialsForm({
       <div style={{ marginTop: 2, paddingTop: 14, borderTop: '1px solid var(--dsw-alias-border-l1)' }}>
         <Button
           variant="primary"
-          onClick={() => void submit()}
+          onClick={() => void submit('connect')}
           disabled={!canSubmit}
           data-testid="setup-save"
           style={{ width: '100%' }}
         >
           {saving ? t('saving') : t('saveAndConnect')}
         </Button>
+        {authorizeAfterSave && (
+          <Button
+            variant="outline"
+            onClick={() => void submit('authorize')}
+            disabled={!canSubmit}
+            data-testid="setup-save-and-authorize"
+            style={{ width: '100%', marginTop: 8 }}
+          >
+            {saving ? t('saving') : t('saveAndScanAuthorize')}
+          </Button>
+        )}
       </div>
     </div>
   );

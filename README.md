@@ -4,19 +4,30 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](package.json)
 
-为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 实现的即时通讯渠道插件（社区项目，非官方）：内置 **微信 / QQ / 钉钉 / 飞书**，用统一的 `ctx.channels` API 收发消息。渠道集不固定——另有 [Telegram 扩展示例](packages/channel-telegram)，新渠道随时可接入（见文末二次开发规范）。
+将 微信 / QQ / 钉钉 / 飞书 的 OpenClaw 接入插件移植到 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)，统一通过 `ctx.channels` API 收发消息（社区项目，非官方）。
+
+**目录**
+
+- [✨ 特性](#-特性)
+- [🚀 快速开始](#-快速开始)
+  - [📸 效果预览](#-效果预览)
+  - [⌨️ 渠道指令](#-渠道指令)
+- [🔌 渠道配置与登录](#-渠道配置与登录)
+- [🧭 渠道总览](#-渠道总览)
+- [🧭 工作区隔离](#-工作区隔离)
+- [🛠 开发](#-开发)
+- [📚 文档](#-文档)
+- [🤝 二次开发规范](#-二次开发规范)
 
 ## ✨ 特性
 
-- **内置渠道 + Web 可视化，一个 Bundle 装完**：聚合为 `@wsz987/dsh-channels`，含 Harness Web「设置 → 渠道」面板
-- **官方 SDK / 协议直连**：QQ / 钉钉 / 飞书走各平台官方 SDK，微信直连腾讯 iLink（扫码登录 + 长轮询）
-- **流式回复**：QQ C2C 原生流式、钉钉 / 飞书卡片流式（edit）、群聊 buffered
-- **微信图片（唯一已接入的真实附件）**：入站图片 CDN 下载解密 → `localData` → Harness 真实图片附件，出站图片上传，附 typing 生命周期（不再只是 Text-only）
-- **附件接入（其余渠道待接入）**：QQ / 钉钉 / 飞书的入站媒体目前仍以文本占位符（`[image: …]` / `[file: …]` 等）进入模型，尚未接入 Harness 真实附件——Harness 附件服务 v1 仅支持图片，file / audio / video 需等官方扩展；详见「渠道总览」
-- **模型路由**：按 channel / account / conversation 分发不同模型，`agent.default` 兜底
-- **渠道指令**：会话内斜杠指令（`/new`），官方命令注册器承载，未知指令不下发模型
-- **凭据安全**：密钥走 `ctx.credentials`（不落盘、不入 git）；微信扫码凭据持久化，重启免登录
-- **零改动扩展**：公开 Channel Contract，第三方渠道（如 Telegram / Slack / Discord）接入不改核心
+- **一个包接入多渠道**：内置微信 / QQ / 钉钉 / 飞书，装完即在 Harness Web「设置 → 渠道」统一配置与扫码授权
+- **扫码即登录**：微信扫码免配置，钉钉 / 飞书支持扫码授权或填写平台凭证，QQ 填写 AppID / AppSecret 即可
+- **流式回复**：QQ / 钉钉 / 飞书支持边生成边输出
+- **附件**：微信已支持收发图片，其余渠道待接入
+- **工作区隔离**：各渠道 / 账号会话空间相互独立，互不串扰
+- **渠道指令**：会话内支持 `/new` 等斜杠指令
+- **凭据安全**：基于 DeepSeek Harness 凭据服务（`ctx.credentials`）存储密钥，扫码凭据持久化、重启免登录
 
 ## 🚀 快速开始
 
@@ -34,38 +45,68 @@ npx @deepseek-ai/dsh --profile web --dump-config
 npx @deepseek-ai/dsh web
 ```
 
-装一个包即挂上完整链路：
+装一个包即集成微信 / QQ / 钉钉 / 飞书等，各渠道在 Harness Web「设置 → 渠道」面板完成登录：
 
-```text
-DSH profile（web） → @wsz987/dsh-channels bundle → ChannelService（ctx.channels）
-      → Harness Bridge（channel-harness） → Weixin / QQ / DingTalk / Lark Adapter
-```
+- **微信**：扫码即登录
+- **钉钉 / 飞书**：扫码授权，或填写平台凭证
+- **QQ**：填写 AppID / AppSecret 即可收发
 
-不配置也能启动；微信完成扫码登录，QQ / 钉钉 / 飞书填写平台凭证后即可收发消息。也可按需只装单渠道（`@wsz987/channel-weixin`、`-qq`、`-dingtalk`、`-lark`）。
+按需可只装单渠道（`@wsz987/channel-weixin`、`-qq`、`-dingtalk`、`-lark`），详细配置见下文。
 
-### 本机开发（bundle 未发布时）
+### 📸 效果预览
 
-仓库根目录跑 dev 脚本，把本地构建产物直链到 dsh profile（symlink 指源码，改完代码 `pnpm build` + 重启即生效）：
+接入后，在 Harness Web「设置 → 渠道」面板统一配置与扫码授权，并在各平台对话框中直接与 Agent 对话（图片来源：[docs/ScreenShot](docs/ScreenShot)）：
+
+**Harness Web · 渠道设置面板**
+
+<p align="center">
+  <img src="docs/ScreenShot/dsh-channels-setting.png" alt="Harness Web 渠道设置面板" width="560"/>
+</p>
+
+**各平台对话框**
+
+<p align="center">
+  <img src="docs/ScreenShot/weixin.jpg" alt="微信对话" width="24%"/>
+  <img src="docs/ScreenShot/qq.jpg" alt="QQ 对话" width="24%"/>
+  <img src="docs/ScreenShot/dingding.jpg" alt="钉钉对话" width="24%"/>
+  <img src="docs/ScreenShot/feishu.jpg" alt="飞书对话" width="24%"/>
+</p>
+
+
+### ⌨️ 渠道指令
+
+任意渠道会话内可直接发斜杠指令，由 Harness 官方命令系统解析执行：
+
+| 指令 | 说明 |
+| --- | --- |
+| `/new` | 开启全新会话 |
+
+未注册的指令会被拦截（"未知指令"），不会发给模型。
+
+### 从源码运行（Run from source）
 
 ```bash
-pnpm build                 # 构建
-pnpm channels              # 不带参 = 全装
-pnpm channels weixin       # 只装微信
-pnpm channels weixin qq    # 装多个，空格隔开
-pnpm web:debug             # 调试模式启动 dsh web
+git clone https://github.com/wsz987/dsh-channels.git
+cd dsh-channels
+pnpm install
+pnpm build
+pnpm channels              # 构建产物直链到 dsh profile（symlink 指源码）
+pnpm web:debug             # 启动 dsh web
 ```
 
-- 渠道名自动识别（新增一行即生效，别名 `wx` → weixin、`feishu` → lark）；未选渠道自动禁用
+- `pnpm channels` 不带参 = 全装；可指定渠道（`pnpm channels weixin`、`pnpm channels weixin qq`），渠道名自动识别（别名 `wx` → weixin、`feishu` → lark），未选渠道自动禁用
+- 改完代码 `pnpm build` + 重启即生效
 - `web:debug`：`dsh web` + 调试日志，落盘 `dsh-web.log`
 
 ## 🔌 渠道配置与登录
 
-| 渠道 | 必需配置 | 登录方式 |
+| 渠道 | 配置 | 配置方式 |
 | --- | --- | --- |
-| **微信** | 无需配置 | 通过 Web 面板或 `beginAuth()` 触发**扫码**登录（启动不会自动弹码），凭据持久化免登录 |
-| **QQ** | `appId` + `appSecretRef`（默认 `QQBOT_APP_SECRET`） | [QQ 开放平台](https://q.qq.com/qqbot/openclaw/) 创建机器人；AppSecret 存 `ctx.credentials` |
-| **钉钉** | `upstream.clientId` + `clientSecretRef`（默认 `DSH_CHANNEL_DINGTALK_MAIN_CLIENT_SECRET`） | [钉钉开放平台](https://open-dev.dingtalk.com/) 创建应用，取 AppKey / AppSecret |
-| **飞书** | `upstream.appId` + `appSecretRef`（默认 `DSH_CHANNEL_LARK_MAIN_APP_SECRET`） | [飞书开放平台](https://open.feishu.cn/) 创建应用，取 AppId / AppSecret |
+| **微信** | 无 | **扫一扫**：扫码即登录，凭据持久化免登录，无其他配置 |
+| **QQ** | **AppID** + **AppSecret** | [QQ 开放平台](https://q.qq.com/qqbot/openclaw/) 创建机器人 → 填写 **AppID** / **AppSecret** |
+| **钉钉** | `clientId` + `clientSecret`（可选） | **扫一扫**，或手动到 [钉钉开放平台](https://open-dev.dingtalk.com/) 创建应用，配置 `clientId` / `clientSecret` |
+| **飞书** | **AppId** + **AppSecret** | 到 [飞书开放平台](https://open.feishu.cn/) 创建应用，配置 **AppId** / **AppSecret**，然后扫一扫创建智能体 |
+
 
 配置通过 profile patch（`cordis.patch.yml`）下发，patch 会**整体替换**目标插件配置，需写全字段；完整示例见 [apps/example/minimal-profile/](apps/example/minimal-profile/)。
 
@@ -111,82 +152,32 @@ pnpm web:debug             # 调试模式启动 dsh web
       # 真实 AppSecret 只存 ctx.credentials
 ```
 
-钉钉 / 飞书的 AppSecret 不再以明文写进 config：真值存 `ctx.credentials`（分别引用 `DSH_CHANNEL_DINGTALK_MAIN_CLIENT_SECRET` / `DSH_CHANNEL_LARK_MAIN_APP_SECRET`），可在 Harness Web「设置 → 渠道」直接填写，或用同名环境变量提供。旧配置里的明文 `clientSecret` / `appSecret` 会在插件启动时一次性迁移到凭据存储并删除明文。
-
-## 📊 Web 可视化（新增）
-
-`channel-web` 为 Harness Web 提供「设置 → 渠道」设置页（随 bundle 自动启用），走统一的控制面 API：
-
-- **`/dsh-channels/api/v2`**（控制面，最终形态）：
-  - `GET /channels` — 渠道状态总览（configured / enabled / mounted / runtime / connection）
-  - `GET /channels/:id/setup` — 动态配置字段描述（Secret 只报是否已配置，绝不返回值或 credential ref）
-  - `PUT /channels/:id/setup` — 一次提交普通配置与 Secret；保存后由 Host 内部自动启动或重挂 Adapter
-  - `POST /channels/:id/auth/sessions` / `GET|DELETE .../sessions/:sid` / `POST .../input` — 仅用于具备真实 Provider Auth 的渠道（当前为微信扫码）
-  - `PATCH /channels/:id/config` / `PUT /channels/:id/credentials/:field` — 兼容的低层保存接口；Web 表单不再逐字段调用
-- **`/dsh-channels/api/v1`** — 兼容层（auth start/poll/input 保留，未来 major 版本移除）
-
-QQ / 钉钉 / 飞书的设置页只显示凭证表单和官方开放平台入口，不创建伪 Auth Session，也不把控制台 URL 渲染成二维码。Web 不暴露 Adapter 的启动、停止、重启按钮或 API；运行时生命周期由 `channel-control` 在 Host 内部负责。状态变更请求仅限 loopback（403 保护），凭据与适配器内部 payload 永不出进程；浏览器永远读不到 Secret 原值。
+钉钉 / 飞书的 AppSecret 无需写进配置文件：在 Harness Web「设置 → 渠道」直接填写，或用环境变量 `DSH_CHANNEL_DINGTALK_MAIN_CLIENT_SECRET` / `DSH_CHANNEL_LARK_MAIN_APP_SECRET` 提供即可。
 
 ## 🧭 渠道总览
 
-内置渠道（均通过契约 / fixtures / SDK 模拟离线测试；live 平台 E2E 需真实应用凭据，尚未执行）：
-
-| 渠道 | 适配器包 | 接入方式 | 能力（传输层）† | 状态 |
-| --- | --- | --- | --- | --- |
-| 微信 | `@wsz987/channel-weixin` | 直连腾讯 iLink（扫码 + 长轮询） | text / image · buffered | ⚠️ Experimental |
-| QQ | `@wsz987/channel-qq` | 官方 SDK | text / image / file / audio / video / markdown* · native(C2C) / buffered | ✅ |
-| 钉钉 | `@wsz987/channel-dingtalk` | 官方 stream SDK | text / image / file / audio / markdown / cards · edit | ✅ |
-| 飞书 | `@wsz987/channel-lark` | 官方 Node SDK | text / image / file / audio / markdown / cards / threads · edit | ✅ |
-
-`*` markdown 由 `markdownSupport` 配置开启。
-
-† **传输层能力 ≠ 模型真实附件**：指适配器能在平台侧收发该媒体；**入站媒体尚未接入 Harness 真实附件**（Harness 附件服务 `ctx.attachments` v1 仅接受图片，且当前只有微信图片走通真实附件路径）。QQ / 钉钉 / 飞书的入站图片 / 文件 / 音频 / 视频进入模型时仍为 `[image: …]` / `[file: …]` 等文本占位符；出站媒体能力见下方「附件 / 媒体接入状态」。
-
-### 📎 附件 / 媒体接入状态
-
-| 渠道 | 入站（用户消息 → 模型） | 出站（回复 → 用户） |
+| 渠道 | 现在能做什么 | 状态 |
 | --- | --- | --- |
-| 微信 | ✅ 图片：CDN 下载解密 → `localData` → Harness 真实附件（`ImageBlock`） | ✅ 图片上传 |
-| QQ | ⏳ 未接入：图片 / 文件 / 音频 / 视频仅携带 URL，模型收到 `[image: url]` 等占位符 | 部分：image / audio / video / file 经 url / dataUri 发送 |
-| 钉钉 | ⏳ 未接入：仅携带 URL，模型收到占位符 | ❌ 仅文本：媒体渲染为 `[image]` / `[file]` 占位符 |
-| 飞书 | ⏳ 未接入：`image_key` / `file_key` 未解析，模型收到 `[image: img_xxx]` 占位符 | 部分：仅纯图片（OpenAPI 上传）；文件 / 音频 / 视频为占位符 |
+| 微信 | 文本对话 · 图片收发 | ✅ |
+| QQ | 文本对话 · 流式回复 | ✅ |
+| 钉钉 | 文本对话 · 流式回复 | ✅ |
+| 飞书 | 文本对话 · 流式回复 | ✅ |
 
-> file / audio / video 的模型侧附件接入需要 Harness 官方扩展（`@deepseek-ai/dsh-attachment` 明确列为 deferred）；各渠道的 file / audio / video 目前仅为**平台传输层**能力，不代表模型已能接收真实附件。接入计划见 [docs/dsh-channels-release-verification-execution-plan.md](docs/dsh-channels-release-verification-execution-plan.md)（R5）。
+> 入站媒体（图片 / 文件 / 音频 / 视频）尚未接入 Harness 真实附件——除微信图片外，其余渠道进入模型时仍为文本占位符；file / audio / video 需等 Harness 官方扩展（见 [接入计划](docs/dsh-channels-release-verification-execution-plan.md)）。
 
-**更多渠道**：`@wsz987/channel-telegram` 已作为扩展性证明存在（未正式支持）；Slack / Discord 等欢迎贡献，接入不改核心。
+**第三方渠道**：如 Telegram 等，待接入。
 
-## 🧠 模型路由（新增）
+## 🧭 工作区隔离
 
-`channel-harness` 支持按对话粒度分发模型，配置在 `channels-harness` 插件上：
+按渠道开辟独立会话空间：默认每个**渠道 / 账号**对应一个独立 Harness Workspace（`<dsh-home>/workspaces/channels/<渠道>/<账号>`，自动创建），各渠道的会话、文件互不串扰。默认配置即可用，无需手动设置；如需自定义，配置在 `channels-harness` 插件上：
 
 ```yaml
 - id: channels-harness
   name: '@wsz987/channel-harness'
   config:
-    agent:
-      default: { preset: ..., provider: ..., model: ..., maxTokens: ... }  # 全局兜底
-    routing:
-      mode: conversation        # global | channel | account | conversation
-      overrides:
-        channel: { qq: { model: ... } }
-        account: { main: { model: ... } }
-        conversation: { "c2c:123": { model: ... } }
+    workspace:
+      mode: channel-account   # channel-account（默认）| host-cwd | disabled
 ```
-
-解析优先级：**conversation > account > channel > `agent.default`**。`mode: global` 只用兜底。
-
-## ⌨️ 渠道指令
-
-任意渠道会话里可直接发斜杠指令，由 Harness 官方 `@deepseek-ai/dsh-commands` 解析执行；**语法合法但未注册的指令会被拦截（"未知指令"），绝不下发模型**：
-
-| 指令 | 说明 | 用法 |
-| --- | --- | --- |
-| `/new` | 为当前会话开启**全新 Harness 会话**（旧会话由 bridge 自动回收） | 直接发送 `/new`，无参数 |
-
-- 首个会话前直接发 `/new` 可跳过普通首条消息的建会话流程
-- 会话运行中执行 `/new` 会被拒绝（"当前会话仍在运行"）
-- 当前渠道会话在 Harness Web 中被归档后，下一条普通消息会自动创建并绑定同一渠道 Workspace 下的新会话；发送 `/new` 也会直接创建新会话，不再写入已归档历史
-- 指令注册在 Agent 作用域，随 Agent 生命周期自动装卸；**新增指令**只需在 `packages/channel-harness/src/commands/` 加一个 factory（见文末二次开发规范）
 
 ## 🛠 开发
 
@@ -217,7 +208,8 @@ pnpm install && pnpm build && pnpm typecheck && pnpm test
 | `packages/channels` | 对外 bundle `@wsz987/dsh-channels`（聚合 patch） |
 | `packages/channel-core` | **Channel Contract**：类型 + `ctx.channels` Service + `defineChannelAdapter` |
 | `packages/channel-harness` | 渠道 ↔ Harness 桥（唯一允许 import Harness API 的地方） |
-| `packages/channel-{weixin,qq,dingtalk,lark}` | 内置渠道适配器（`channel-telegram` 为扩展性示例） |
+| `packages/channel-control` | 控制面：配置 / 凭据 / 扫码授权 / 运行时生命周期 |
+| `packages/channel-{weixin,qq,dingtalk,lark}` | 内置渠道适配器 |
 | `packages/channel-{compat,testkit,verify,web}` | 契约验证 / 测试工具 / Web 可视化 |
 | `templates/channel-adapter` | 新渠道脚手架 |
 
@@ -230,7 +222,12 @@ import { defineChannelAdapter } from '@wsz987/channel-core';
 
 export default defineChannelAdapter({
   id: 'my-channel',
-  capabilities: { text: true, image: true, streaming: 'buffered' },
+  capabilities: {
+    text: true, image: false, file: false,
+    audio: false, video: false, markdown: false,
+    cards: false, reactions: false, threads: false,
+    streaming: 'buffered',   // native | edit | buffered
+  },
   async start(ctx) { /* 连接平台、ctx.emit('message', ...) */ },
   async stop() { /* 幂等清理 */ },
   async send(target, message) { /* 发送 */ },
@@ -240,9 +237,11 @@ export default defineChannelAdapter({
 
 三条红线（详见 [docs/adapter-authoring.md](docs/adapter-authoring.md)）：
 
-1. 适配器**禁止** import Harness Agent API（`ctx.agents...`）
-2. 平台原始 payload 必须映射为结构化 `MessagePart`，**禁止**直塞给模型
-3. 契约表达不了的需求 → 上报 contract gap，**禁止**改 channel-core / channel-harness
+1. **不在 core 里按渠道做特判**——渠道差异由 core 按 `capabilities` 协商处理
+2. 适配器**禁止**调用 Harness Agent API（`ctx.agents...`）
+3. 平台原始 payload 必须映射为结构化 `MessagePart`，**禁止**直塞给模型
+
+契约表达不了的需求 → 上报 contract gap，**禁止**改 channel-core / channel-harness。
 
 ### 新增渠道四步
 

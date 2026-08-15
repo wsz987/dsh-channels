@@ -630,20 +630,22 @@ describe('ChannelHarnessBridge end-to-end', () => {
     const manager = new AgentManager(gateway, silentLogger, 4);
     const router = new AgentRouter(baseConfig());
     const bindingStore = new MemoryBindingStore();
+    const replyContexts = new ReplyContextStore();
     const bridge = new ChannelHarnessBridge({
       config: baseConfig(),
       bindingStore,
       agentManager: manager,
       agentRouter: router,
       getAdapter: () => new FakeAdapter('weixin') as never,
-      replyContexts: new ReplyContextStore(),
+      replyContexts,
       logger: silentLogger,
       ctx: new Context(),
       commandDeps: { startNewSession: async () => {} },
       workspaceResolver: noopResolver,
     });
 
-    const event = makeMessageEvent();
+    const replyRaw = { sessionWebhook: 'https://example.dingtalk.com/session/reply' };
+    const event = makeMessageEvent({ raw: replyRaw });
     await bridge.handleChannelEvent(event);
 
     // New conversation (no binding) -> create, then persist the binding.
@@ -655,6 +657,9 @@ describe('ChannelHarnessBridge end-to-end', () => {
     expect(binding?.route).toEqual({ model: 'weixin-agent' });
     expect(binding?.schemaVersion).toBe(2);
     expect(manager.bindingFor(binding!.sessionId)).toEqual(binding);
+    const messageId = (gateway.followups[0]!.message as { id: string }).id;
+    const context = replyContexts.claim({ sessionId: binding!.sessionId, messageId, turn: 0 });
+    expect(context?.raw).toBe(replyRaw);
   });
 
   it('reuses the same session for the same conversation', async () => {

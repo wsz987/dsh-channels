@@ -176,7 +176,11 @@ export async function saveCredential(
 
 export async function applySetup(
   id: string,
-  input: { config: Record<string, unknown>; credentials: Record<string, string> },
+  input: {
+    config: Record<string, unknown>;
+    credentials: Record<string, string>;
+    reconcile?: boolean;
+  },
 ): Promise<{ configured: boolean; connection: ConnectionState }> {
   return request(`/channels/${encodeURIComponent(id)}/setup`, {
     method: 'PUT',

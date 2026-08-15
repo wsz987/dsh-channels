@@ -33,6 +33,7 @@
     "@deepseek-ai/dsh-credentials": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-settings": "^0.1.0-rc.6",
     "@deepseek-ai/schemastery": "^3.18.1",
+    "zod": "^4.4.3",
     "@wsz987/channel-core": "workspace:*",
     "dingtalk-stream": "2.1.5",
     "@wsz987/channel-control": "workspace:*"

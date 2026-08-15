@@ -1,6 +1,6 @@
 {
   "name": "dsh-channels",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "description": "Harness-native Channel SDK for DeepSeek Harness (DSH Bundle + Channel Core + Adapters)",
   "type": "module",

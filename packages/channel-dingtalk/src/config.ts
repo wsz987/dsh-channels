@@ -45,8 +45,8 @@ export interface DingTalkCardConfig {
  * Upstream driver selection.
  *
  * - `'sdk'`     — inbound via the official `dingtalk-stream` SDK (WebSocket
- *                stream mode). Outbound (message send / AI card) still rides
- *                the HTTP transport against `baseUrl` in this iteration.
+ *                stream mode); outbound uses the message-scoped
+ *                `sessionWebhook` and DingTalk's official AI Card OpenAPI.
  * - `'gateway'` — inbound via the self-hosted HTTP gateway long-poll driver
  *                (legacy protocol-level integration; outbound unchanged).
  */
@@ -68,10 +68,8 @@ export interface DingTalkConfig {
   /** Account id within the dingtalk channel (defaults to 'main'). */
   accountId: string;
   /**
-   * Base URL of the HTTP upstream. In 'gateway' mode this is the self-hosted
-   * gateway that owns inbound long-polling AND the outbound endpoints. In
-   * 'sdk' mode inbound comes from the official SDK and this base is used only
-   * for outbound HTTP calls (message send / AI card) through the transport.
+   * Base URL of the self-hosted HTTP upstream (legacy gateway mode only).
+   * SDK mode ignores this value and calls DingTalk's official endpoints.
    */
   baseUrl: string;
   /** Per-request timeout. */

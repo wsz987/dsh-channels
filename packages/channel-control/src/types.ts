@@ -164,6 +164,13 @@ export interface ChannelSetupDescriptor {
 export interface ChannelSetupInput {
   config: Record<string, unknown>;
   credentials: Record<string, string>;
+  /**
+   * Whether a successful save immediately reconciles the channel runtime.
+   * Defaults to true. Interactive authorization can persist prerequisite
+   * credentials first, then start the provider auth flow without mounting an
+   * adapter that is not authorized yet.
+   */
+  reconcile?: boolean;
 }
 
 /** Result of saving setup and reconciling the channel runtime. */

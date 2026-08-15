@@ -8,7 +8,7 @@
  *
  * The upstream driver is selected by `config.upstream.mode`:
  * - 'sdk'     → `DingTalkStreamUpstream`: inbound via the official
- *   `dingtalk-stream` SDK, outbound delegated to the HTTP driver. The stream
+ *   `dingtalk-stream` SDK, outbound via DingTalk's official HTTP APIs. The stream
  *   client comes from `deps.sdkClient` / `deps.sdkClientFactory`, defaulting
  *   to a real `DWClient` built from `upstream.clientId` (AppKey) and the
  *   resolved AppSecret at start time (missing credentials fail start loudly).
@@ -38,6 +38,7 @@ import { DWClient } from 'dingtalk-stream';
 import type { DingTalkConfig } from './config.js';
 import { FetchTransport, type HttpTransport } from './transport.js';
 import { HttpDingTalkUpstream, type DingTalkUpstream } from './upstream.js';
+import { DingTalkOfficialUpstream } from './official-upstream.js';
 import {
   DingTalkStreamUpstream,
   type DingTalkStreamClient,
@@ -201,9 +202,14 @@ export class DingTalkAdapter implements ChannelAdapter {
       this.upstream = httpUpstream;
       return;
     }
+    const officialUpstream = new DingTalkOfficialUpstream({
+      transport: this.transport,
+      clientId: this.config.upstream.clientId,
+      clientSecret: this.deps.clientSecret,
+    });
     const options: DingTalkStreamUpstreamOptions = {
       client: this.resolveStreamClient(),
-      outbound: httpUpstream,
+      outbound: officialUpstream,
       onConnected: () => this.markConnected(),
     };
     this.upstream = new DingTalkStreamUpstream(options);
@@ -318,7 +324,11 @@ function createDefaultDWClient(
       'dingtalk upstream mode "sdk" requires resolved clientId and clientSecret credentials',
     );
   }
-  return new DWClient({ clientId, clientSecret });
+  const client = new DWClient({ clientId, clientSecret, keepAlive: false });
+  // The adapter owns retry/backoff. The SDK otherwise swallows a failed
+  // connection and retries independently, which makes health unreliable.
+  client.getConfig().autoReconnect = false;
+  return client;
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {

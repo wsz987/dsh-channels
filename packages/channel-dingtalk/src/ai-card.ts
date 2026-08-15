@@ -57,6 +57,8 @@ export class DingTalkCardReply implements ReplyHandle {
 
   private readonly now: () => number;
   private queue: Promise<void> = Promise.resolve();
+  /** Card API/template failures fall back to one final sessionWebhook text reply. */
+  private cardUnavailable = false;
 
   constructor(private readonly options: DingTalkCardReplyOptions) {
     this.now = options.now ?? Date.now;
@@ -99,9 +101,13 @@ export class DingTalkCardReply implements ReplyHandle {
         await this.options.upstream.updateCard(this.cardId, this.text);
         this.record('update', this.text);
       }
+      if (this.cardUnavailable && this.text) {
+        await this.options.upstream.sendText(this.options.target, this.text);
+        this.record('update', this.text);
+      }
       this.status = 'finished';
       if (this.cardId) {
-        await this.options.upstream.finishCard(this.cardId);
+        await this.options.upstream.finishCard(this.cardId, this.text);
         this.record('finished', this.text);
       } else {
         this.record('finished', undefined);
@@ -141,18 +147,25 @@ export class DingTalkCardReply implements ReplyHandle {
     }
     if (!this.options.createOnFirstDelta) return; // buffer until finish
     await this.createCard();
+    if (this.cardUnavailable) return;
     await this.options.upstream.updateCard(this.cardId!, this.text);
     this.record('update', this.text);
   }
 
   private async createCard(): Promise<void> {
-    const result = await this.options.upstream.createCard(
-      this.options.target.conversationId,
-      this.text,
-    );
-    this.cardId = result.cardId;
-    this.status = 'active';
-    this.record('created', this.text);
+    if (this.cardUnavailable) return;
+    try {
+      const result = await this.options.upstream.createCard(this.options.target, this.text);
+      this.cardId = result.cardId;
+      this.status = 'active';
+      this.record('created', this.text);
+    } catch (error) {
+      // A card may be disabled for an otherwise valid bot. The session webhook
+      // can still deliver the completed answer, so defer that fallback to
+      // finish() rather than losing the whole Harness reply.
+      this.cardUnavailable = true;
+      this.options.logger.warn('[channel-dingtalk] AI Card unavailable; falling back to text', error);
+    }
   }
 
   private record(kind: DingTalkCardUpdate['kind'], text?: string, error?: unknown): void {

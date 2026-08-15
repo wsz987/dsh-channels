@@ -39,6 +39,11 @@ export const inject: string[] = ['channels', 'credentials'];
 
 export { Config, LARK_APP_SECRET_REF };
 export { createLarkDefinition, type LarkCredentialSeam, type CreateLarkDefinitionOptions } from './definition.js';
+export {
+  beginLarkDeviceAuthorization,
+  pollLarkDeviceAuthorization,
+  type LarkDeviceAuthorizationOptions,
+} from './auth/device-authorization.js';
 export { LarkAdapter, resolveDomain, type LarkAdapterDeps } from './adapter.js';
 export { LarkCardReply, type LarkCardStatus, type LarkCardUpdate } from './card.js';
 export { InboundProcessor } from './inbound.js';

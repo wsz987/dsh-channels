@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Context } from '@deepseek-ai/cordis';
 import { TOPIC_ROBOT } from 'dingtalk-stream';
 import { ChannelService, ChannelError, type MessageReceived } from '@wsz987/channel-core';
-import { createTestContext } from '@wsz987/channel-testkit';
+import { createTestContext, makeChannelTarget } from '@wsz987/channel-testkit';
 import {
   DingTalkStreamUpstream,
   HttpDingTalkUpstream,
@@ -141,13 +141,20 @@ function streamUpstream(client: DingTalkStreamClient, outbound: DingTalkUpstream
 
 describe('toGatewayRaw (SDK message → gateway raw shape)', () => {
   it('maps a text robot message to the gateway raw shape', () => {
-    const raw = toGatewayRaw(robotDownstream());
+    const raw = toGatewayRaw(robotDownstream({
+      conversationType: '2',
+      sessionWebhook: 'https://example.dingtalk.com/session/reply',
+      robotCode: 'ding-app',
+    }));
     expect(raw).toEqual({
       type: 'text',
       msgId: 'msg-1',
       eventId: 'evt-1',
       senderId: 'user_123',
       conversationId: 'conv_456',
+      conversationType: '2',
+      sessionWebhook: 'https://example.dingtalk.com/session/reply',
+      robotCode: 'ding-app',
       content: 'hello sdk',
     });
   });
@@ -369,7 +376,7 @@ describe('DingTalkStreamUpstream outbound (delegated to the HTTP driver)', () =>
     const http = new HttpDingTalkUpstream({ transport, longPollTimeoutMs: 1000 });
     const upstream = streamUpstream(new FakeStreamClient(), http);
 
-    const result = await upstream.sendText('conv_456', 'hello');
+    const result = await upstream.sendText({ ...makeChannelTarget(), conversationId: 'conv_456' as never }, 'hello');
     expect(result).toEqual({ id: 'out-1' });
     const call = transport.calls.find((c) => c.path === '/message/send');
     expect(call?.init?.body).toEqual({ to: 'conv_456', type: 'text', content: 'hello' });
@@ -384,7 +391,7 @@ describe('DingTalkStreamUpstream outbound (delegated to the HTTP driver)', () =>
     const http = new HttpDingTalkUpstream({ transport, longPollTimeoutMs: 1000 });
     const upstream = streamUpstream(new FakeStreamClient(), http);
 
-    await expect(upstream.createCard('conv_456', 'hi')).resolves.toEqual({ cardId: 'card-1' });
+    await expect(upstream.createCard({ ...makeChannelTarget(), conversationId: 'conv_456' as never }, 'hi')).resolves.toEqual({ cardId: 'card-1' });
     await upstream.updateCard('card-1', 'hi 2');
     await upstream.finishCard('card-1');
     await upstream.failCard('card-1', 'boom');
@@ -413,7 +420,7 @@ describe('DingTalkStreamUpstream outbound (delegated to the HTTP driver)', () =>
     controller.abort();
     await loop;
 
-    await expect(upstream.sendText('conv_456', 'hi')).rejects.toThrow('outbound exploded');
+    await expect(upstream.sendText({ ...makeChannelTarget(), conversationId: 'conv_456' as never }, 'hi')).rejects.toThrow('outbound exploded');
     expect(JSON.stringify(client.calls)).not.toContain(secret);
     expect(JSON.stringify(transport.calls)).not.toContain(secret);
   });

@@ -4,7 +4,7 @@
  * Maps the DingTalk platform to the stable Channel Contract. Two upstream
  * drivers implement `DingTalkUpstream` behind `config.upstream.mode`:
  * - 'sdk'     — inbound via the official `dingtalk-stream` SDK (WebSocket
- *   stream mode); outbound delegated to the HTTP driver.
+ *   stream mode); outbound via `sessionWebhook` and the AI Card OpenAPI.
  * - 'gateway' — self-hosted HTTP gateway long-poll driver (legacy).
  *
  * Credential model: the DingTalk AppSecret never lives in config. Config only
@@ -30,11 +30,18 @@ export const inject: string[] = ['channels', 'credentials'];
 
 export { Config, DINGTALK_CLIENT_SECRET_REF };
 export { createDingTalkDefinition } from './definition.js';
+export {
+  beginDingTalkDeviceAuth,
+  pollDingTalkDeviceAuth,
+  type DingTalkDeviceAuthOptions,
+  type DingTalkDevicePollResult,
+} from './auth/device-registration.js';
 export { DingTalkAdapter, type DingTalkAdapterDeps } from './adapter.js';
 export { DingTalkCardReply, type DingTalkCardStatus, type DingTalkCardUpdate } from './ai-card.js';
 export { InboundProcessor } from './inbound.js';
 export { OutboundSender } from './outbound.js';
 export { HttpDingTalkUpstream, type CardCreateResult, type DingTalkUpstream } from './upstream.js';
+export { DingTalkOfficialUpstream } from './official-upstream.js';
 export {
   DingTalkStreamUpstream,
   ackRobotMessage,
@@ -66,7 +73,10 @@ export { manifest, type DingTalkManifest } from './manifest.js';
  *    adapter directly, resolving SDK-mode credentials via `ctx.credentials` and
  *    logging a warning instead of throwing when the credential is missing.
  */
-type ChannelControlLike = { definitions: { register(def: unknown): unknown } };
+type ChannelControlLike = {
+  definitions: { register(def: unknown): unknown };
+  runtime?: { restart(channelId: string, accountId?: string): Promise<void> };
+};
 
 export function apply(ctx: Context, config: DingTalkConfig, deps: DingTalkAdapterDeps = {}): void {
   if (!config.enabled) return;
@@ -88,12 +98,28 @@ export function apply(ctx: Context, config: DingTalkConfig, deps: DingTalkAdapte
     // The control plane owns lifecycle: register only, runtime auto-starts.
     const settings = ctx.get('settings') as SettingsProvider | undefined;
     const scope = settings?.register(settingsNamespace('channels-dingtalk'), Config, { base: config });
+    const effectiveConfig = scope?.get() ?? config;
     control.definitions.register(
       createDingTalkDefinition({
-        config: scope?.get() ?? config,
+        config: effectiveConfig,
         deps,
         credentials: ctx.credentials,
         persistSetup: (patch) => scope?.update(patch) ?? Promise.resolve(),
+        onAuthCompleted: control.runtime
+          ? async () => {
+              try {
+                await control.runtime!.restart('dingtalk', effectiveConfig.accountId);
+              } catch (error) {
+                // Provider authorization is complete even if adapter startup
+                // needs attention; keep the public auth session terminal and
+                // expose the startup failure through runtime status.
+                ctx.logger('channel-dingtalk').error(
+                  'dingtalk credentials saved but runtime restart failed',
+                  error,
+                );
+              }
+            }
+          : undefined,
       }),
     );
     return;

@@ -4,7 +4,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { ChannelDefinitionRegistry } from '../../src/definitions/registry.js';
-import { AuthSessionManager } from '../../src/auth/session-manager.js';
+import { AuthSessionManager, MAX_AUTH_SESSION_TTL_MS } from '../../src/auth/session-manager.js';
 import { ControlError } from '../../src/errors.js';
 import type {
   AuthInput,
@@ -71,7 +71,7 @@ describe('AuthSessionManager', () => {
     expect(session.channelId).toBe('weixin');
     expect(session.state).toBe('pending');
     // The public DTO carries qr but never host-only fields.
-    expect(session.qr).toEqual({ kind: 'content', value: 'auth://scan' });
+    expect(session.qr).toEqual({ kind: 'content', value: 'auth://scan', expiresAt: 1000 + MAX_AUTH_SESSION_TTL_MS });
     expect('providerState' in session).toBe(false);
     expect('deviceCode' in session).toBe(false);
   });
@@ -87,6 +87,27 @@ describe('AuthSessionManager', () => {
     expect(manager.size).toBe(1);
     expect(second.id).not.toBe(first.id);
     expect(manager.listIds()).toEqual([second.id]);
+  });
+
+  it('caps every provider QR session and its poll status at three minutes', async () => {
+    const { manager, definition, advance } = setup();
+    definition.beginAuth = vi.fn(async () => makeProviderSession({
+      expiresAt: FAR,
+      qr: { kind: 'content', value: 'auth://long-lived', expiresAt: FAR },
+    }));
+    definition.pollAuth = vi.fn(async (session) => ({
+      state: 'pending' as const,
+      phase: 'waiting-scan' as const,
+      expiresAt: session.expiresAt,
+    }));
+
+    const session = await manager.create('weixin', { method: 'qr' });
+    expect(session.expiresAt).toBe(1000 + MAX_AUTH_SESSION_TTL_MS);
+    expect(session.qr?.expiresAt).toBe(1000 + MAX_AUTH_SESSION_TTL_MS);
+
+    advance(5000);
+    const status = await manager.poll(session.id);
+    expect(status.expiresAt).toBe(1000 + MAX_AUTH_SESSION_TTL_MS);
   });
 
   it('poll before nextPollAt throttles: provider is NOT called', async () => {

@@ -33,7 +33,8 @@ import {
   type SessionSnapshot,
 } from './sanitizer.js';
 
-const DEFAULT_TTL_MS = 5 * 60 * 1000;
+/** Interactive QR/device authorization is deliberately short-lived. */
+export const MAX_AUTH_SESSION_TTL_MS = 3 * 60 * 1000;
 
 export interface AuthSessionManagerOptions {
   registry: ChannelDefinitionRegistry;
@@ -202,10 +203,22 @@ export class AuthSessionManager {
     key: string,
     providerSession: AuthProviderSession,
   ): SessionSnapshot {
-    const interval = providerSession.pollingIntervalMs;
     const now = this.now();
+    const expiresAt = Math.min(
+      providerSession.expiresAt ?? now + MAX_AUTH_SESSION_TTL_MS,
+      now + MAX_AUTH_SESSION_TTL_MS,
+    );
+    const scopedQr = providerSession.qr
+      ? { ...providerSession.qr, expiresAt: Math.min(providerSession.qr.expiresAt ?? expiresAt, expiresAt) }
+      : undefined;
+    const scopedProviderSession: AuthProviderSession = {
+      ...providerSession,
+      expiresAt,
+      qr: scopedQr,
+    };
+    const interval = scopedProviderSession.pollingIntervalMs;
     const initialPhase =
-      providerSession.qr || providerSession.prompt?.kind === 'open-browser'
+      scopedProviderSession.qr || scopedProviderSession.prompt?.kind === 'open-browser'
         ? ('waiting-scan' as const)
         : ('preparing' as const);
     const snapshot: SessionSnapshot = {
@@ -213,19 +226,19 @@ export class AuthSessionManager {
       channelId,
       accountId,
       method: (key.split(':')[2] as AuthMethod) ?? 'qr',
-      provider: providerSession.provider,
+      provider: scopedProviderSession.provider,
       createdAt: now,
-      expiresAt: providerSession.expiresAt ?? now + DEFAULT_TTL_MS,
+      expiresAt,
       pollingIntervalMs: interval,
       nextPollAt: now + interval,
-      deviceCode: providerSession.deviceCode,
+      deviceCode: scopedProviderSession.deviceCode,
       abortController: new AbortController(),
-      providerState: providerSession.providerState,
-      qr: providerSession.qr,
-      prompt: providerSession.prompt,
+      providerState: scopedProviderSession.providerState,
+      qr: scopedProviderSession.qr,
+      prompt: scopedProviderSession.prompt,
       state: 'pending',
       phase: initialPhase,
-      providerSession,
+      providerSession: scopedProviderSession,
     };
     return snapshot;
   }
@@ -244,7 +257,7 @@ export class AuthSessionManager {
     session.state = status.state;
     session.phase = status.phase;
     if (status.prompt) session.prompt = status.prompt;
-    return toPublicStatus(status);
+    return toPublicStatus({ ...status, expiresAt: session.expiresAt });
   }
 
   private lastKnownStatus(session: SessionSnapshot): PublicAuthStatus {

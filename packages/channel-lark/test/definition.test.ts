@@ -111,7 +111,7 @@ describe('lark ChannelDefinition', () => {
     expect(definition.id).toBe('lark');
     expect(definition.enabled).toBe(true);
     expect(definition.autoStart).toBe(true);
-    expect(definition.setup.authMethods).toEqual([]);
+    expect(definition.setup.authMethods).toEqual(['credentials', 'hybrid']);
     // The configured appId deep-links into the Feishu console app page.
     expect(definition.setup.setupUrl).toBe('https://open.feishu.cn/app/cli_abc');
     expect(definition.setup.fields).toHaveLength(2);
@@ -124,8 +124,8 @@ describe('lark ChannelDefinition', () => {
     expect(appSecret).toMatchObject({ kind: 'secret', secret: true, writable: true });
     expect(appSecret?.ref).toBe(LARK_APP_SECRET_REF);
 
-    expect(definition.beginAuth).toBeUndefined();
-    expect(definition.pollAuth).toBeUndefined();
+    expect(definition.beginAuth).toBeTypeOf('function');
+    expect(definition.pollAuth).toBeTypeOf('function');
     expect(definition.submitAuthInput).toBeUndefined();
   });
 

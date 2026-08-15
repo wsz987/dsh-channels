@@ -161,7 +161,7 @@ describe('ChannelControlService', () => {
     await service.runtime.stop('qq');
   });
 
-  it('applySetup saves the whole form and starts the adapter once configured', async () => {
+  it('applySetup can defer runtime reconciliation for an authorization prerequisite', async () => {
     let appId = '';
     const stored = new Map<string, string>();
     const credentials: CredentialSeam = {
@@ -202,13 +202,19 @@ describe('ChannelControlService', () => {
     });
     const { service } = harness([def], credentials);
 
-    const result = await service.applySetup('qq', {
+    const deferred = await service.applySetup('qq', {
       config: { appId: '102345678' },
       credentials: { appSecret: 'secret-value' },
+      reconcile: false,
     });
 
     expect(def.saveConfig).toHaveBeenCalledWith({ appId: '102345678' });
     expect(stored.get('QQBOT_APP_SECRET')).toBe('secret-value');
+    expect(adapter.start).not.toHaveBeenCalled();
+    expect(deferred).toEqual({ configured: true, connection: 'unknown' });
+
+    const result = await service.applySetup('qq', { config: {}, credentials: {} });
+
     expect(adapter.start).toHaveBeenCalledTimes(1);
     expect(result).toEqual({ configured: true, connection: 'connected' });
   });

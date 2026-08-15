@@ -92,7 +92,7 @@ function challengeOf(session: AuthProviderSession): AuthChallenge {
 }
 
 const POLL_INTERVAL_MS = 3000;
-const DEFAULT_EXPIRES_MS = 5 * 60_000;
+const DEFAULT_EXPIRES_MS = 3 * 60_000;
 
 /**
  * Build the Weixin ChannelDefinition. Weixin has no config fields (setup

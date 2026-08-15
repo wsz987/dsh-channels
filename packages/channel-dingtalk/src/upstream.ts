@@ -7,7 +7,9 @@
  *   against the self-hosted gateway. The gateway owns platform credentials;
  *   the adapter never sees or logs them (architecture §21 / red line 3).
  * - `DingTalkStreamUpstream` (stream-upstream.ts) — inbound via the official
- *   `dingtalk-stream` SDK; outbound delegates back to this HTTP driver.
+ *   `dingtalk-stream` SDK; outbound delegates to a separately injected driver.
+ * - `DingTalkOfficialUpstream` (official-upstream.ts) — SDK-mode outbound via
+ *   the message-scoped webhook and DingTalk AI Card OpenAPI.
  *
  * Endpoints (protocol-level, self-hosted gateway):
  * - GET  /stream        — long-poll for inbound payloads
@@ -17,6 +19,7 @@
  * - POST /card/finish   — finalize the card (status 'finished')
  * - POST /card/fail     — mark the card failed (status 'failed')
  */
+import type { ChannelTarget } from '@wsz987/channel-core';
 import type { HttpTransport } from './transport.js';
 
 /** Card create response: the gateway-issued card id. */
@@ -35,16 +38,16 @@ export interface DingTalkUpstream {
   ): Promise<void>;
 
   /** Send a plain text message (buffered fallback). */
-  sendText(to: string, text: string): Promise<unknown>;
+  sendText(target: ChannelTarget, text: string): Promise<unknown>;
 
   /** Create an AI Card in the given conversation with initial content. */
-  createCard(conversationId: string, text: string): Promise<CardCreateResult>;
+  createCard(target: ChannelTarget, text: string): Promise<CardCreateResult>;
 
   /** Update an AI Card's body text. */
   updateCard(cardId: string, text: string): Promise<unknown>;
 
   /** Finalize an AI Card. */
-  finishCard(cardId: string): Promise<unknown>;
+  finishCard(cardId: string, text?: string): Promise<unknown>;
 
   /** Mark an AI Card as failed, optionally with a reason. */
   failCard(cardId: string, reason?: string): Promise<unknown>;
@@ -83,18 +86,18 @@ export class HttpDingTalkUpstream implements DingTalkUpstream {
     }
   }
 
-  sendText(to: string, text: string): Promise<unknown> {
+  sendText(target: ChannelTarget, text: string): Promise<unknown> {
     return this.options.transport.request('/message/send', {
       method: 'POST',
-      body: { to, type: 'text', content: text },
+      body: { to: target.conversationId, type: 'text', content: text },
     });
   }
 
-  createCard(conversationId: string, text: string): Promise<CardCreateResult> {
+  createCard(target: ChannelTarget, text: string): Promise<CardCreateResult> {
     return this.options.transport
       .request('/card/create', {
         method: 'POST',
-        body: { conversationId, text },
+        body: { conversationId: target.conversationId, text },
       })
       .then((raw) => {
         const payload = raw as Partial<CardCreateResult>;

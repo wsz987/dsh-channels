@@ -35,7 +35,8 @@
     "@deepseek-ai/schemastery": "^3.18.1",
     "@wsz987/channel-core": "workspace:*",
     "@larksuiteoapi/node-sdk": "1.73.0",
-    "@wsz987/channel-control": "workspace:*"
+    "@wsz987/channel-control": "workspace:*",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@wsz987/channel-testkit": "workspace:*",

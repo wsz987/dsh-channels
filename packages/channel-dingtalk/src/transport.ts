@@ -46,7 +46,8 @@ export class FetchTransport implements HttpTransport {
     const onOuterAbort = () => controller.abort();
     signal?.addEventListener('abort', onOuterAbort, { once: true });
     try {
-      const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      const url = /^https?:\/\//i.test(path) ? path : `${this.baseUrl}${path}`;
+      const response = await this.fetchImpl(url, {
         method: init.method ?? 'GET',
         headers: { 'content-type': 'application/json', ...init.headers },
         body: init.body !== undefined ? JSON.stringify(init.body) : undefined,

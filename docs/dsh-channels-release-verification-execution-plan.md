@@ -34,7 +34,7 @@
 2. DingTalk Stream 模式缺少官方 ACK。
 3. QQ 没有完全使用统一 Channel runtime resources。
 4. Lark 仍是低层 SDK（出站已官方化，见 §13 R7B），媒体未真正进入 Harness attachment。
-5. DingTalk 的 `sdk` 模式仍然依赖本地 HTTP gateway 做出站（Lark 已消除）。
+5. DingTalk 的 `sdk` 模式已改为 `sessionWebhook` + 官方 AI Card OpenAPI 出站；真实平台 live gate 待验证。
 6. Weixin 真实 live verification 尚未完成。
 7. compatibility manifest 中部分 `versionRange: '*'` 过宽。
 
@@ -112,7 +112,7 @@ Live gates          PASS / 明确标记 Experimental
 | P1 | QQ 统一 AdapterContext | 否，但必须收口 |
 | P1 | Lark media → Harness attachment | 建议 |
 | P1 | Lark domain 配置化 | 建议 |
-| P1 | DingTalk sdk 模式消除隐式 localhost gateway（Lark 已官方化，见 §13 R7B） | 建议 |
+| P1 | DingTalk sdk 模式消除隐式 localhost gateway（已实现，待 live gate） | 建议 |
 | P2 | Lark 高层 Channel SDK 评估/迁移 | 否 |
 | P2 | Weixin source-port drift 对齐 | 否 |
 | P2 | compatibility versionRange 收紧 | 发布前建议完成 |
@@ -1669,7 +1669,7 @@ Implementation Complete
 - [ ] QQ 使用统一 `createAdapterContext`
 - [ ] Lark domain 可配置
 - [ ] Lark inbound image 真正进入 Harness ImageBlock
-- [ ] SDK 模式不再隐式依赖 localhost gateway，或明确重命名为 hybrid（Lark 已官方化，DingTalk 待做）
+- [x] SDK 模式不再隐式依赖 localhost gateway（Lark / DingTalk 均已官方化）
 - [ ] Weixin live gate 通过
 - [ ] Weixin manifest 写入真实 testedVersion / testedCommit
 - [ ] DingTalk / Lark `versionRange: '*'` 收紧

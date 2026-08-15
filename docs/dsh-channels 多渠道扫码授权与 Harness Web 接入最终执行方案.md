@@ -6,11 +6,11 @@
 > **最终运行平台**：DeepSeek Harness
 > **日期**：2026-08-15
 >
-> `openclaw-toolkit` 与 `dsh-channels` **不存在运行时依赖关系**。本方案只参考前者飞书、QQ、钉钉的配置/扫码/轮询/授权 UX 和状态设计，不引入其 Tauri、Rust、OpenClaw Runtime、OpenClaw 配置系统。
+> `openclaw-toolkit` 与 `dsh-channels` **不存在运行时依赖关系**。本方案只参考前者飞书、钉钉的配置/扫码/轮询/授权 UX 和状态设计；QQ 以腾讯云配置指南和腾讯官方 `openclaw-qqbot` 的 AppID/AppSecret 运行时配置为准，不引入其 Tauri、Rust、OpenClaw Runtime、OpenClaw 配置系统。
 >
 > **2026-08-15 源码核验修订**：参考项目并非只把官方控制台 URL 包装成二维码。
-> 微信、钉钉、飞书均存在 Host 可发起并轮询的真实授权流程；QQ 也实现了可轮询的
-> `ptlogin2` 开放平台登录二维码，只是当前参考项目的 QQ 面板没有接回这段已有能力。
+> 微信、钉钉、飞书存在 Host 可发起并轮询的真实授权流程；QQ Bot 的 Web 接入仍以
+> AppID/AppSecret 为运行时凭证，官方仓库中的可选 CLI onboarding 不纳入本项目 Web 授权契约。
 > 四个渠道的前置条件和扫码结果不同，不能统一降级为“凭证表单 + 官方平台链接”，
 > 也不能把“扫码完成”统一解释为“Channel 已连接”。
 
@@ -21,11 +21,14 @@
 | 微信 | 无需 AppID/Secret | 是（iLink QR + long poll） | bot token、bot/user 元数据 | 直接显示“扫码登录”，必要时输入验证码 |
 | 钉钉 | 无需预填 ClientID/Secret | 是（`registration/init → begin → poll`） | `client_id` + `client_secret` | “扫码授权”和“手动填写凭证”二选一；扫码成功后 Host 自动保存凭证 |
 | 飞书/Lark | **必须先提供 App ID + App Secret + domain** | 是（OAuth device authorization + token poll） | 用户授权 token/scope；不是新的 App ID/Secret | 先保存应用凭证，再显示“插件扫码授权”完成增量授权 |
-| QQ | 无需凭证即可生成登录码 | 是（`ptlogin2` QR status） | QQ 开放平台登录状态；**不会返回机器人 AppID/Secret** | 可先扫码登录开放平台，随后创建机器人并手动填写 AppID/Secret |
+| QQ | 必须提供 AppID + AppSecret | 否 | 运行时直接使用机器人凭证 | Web 只显示 AppID/AppSecret 凭证表单和官方开放平台链接 |
 
 因此二维码不能删，而应由统一 `AuthSession` 根据渠道定义编排不同前置步骤。只有钉钉扫码
 可以直接补齐 Channel 的应用凭证；微信扫码生成运行凭据；飞书扫码依赖已保存的应用凭证；
-QQ 扫码只完成开放平台登录，仍需后续凭证表单。
+QQ 不在本项目 Web 中创建扫码 Auth Session；填写 AppID/AppSecret 后由 QQ 官方 SDK 完成运行时鉴权。
+
+所有真实扫码 Auth Session 均由 Host 强制限制为 **3 分钟**：`expiresAt`、浏览器倒计时和轮询
+终止条件使用同一截断后的时限；不因上游声明更长有效期而延长展示或继续轮询。
 >
 > 最终实现必须遵循：
 >
@@ -90,7 +93,7 @@ ChannelControlService
 ```text
 表单
 真实 Provider 授权的二维码 / 倒计时 / 验证码（微信 / 钉钉 / 飞书）
-QQ 开放平台登录二维码 + 后续凭证表单
+QQ AppID/AppSecret 凭证表单 + 官方开放平台入口
 官方开放平台链接（所有需要人工补充配置的渠道）
 只读连接状态
 统一“保存并连接”操作
@@ -333,10 +336,9 @@ DingTalkQrDialog + DingTalkQrState + DingTalkQrApi
 
 ```text
 QQ
-→ Host 生成并轮询 ptlogin2 登录二维码
-→ 登录开放平台成功
-→ 用户创建机器人
+→ 用户在 QQ 开放平台创建机器人
 → 手动填写 AppID/AppSecret
+→ QQ 官方 SDK 运行时鉴权
 
 钉钉
 → Host 发起 registration device flow
@@ -356,15 +358,14 @@ QQ
 
 ```ts
 weixin.setup.authMethods = ['qr'];
-qq.setup.authMethods = ['portal-login', 'credentials'];
+qq.setup.authMethods = ['credentials'];
 dingtalk.setup.authMethods = ['device', 'credentials'];
 lark.setup.authMethods = ['hybrid', 'credentials'];
 ```
 
-其中 `credentials` 表示手动配置路径，不创建轮询 session；`portal-login`、`device`、`hybrid`
-都由 `beginAuth()` / `pollAuth()` 驱动。飞书 `hybrid` 在字段未配置时先进入
-`credentials-required`，保存凭据后才能生成二维码。QQ `portal-login` 成功后也进入
-`credentials-required`，直到机器人 AppID/AppSecret 填写完成。
+其中 `credentials` 表示手动配置路径，不创建轮询 session；`device`、`hybrid`
+由 `beginAuth()` / `pollAuth()` 驱动。飞书 `hybrid` 在字段未配置时先进入
+`credentials-required`，保存凭据后才能生成二维码。QQ 只通过 AppID/AppSecret 配置。
 
 ---
 
@@ -866,8 +867,8 @@ submitAuthInput()
 这是一个很好的起点。
 
 该模型是能力容器，不代表每个渠道都必须声明 AuthMethod。只有 Host 能验证授权进度和结果的
-真实 Provider Auth 才进入 AuthSessionManager；当前内置实现仅为 Weixin QR。QQ、钉钉、飞书
-使用 setup form，不创建 session。
+真实 Provider Auth 才进入 AuthSessionManager；当前内置实现为 Weixin QR、钉钉 device registration 与
+飞书/Lark device authorization。QQ 使用 setup form，不创建 session。
 
 但 M2 Web 管理面需要更丰富的 Host-side auth state。
 
@@ -1944,7 +1945,9 @@ Host 内部启动 / 重挂 dingtalk-stream
 connected
 ```
 
-DingTalk 当前不声明 AuthMethod；控制台登录或创建应用不是本插件可验证的授权协议。
+DingTalk 声明 `device` AuthMethod：Host 执行 `registration/init → begin → poll`，
+扫码成功后把 `client_id` 写入普通配置，把 `client_secret` 写入 `ctx.credentials`，
+随后触发运行时重启；浏览器只收到脱敏的授权状态。
 
 ---
 
@@ -1972,7 +1975,8 @@ Gateway ready
 连接成功
 ```
 
-QQ 不再提供 portal-login Auth Session；官方平台入口是普通链接。
+QQ 只声明 `credentials` AuthMethod：用户在官方开放平台创建机器人后填写 AppID/AppSecret；
+官方平台入口作为普通链接保留，不创建 QQ 登录二维码或 Auth Session。
 
 ---
 
@@ -2483,8 +2487,8 @@ Weixin
 → 保留真实 QR / poll / verification / cancel / regenerate
 
 QQ
-→ portal-login QR / poll
-→ 登录成功后引导创建机器人并填写 AppID/AppSecret
+→ AppID/AppSecret 凭证表单
+→ QQ 官方 SDK 运行时鉴权
 
 DingTalk
 → device registration QR / poll
@@ -2506,8 +2510,8 @@ All
 自动测试：
 
 ```text
-Definition 按渠道声明 portal-login / device / hybrid / credentials
-QQ 登录扫码成功后仍返回 credentials-required
+Definition 按渠道声明 device / hybrid / credentials
+QQ 不创建 Auth Session，只走 AppID/AppSecret 凭证表单
 钉钉扫码成功后自动持久化 clientId/clientSecret，响应不含 Secret
 飞书未配置 AppID/AppSecret 时不能开始 device auth
 飞书 poll 的 accessToken/refreshToken 不进入浏览器响应或日志
@@ -2857,7 +2861,7 @@ Harness Web Setup Wizard
 + generic QR renderer
 
 M6
-QQ portal-login QR + credentials continuation
+QQ AppID/AppSecret credential setup
 + DingTalk registration device flow + automatic credential persistence
 + Lark/Feishu credential-gated device authorization
 + manual setup fallback + official setupUrl
@@ -2911,7 +2915,7 @@ Slack
 - [ ] Weixin 原有真实 QR 登录行为不回退。
 - [ ] QR 支持 URL、内容字符串、data URL。
 - [ ] QR session 支持 TTL / cancel / regenerate / polling throttle。
-- [ ] QQ 可扫码登录开放平台，成功后明确继续提示 AppID/AppSecret，而不误报 Channel 已配置。
+- [ ] QQ 只接受 AppID/AppSecret 凭证配置，不创建扫码 Auth Session。
 - [ ] 钉钉扫码成功后自动保存 clientId/clientSecret，Secret 不经过浏览器。
 - [ ] 飞书/Lark 仅在 AppID/AppSecret 已配置后生成 device authorization 二维码。
 - [ ] QQ / 钉钉 / 飞书仍保留手动凭证配置与官方 `setupUrl` 作为备用路径。
@@ -2976,5 +2980,5 @@ channel-harness
 ```
 
 这套拆法与现有 `dsh-channels` 的 Harness-native 架构是一致的：既保留 Weixin 扫码链路，
-也让 QQ portal login、钉钉 registration device flow、飞书 credential-gated device flow 复用同一套
-Host session / Web renderer，而不会把 `channel-web/routes.ts` 变成第二个业务核心。
+也让钉钉 registration device flow、飞书 credential-gated device flow 复用同一套
+Host session / Web renderer，而 QQ 保持纯凭证设置，不会把 `channel-web/routes.ts` 变成第二个业务核心。

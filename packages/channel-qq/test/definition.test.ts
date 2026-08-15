@@ -105,12 +105,12 @@ class FakeCredentials extends CredentialProvider {
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('createQQDefinition', () => {
-  it('exposes credential fields and the official console without fake auth methods', () => {
+  it('exposes credential fields and the official console', () => {
     const { definition } = makeDefinition();
     expect(definition.id).toBe('qq');
     expect(definition.enabled).toBe(true);
     expect(definition.autoStart).toBe(true);
-    expect(definition.setup.authMethods).toEqual([]);
+    expect(definition.setup.authMethods).toEqual(['credentials']);
     // The configured appId deep-links into the QQ openclaw console.
     expect(definition.setup.setupUrl).toBe('https://q.qq.com/qqbot/openclaw/?appid=dummy-app-id');
     expect(definition.beginAuth).toBeUndefined();

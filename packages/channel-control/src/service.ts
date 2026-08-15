@@ -272,6 +272,11 @@ export class ChannelControlService extends Service {
         return { configured: false, connection: 'unknown' };
       }
 
+      if (input.reconcile === false) {
+        const status = await this.runtime.status(channelId);
+        return { configured: true, connection: status.connection };
+      }
+
       if (running) await this.runtime.restart(channelId, undefined, rollback);
       else await this.runtime.start(channelId);
       const status = await this.runtime.status(channelId);

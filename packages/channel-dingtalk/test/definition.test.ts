@@ -91,7 +91,7 @@ function makeConfig(overrides: Partial<DingTalkConfig> = {}): DingTalkConfig {
 }
 
 describe('createDingTalkDefinition setup descriptor', () => {
-  it('advertises credential fields and the official console without fake auth methods', () => {
+  it('advertises credential fields, device auth, and the official console', () => {
     const def = createDingTalkDefinition({
       config: makeConfig({ enabled: true, upstream: { mode: 'sdk' } }),
       deps: {},
@@ -100,10 +100,10 @@ describe('createDingTalkDefinition setup descriptor', () => {
     expect(def.id).toBe('dingtalk');
     expect(def.enabled).toBe(true);
     expect(def.autoStart).toBe(true);
-    expect(def.setup.authMethods).toEqual([]);
+    expect(def.setup.authMethods).toEqual(['device', 'credentials']);
     expect(def.setup.setupUrl).toBe('https://open-dev.dingtalk.com/#/app');
-    expect(def.beginAuth).toBeUndefined();
-    expect(def.pollAuth).toBeUndefined();
+    expect(def.beginAuth).toBeTypeOf('function');
+    expect(def.pollAuth).toBeTypeOf('function');
     expect(def.submitAuthInput).toBeUndefined();
 
     const byName = Object.fromEntries(def.setup.fields.map((f) => [f.name, f]));

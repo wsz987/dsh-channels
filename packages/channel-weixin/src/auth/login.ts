@@ -83,7 +83,7 @@ export class WeixinQrAuth {
   constructor(options: WeixinQrAuthOptions) {
     this.client = options.client;
     this.now = options.now ?? Date.now;
-    this.expiresInMs = options.expiresInMs ?? 5 * 60_000;
+    this.expiresInMs = options.expiresInMs ?? 3 * 60_000;
   }
 
   /** Current full-fidelity internal state. */

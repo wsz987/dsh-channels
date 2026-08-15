@@ -316,6 +316,9 @@ export class ChannelHarnessBridge {
       context: {
         conversationType: event.conversation.type,
         replyToMessageId: event.message.id,
+        // Platform reply handles such as DingTalk's per-message sessionWebhook
+        // are transient and must travel only with the triggering turn.
+        raw: event.raw,
         runId,
       },
     });
@@ -392,6 +395,7 @@ export class ChannelHarnessBridge {
       accountId: event.accountId,
       conversationId: event.conversation.id,
       conversationType: event.conversation.type,
+      raw: event.raw,
       ...(event.conversation.threadId
         ? { threadId: event.conversation.threadId, replyToMessageId: event.message.id }
         : { replyToMessageId: event.message.id }),

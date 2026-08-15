@@ -23,7 +23,7 @@ export class OutboundSender {
   async send(target: ChannelTarget, message: OutboundMessage): Promise<SendResult> {
     try {
       const payload = toTextPayload(target, message);
-      const response = await this.upstream.sendText(payload.to, payload.content);
+      const response = await this.upstream.sendText(target, payload.content);
       return { delivered: true, raw: response };
     } catch (error) {
       this.logger.error(

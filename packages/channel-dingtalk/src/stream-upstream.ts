@@ -10,10 +10,9 @@
  *
  * OUTBOUND is deliberately delegated: message send / AI Card create/update are
  * HTTP calls, not part of the stream SDK. `DingTalkStreamUpstream` forwards
- * every outbound method to an injected `DingTalkUpstream` (the existing HTTP
- * driver over `HttpTransport`). This split keeps the change small and fully
- * offline-testable; a future iteration can point outbound at the DingTalk
- * OpenAPI base without touching the inbound path.
+ * every outbound method to an injected `DingTalkUpstream`; SDK mode injects
+ * the official `sessionWebhook` / OpenAPI driver, while gateway mode uses its
+ * legacy HTTP driver.
  *
  * Credentials never appear in this module and are never logged. Live
  * verification against a real DingTalk app (AppKey/AppSecret) is a manual
@@ -27,6 +26,7 @@
  * are deliberately NOT acked, so the platform can retry / surface the error.
  */
 import { TOPIC_ROBOT } from 'dingtalk-stream';
+import type { ChannelTarget } from '@wsz987/channel-core';
 import type { CardCreateResult, DingTalkUpstream } from './upstream.js';
 
 /** Downstream headers of a stream message (subset of the SDK shape). */
@@ -69,7 +69,7 @@ export interface DingTalkStreamClient {
 export interface DingTalkStreamUpstreamOptions {
   /** The stream-mode client (real DWClient or injected fake). */
   client: DingTalkStreamClient;
-  /** Outbound delegate: the HTTP driver over the transport (gateway endpoints). */
+  /** Outbound delegate selected by the adapter (official API or legacy gateway). */
   outbound: DingTalkUpstream;
   /** Invoked after the stream connection is established (connection state). */
   onConnected?: () => void;
@@ -81,6 +81,9 @@ interface DingTalkStreamRobotMessage {
   senderStaffId?: string;
   senderId?: string;
   conversationId?: string;
+  conversationType?: string;
+  sessionWebhook?: string;
+  robotCode?: string;
   msgtype?: string;
   text?: { content?: string };
   picture?: { url?: string };
@@ -111,6 +114,9 @@ export function toGatewayRaw(message: DingTalkStreamMessage): Record<string, unk
     eventId: message.headers?.eventId,
     senderId: data.senderStaffId ?? data.senderId,
     conversationId: data.conversationId,
+    conversationType: data.conversationType,
+    sessionWebhook: data.sessionWebhook,
+    robotCode: data.robotCode,
   };
   // Media fields follow the documented robot-message schema (best-effort);
   // the mapper turns them into image/audio/video/file parts.
@@ -188,6 +194,12 @@ export class DingTalkStreamUpstream implements DingTalkUpstream {
       this.options.client.disconnect();
       return;
     }
+    // dingtalk-stream v2 resolves connect() after a failed connection attempt
+    // and schedules its own retry. Do not report a healthy channel until its
+    // actual socket is open.
+    if ((this.options.client as { connected?: unknown }).connected === false) {
+      throw new Error('dingtalk stream connection was not established');
+    }
     this.options.onConnected?.();
     await waitForAbort(signal);
     this.options.client.disconnect();
@@ -207,20 +219,20 @@ export class DingTalkStreamUpstream implements DingTalkUpstream {
     this.listenerRegistered = true;
   }
 
-  sendText(to: string, text: string): Promise<unknown> {
-    return this.options.outbound.sendText(to, text);
+  sendText(target: ChannelTarget, text: string): Promise<unknown> {
+    return this.options.outbound.sendText(target, text);
   }
 
-  createCard(conversationId: string, text: string): Promise<CardCreateResult> {
-    return this.options.outbound.createCard(conversationId, text);
+  createCard(target: ChannelTarget, text: string): Promise<CardCreateResult> {
+    return this.options.outbound.createCard(target, text);
   }
 
   updateCard(cardId: string, text: string): Promise<unknown> {
     return this.options.outbound.updateCard(cardId, text);
   }
 
-  finishCard(cardId: string): Promise<unknown> {
-    return this.options.outbound.finishCard(cardId);
+  finishCard(cardId: string, text?: string): Promise<unknown> {
+    return this.options.outbound.finishCard(cardId, text);
   }
 
   failCard(cardId: string, reason?: string): Promise<unknown> {

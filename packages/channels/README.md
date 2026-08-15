@@ -18,6 +18,58 @@ The bundle patch (`cordis.patch.yml`) inserts the `ChannelService`
 four channel adapters. Every channel can be disabled through its plugin
 config.
 
+## Quick start
+
+```bash
+# 1. add the bundle to a profile
+npx @deepseek-ai/dsh plugin --profile default add @wsz987/dsh-channels
+
+# 2. confirm the merged config inserted the channel plugins
+npx @deepseek-ai/dsh --profile default --dump-config
+
+# 3. start the profile — all four channels load
+npx @deepseek-ai/dsh --profile default
+```
+
+Disable a channel you don't use by setting its plugin `enabled` flag to `false`
+in your profile patch, e.g. `plugins.channels-weixin.enabled = false`.
+See `apps/example/minimal-profile/` in the repository for a reference profile.
+
+## Verify your install
+
+Use a clean profile to confirm the bundle loads end to end (never reuse a dirty
+profile for release validation):
+
+```bash
+# 1. add the bundle to a clean profile (auto-initializes it on first use)
+npx @deepseek-ai/dsh plugin --profile release-validation add @wsz987/dsh-channels
+
+# 2. dump the merged config — verify the channel plugins were inserted
+npx @deepseek-ai/dsh --profile release-validation --dump-config
+
+# 3. start the profile — channels-service / -harness / -control and the four
+#    adapters (plus channels-web) should all load without error
+npx @deepseek-ai/dsh --profile release-validation
+```
+
+## Dependencies
+
+The bundle is a thin entry point. Its npm `dependencies` pull in the rest of the
+channel suite automatically, so **you only ever install `@wsz987/dsh-channels`**:
+
+| Package                  | Role |
+| ------------------------ | ---- |
+| `@wsz987/channel-core`   | Cross-channel contract + `ChannelService` (`ctx.channels`) |
+| `@wsz987/channel-harness`| Harness bridge (`SessionBinding`, `AgentManager`, reply pipeline) |
+| `@wsz987/channel-control`| Config / credentials / auth-session control plane |
+| `@wsz987/channel-web`    | Web dashboard (`Settings > Channels`) for GUI setup |
+| `@wsz987/channel-weixin/qq/dingtalk/lark` | The four channel adapters |
+
+The Web dashboard (`@wsz987/channel-web`) injects the Harness web client
+surfaces (`@deepseek-ai/dsh-client-runtime`, `-locale`, `-ui-settings`,
+`-ui-primitives`), which the Harness itself provides at runtime — nothing extra
+to install for that panel beyond a Harness version that ships them.
+
 ## Individual adapters
 
 Advanced users may install a single adapter:

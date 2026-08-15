@@ -15,6 +15,7 @@ import { useEffect, useState } from 'react';
 import { Button, StateDot, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives';
 import { fetchChannelsV2, type AuthMethod, type ChannelSummary } from './api.js';
 import { ChannelSetupDialog } from './ChannelSetupDialog.js';
+import { channelDisplayName } from './channelNames.js';
 import { RuntimeStatus } from './components/RuntimeStatus.js';
 import { ChannelBrandIcon } from './components/ChannelBrandIcon.js';
 
@@ -27,16 +28,15 @@ export interface ChannelsSectionProps {
 const CARD_IDS = ['weixin', 'qq', 'dingtalk', 'lark'] as const;
 
 interface ChannelMeta {
-  label: string;
   accent: string;
 }
 
 // Accent = brand color, used as a subtle tint behind the card's brand logo.
 const CHANNEL_META: Record<string, ChannelMeta> = {
-  weixin: { label: 'Weixin', accent: '#07c160' },
-  qq: { label: 'QQ', accent: '#1ebafc' },
-  dingtalk: { label: 'DingTalk', accent: '#0089ff' },
-  lark: { label: 'Lark', accent: '#3370ff' },
+  weixin: { accent: '#07c160' },
+  qq: { accent: '#1ebafc' },
+  dingtalk: { accent: '#0089ff' },
+  lark: { accent: '#3370ff' },
 };
 
 interface OpenDialog {
@@ -108,7 +108,7 @@ export function ChannelsSection(props: ChannelsSectionProps) {
       >
         {CARD_IDS.map((id) => {
           const summary = byId(id);
-          const meta = CHANNEL_META[id] ?? { label: id, accent: 'var(--dsw-alias-label-tertiary)' };
+          const meta = CHANNEL_META[id] ?? { accent: 'var(--dsw-alias-label-tertiary)' };
           const hovered = hoverId === id;
           return (
             <div
@@ -142,7 +142,7 @@ export function ChannelsSection(props: ChannelsSectionProps) {
                 <span
                   style={{ fontSize: 14, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}
                 >
-                  {meta.label}
+                  {channelDisplayName(id, t)}
                 </span>
                 {summary && (
                   <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center' }}>

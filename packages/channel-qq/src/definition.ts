@@ -13,10 +13,9 @@
  * structural credential seam and the `QQAdapterDeps` seam (tests inject the
  * `FakeQQSdkClient`).
  *
- * QQ does not expose provider auth through this definition. Users obtain the
- * bot credentials from the official console and submit them through setup.
+ * QQ Bot setup uses the official AppID/AppSecret flow. Optional CLI onboarding
+ * in the upstream plugin is outside this channel Web control-plane contract.
  */
-import { ControlError } from '@wsz987/channel-control';
 import type {
   ChannelAdapter,
   ChannelDefinition,
@@ -24,6 +23,7 @@ import type {
   ConfiguredState,
   ChannelSetupField,
 } from '@wsz987/channel-control';
+import { ControlError } from '@wsz987/channel-control';
 import type { QQConfig } from './config.js';
 import { QQ_APP_SECRET_REF } from './config.js';
 import { QQAdapter, type QQAdapterDeps } from './adapter.js';
@@ -154,7 +154,7 @@ export function createQQDefinition(options: QQDefinitionOptions): ChannelDefinit
       name: 'appSecret',
       kind: 'secret',
       secret: true,
-      configured: Boolean(appSecretRef),
+      configured: false,
       writable: true,
       ref: appSecretRef,
     },
@@ -162,7 +162,7 @@ export function createQQDefinition(options: QQDefinitionOptions): ChannelDefinit
 
   const setup: ChannelSetupDescriptor = {
     fields,
-    authMethods: [],
+    authMethods: ['credentials'],
     setupUrl: qqConsoleUrl(snapshot.appId),
   };
 

@@ -31,10 +31,15 @@ import type {
   ChannelSetupDescriptor,
   ConfiguredState,
 } from '@wsz987/channel-control';
+import { ControlError } from '@wsz987/channel-control';
 import { ChannelError } from '@wsz987/channel-core';
 import type { LarkConfig } from './config.js';
 import { LARK_APP_SECRET_REF } from './config.js';
 import { LarkAdapter, type LarkAdapterDeps } from './adapter.js';
+import {
+  beginLarkDeviceAuthorization,
+  pollLarkDeviceAuthorization,
+} from './auth/device-authorization.js';
 
 /**
  * Structural credential seam used by the definition. Mirrors the tiny slice of
@@ -126,7 +131,7 @@ export function createLarkDefinition(
         ref: appSecretRef(),
       },
     ],
-    authMethods: [],
+    authMethods: ['credentials', 'hybrid'],
     setupUrl: larkConsoleAppUrl(state.upstream.domain, state.upstream.appId),
   };
 
@@ -231,6 +236,20 @@ export function createLarkDefinition(
     saveConfig,
     snapshotConfig: () => snapshotOf(state),
     restoreConfig,
+    async beginAuth(input) {
+      if (input.method !== 'hybrid' && input.method !== 'device') {
+        throw new ControlError('AUTH_NOT_SUPPORTED', 'lark supports device authorization after credentials setup');
+      }
+      const resolved = await credentials.resolve(appSecretRef());
+      return beginLarkDeviceAuthorization({
+        appId: state.upstream.appId ?? '',
+        appSecret: resolved?.value ?? '',
+        domain: state.upstream.domain,
+      });
+    },
+    async pollAuth(session) {
+      return pollLarkDeviceAuthorization(session);
+    },
     createAdapter,
     autoStart: true,
   };

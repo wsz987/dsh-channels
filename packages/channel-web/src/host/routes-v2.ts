@@ -333,6 +333,7 @@ export class ChannelApiV2 {
     const record = root.data;
     const config = record.config ?? {};
     const credentials = record.credentials ?? {};
+    const reconcile = record.reconcile;
 
     const parsedConfig = jsonObjectSchema.safeParse(config);
     if (!parsedConfig.success) {
@@ -346,7 +347,10 @@ export class ChannelApiV2 {
       }
       return badInput('config and credentials must be JSON objects');
     }
-    return { ok: true, value: { config: parsedConfig.data, credentials: parsedCredentials.data } };
+    if (reconcile !== undefined && typeof reconcile !== 'boolean') {
+      return badInput('reconcile must be a boolean when present');
+    }
+    return { ok: true, value: { config: parsedConfig.data, credentials: parsedCredentials.data, reconcile } };
   }
 
   /** POST auth/sessions body: `{ method: AuthMethod, accountId?: string }`. */

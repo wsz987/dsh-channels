@@ -234,7 +234,7 @@ describe('HttpDingTalkUpstream (fake transport)', () => {
 
   it('sendText posts to /message/send with the text payload', async () => {
     transport.route('/message/send', (_init, _signal) => ({ id: 'out-1' }));
-    const result = await upstream().sendText('c1', 'hello');
+    const result = await upstream().sendText({ ...makeChannelTarget(), conversationId: 'c1' as never }, 'hello');
     expect(result).toEqual({ id: 'out-1' });
     const call = transport.calls[0];
     expect(call?.path).toBe('/message/send');
@@ -243,7 +243,7 @@ describe('HttpDingTalkUpstream (fake transport)', () => {
 
   it('createCard returns a cardId from /card/create', async () => {
     transport.route('/card/create', (_init, _signal) => ({ cardId: 'card-1' }));
-    const result = await upstream().createCard('c1', 'hi');
+    const result = await upstream().createCard({ ...makeChannelTarget(), conversationId: 'c1' as never }, 'hi');
     expect(result).toEqual({ cardId: 'card-1' });
     const call = transport.calls[0];
     expect(call?.path).toBe('/card/create');
@@ -388,6 +388,23 @@ describe('DingTalkCardReply (AI Card reply handle)', () => {
     expect(transport.calls.some((c) => c.path === '/card/finish')).toBe(true);
     // No /message/send fallback — the card path is used.
     expect(transport.calls.some((c) => c.path === '/message/send')).toBe(false);
+  });
+
+  it('falls back to one final text reply when AI Card creation is unavailable', async () => {
+    transport.route('/message/send', () => ({ id: 'fallback-1' }));
+    const handle = reply();
+
+    await handle.append('partial');
+    await handle.finish({ text: 'complete answer' });
+
+    expect(handle.status).toBe('finished');
+    expect(transport.calls.filter((call) => call.path === '/card/create')).toHaveLength(1);
+    expect(transport.calls.filter((call) => call.path === '/message/send')).toHaveLength(1);
+    expect(transport.calls.find((call) => call.path === '/message/send')?.init?.body).toEqual({
+      to: makeChannelTarget().conversationId,
+      type: 'text',
+      content: 'complete answer',
+    });
   });
 
   it('fail marks the card failed and records the error', async () => {

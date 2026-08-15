@@ -16,10 +16,16 @@ import {
   type ChannelDefinition,
   type ChannelSetupDescriptor,
   type ConfiguredState,
+  type AuthBeginInput,
 } from '@wsz987/channel-control';
+import { ControlError } from '@wsz987/channel-control';
 import type { DingTalkConfig, DingTalkUpstreamConfig } from './config.js';
 import { DINGTALK_CLIENT_SECRET_REF } from './config.js';
 import { DingTalkAdapter, type DingTalkAdapterDeps } from './adapter.js';
+import {
+  beginDingTalkDeviceAuth,
+  pollDingTalkDeviceAuth,
+} from './auth/device-registration.js';
 
 /** Structural credential seam (matches the channel-control CredentialSeam). */
 export interface DingTalkCredentialSeam {
@@ -27,6 +33,7 @@ export interface DingTalkCredentialSeam {
     ref: string,
   ): Promise<{ value: string; source: string } | undefined>;
   describe(ref: string): Promise<{ configured: boolean; writable: boolean; source?: string }>;
+  set(ref: string, value: string): Promise<void>;
 }
 
 export interface DingTalkDefinitionOptions {
@@ -36,6 +43,8 @@ export interface DingTalkDefinitionOptions {
   credentials: DingTalkCredentialSeam;
   /** Durable store for the non-secret setup field when the host provides one. */
   persistSetup?: (patch: { upstream: Pick<DingTalkConfig['upstream'], 'clientId'> }) => Promise<void>;
+  /** Reconcile the runtime after device registration writes new credentials. */
+  onAuthCompleted?: () => Promise<void>;
 }
 
 /** Non-secret config keys accepted by saveConfig (deep-merged sub-objects). */
@@ -78,7 +87,7 @@ export function createDingTalkDefinition(options: DingTalkDefinitionOptions): Ch
       { name: 'clientId', kind: 'text', secret: false, configured: Boolean(state.upstream.clientId), writable: true },
       { name: 'clientSecret', kind: 'secret', secret: true, configured: false, writable: true, ref: clientSecretRef() },
     ],
-    authMethods: [],
+    authMethods: ['device', 'credentials'],
     setupUrl: dingtalkConsoleUrl(state.upstream.clientId),
   };
 
@@ -88,6 +97,14 @@ export function createDingTalkDefinition(options: DingTalkDefinitionOptions): Ch
       { name: 'clientSecret', kind: 'secret', secret: true, configured: false, writable: true, ref: clientSecretRef() },
     ];
     setup.setupUrl = dingtalkConsoleUrl(state.upstream.clientId);
+  };
+
+  const saveConfig = async (patch: Record<string, unknown>): Promise<void> => {
+    applyPatch(state, patch);
+    refreshSetup();
+    if (patch.clientId !== undefined || isPlainObject(patch.upstream) && patch.upstream.clientId !== undefined) {
+      await options.persistSetup?.({ upstream: { clientId: state.upstream.clientId } });
+    }
   };
 
   return {
@@ -120,12 +137,26 @@ export function createDingTalkDefinition(options: DingTalkDefinitionOptions): Ch
       return { configured: clientIdConfigured && secretDescribed.configured, fields };
     },
 
-    async saveConfig(patch: Record<string, unknown>): Promise<void> {
-      applyPatch(state, patch);
-      refreshSetup();
-      if (patch.clientId !== undefined || isPlainObject(patch.upstream) && patch.upstream.clientId !== undefined) {
-        await options.persistSetup?.({ upstream: { clientId: state.upstream.clientId } });
+    saveConfig,
+
+    async beginAuth(input: AuthBeginInput) {
+      if (input.method !== 'device') {
+        throw new ControlError('AUTH_NOT_SUPPORTED', 'dingtalk supports device authorization or credentials setup');
       }
+      return beginDingTalkDeviceAuth({
+        baseUrl: process.env.DINGTALK_REGISTRATION_BASE_URL,
+        source: process.env.DINGTALK_REGISTRATION_SOURCE,
+      });
+    },
+
+    async pollAuth(session) {
+      const result = await pollDingTalkDeviceAuth(session);
+      if (result.credentials) {
+        await credentials.set(clientSecretRef(), result.credentials.clientSecret);
+        await saveConfig({ clientId: result.credentials.clientId });
+        await options.onAuthCompleted?.();
+      }
+      return result.status;
     },
 
     snapshotConfig: () => cloneConfig(state),

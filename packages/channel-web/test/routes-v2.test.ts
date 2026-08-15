@@ -334,6 +334,23 @@ describe('PUT /channels/:id/setup', () => {
     expect(body).toEqual({ configured: true, connection: 'connected' });
     expect(JSON.stringify(body)).not.toContain('s3cret-value');
   });
+
+  it('forwards an explicit deferred runtime reconciliation request', async () => {
+    const fresh = makeControl();
+    const handler = wireV2(fresh.control);
+    const input = {
+      config: { appId: 'cli_123' },
+      credentials: { appSecret: 's3cret-value' },
+      reconcile: false,
+    };
+    const { status } = await invokeDirect(handler, {
+      method: 'PUT',
+      url: '/dsh-channels/api/v2/channels/qq/setup',
+      body: JSON.stringify(input),
+    });
+    expect(status).toBe(200);
+    expect(fresh.calls.applySetup).toEqual([[KNOWN, input]]);
+  });
 });
 
 describe('auth session lifecycle (doc §32)', () => {

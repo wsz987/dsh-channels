@@ -109,7 +109,7 @@ describe('createWeixinDefinition', () => {
     const def = makeDefinition(adapter);
     const before = Date.now();
     const result = (await def.beginAuth!({ method: 'qr' })) as AuthProviderSession;
-    expect(result.expiresAt).toBeGreaterThanOrEqual(before + 5 * 60_000);
+    expect(result.expiresAt).toBeGreaterThanOrEqual(before + 3 * 60_000);
   });
 
   it('beginAuth throws AUTH_NOT_READY when no adapter is mounted', async () => {
