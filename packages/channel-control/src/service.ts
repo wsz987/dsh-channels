@@ -1,0 +1,277 @@
+/**
+ * [ChannelControlService] — the universal Channel Control Plane mounted at
+ * ctx.channelControl (doc §12–§13, §33, §46).
+ *
+ * Owns the four sub-managers that later waves wire into:
+ * - definition registry (registration order)
+ * - credential access (thin wrappers over the injected structural seam)
+ * - interactive auth session lifecycle (AuthSessionManager)
+ * - runtime mount lifecycle (ChannelRuntimeManager)
+ *
+ * It is deliberately adapter-agnostic: every channel is driven through its
+ * [ChannelDefinition], never through a per-channel conditional.
+ *
+ * The credentials seam is structural ([CredentialSeam]) and injected, so this
+ * package carries no dependency on any concrete credentials implementation.
+ */
+import { Service, type Context } from '@deepseek-ai/cordis';
+import type { ChannelAdapter } from '@wsz987/channel-core';
+import { ChannelDefinitionRegistry } from './definitions/registry.js';
+import { CredentialManager, type CredentialSeam } from './credentials/manager.js';
+import { AuthSessionManager } from './auth/session-manager.js';
+import { ControlError } from './errors.js';
+import { ChannelRuntimeManager } from './runtime/manager.js';
+import type {
+  AuthBeginInput,
+  AuthInput,
+  ChannelDefinition,
+  ChannelSetupDescriptor,
+  ChannelSetupInput,
+  ChannelSetupResult,
+  ChannelSummary,
+  ConfiguredState,
+  InternalAuthSession,
+} from './types.js';
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    channelControl: ChannelControlService;
+  }
+}
+
+export interface ChannelControlServiceOptions {
+  /** Optional registry; created fresh when omitted. */
+  registry?: ChannelDefinitionRegistry;
+  /** The injected credentials seam (structural). */
+  credentials: CredentialSeam;
+  /** Injectable clock for auth (ms since epoch). Defaults to Date.now. */
+  now?: () => number;
+}
+
+const SECRET_SUFFIXES = ['secret', 'Secret', 'token', 'Token'] as const;
+
+/** Whether a config key is a secret field and must be rejected in saveConfig. */
+function isSecretKey(name: string): boolean {
+  return SECRET_SUFFIXES.some((suffix) => name.endsWith(suffix));
+}
+
+export class ChannelControlService extends Service {
+  readonly definitions: ChannelDefinitionRegistry;
+  readonly credentials: CredentialManager;
+  readonly auth: AuthSessionManager;
+  readonly runtime: ChannelRuntimeManager;
+
+  constructor(ctx: Context, options: ChannelControlServiceOptions) {
+    super(ctx, 'channelControl');
+    this.definitions = options.registry ?? new ChannelDefinitionRegistry();
+    this.credentials = new CredentialManager(options.credentials);
+    this.auth = new AuthSessionManager({ registry: this.definitions, now: options.now });
+    this.runtime = new ChannelRuntimeManager({
+      ctx,
+      registry: this.definitions,
+      credentials: options.credentials,
+    });
+    // Doc §27: auto-start configured channels the moment their plugin
+    // registers the definition (channel plugins activate after this service).
+    // A registration that cannot report state or fails to start is logged by
+    // autoStartOne and never throws out of register().
+    this.definitions.onRegister((definition) => {
+      void this.runtime.autoStartOne(definition.id).catch(() => {});
+    });
+  }
+
+  // ---- convenience surface for the future v2 web API (doc §29–§33) --------
+
+  /** Registry + runtime + configured state merged into per-channel rows. */
+  async listChannels(): Promise<ChannelSummary[]> {
+    const rows: ChannelSummary[] = [];
+    for (const definition of this.definitions.list()) {
+      let configured = false;
+      try {
+        configured = (await definition.getConfiguredState()).configured;
+      } catch {
+        configured = false;
+      }
+      const enabled = definition.enabled;
+      const running = this.runtime.isRunning(definition.id);
+      if (running) {
+        const status = await this.runtime.status(definition.id);
+        rows.push({
+          id: definition.id,
+          configured,
+          enabled,
+          mounted: status.mounted,
+          runtime: status.running ? 'running' : 'stopped',
+          connection: status.connection,
+        });
+      } else {
+        rows.push({
+          id: definition.id,
+          configured,
+          enabled,
+          mounted: false,
+          runtime: 'stopped',
+          connection: 'unknown',
+        });
+      }
+    }
+    return rows;
+  }
+
+  async getSetup(channelId: string): Promise<ChannelSetupDescriptor> {
+    const definition = this.definitions.require(channelId);
+    const state = await definition.getConfiguredState();
+    return {
+      authMethods: [...definition.setup.authMethods],
+      setupUrl: definition.setup.setupUrl,
+      fields: definition.setup.fields.map((field) => {
+        const dynamic = state.fields[field.name];
+        return {
+          name: field.name,
+          kind: field.kind,
+          secret: field.secret,
+          configured: dynamic?.configured ?? field.configured,
+          writable: dynamic?.writable ?? field.writable,
+        };
+      }),
+    };
+  }
+
+  async getConfiguredState(channelId: string): Promise<ConfiguredState> {
+    return this.definitions.require(channelId).getConfiguredState();
+  }
+
+  /**
+   * Persist a non-secret config patch for a channel. Secret fields (names
+   * ending in Secret/secret/Token/token, or declared kind:'secret' in the
+   * setup descriptor) are rejected — secret values go only through
+   * credentials.set (doc §30–§31).
+   */
+  async saveConfig(channelId: string, patch: Record<string, unknown>): Promise<void> {
+    const definition = this.definitions.require(channelId);
+    const secretNames = new Set(
+      definition.setup.fields.filter((field) => field.secret).map((field) => field.name),
+    );
+    for (const key of Object.keys(patch)) {
+      if (isSecretKey(key) || secretNames.has(key)) {
+        throw new ControlError(
+          'SECRET_FIELD_REJECTED',
+          `config field '${key}' is a secret; save it through the credentials seam instead`,
+        );
+      }
+    }
+    await definition.saveConfig(patch);
+  }
+
+  /**
+   * Describe one credential field of a channel by its setup field name
+   * (doc §31). Resolves the field's credential ref from the setup descriptor
+   * and describes it via ctx.credentials — the value is never returned.
+   */
+  async describeCredential(
+    channelId: string,
+    fieldName: string,
+  ): Promise<{ configured: boolean; writable: boolean; source?: string }> {
+    const field = this.credentialField(channelId, fieldName);
+    if (field.ref) {
+      const described = await this.credentials.describe(field.ref);
+      return { configured: described.configured, writable: described.writable, source: described.source };
+    }
+    return { configured: false, writable: field.writable };
+  }
+
+  /**
+   * Save one credential field of a channel by its setup field name (doc §31).
+   * The web layer sends only { field, value }; the control plane maps the
+   * field to its credential ref and calls ctx.credentials.set. The value is
+   * never echoed back.
+   */
+  async saveCredential(
+    channelId: string,
+    fieldName: string,
+    value: string,
+  ): Promise<{ configured: boolean; writable: boolean }> {
+    const field = this.credentialField(channelId, fieldName);
+    if (!field.secret) {
+      throw new ControlError(
+        'NOT_A_SECRET_FIELD',
+        `field '${fieldName}' is not a secret; save it through the config endpoint`,
+      );
+    }
+    if (!field.ref) {
+      throw new ControlError(
+        'CREDENTIAL_NOT_SUPPORTED',
+        `field '${fieldName}' has no credential ref`,
+      );
+    }
+    if (!field.writable) {
+      throw new ControlError(
+        'CREDENTIAL_READONLY',
+        `credential '${fieldName}' is read-only (not writable)`,
+      );
+    }
+    if (typeof value !== 'string' || !value) {
+      throw new ControlError('INVALID_CREDENTIAL', 'credential value must be a non-empty string');
+    }
+    await this.credentials.set(field.ref, value);
+    const described = await this.credentials.describe(field.ref);
+    return { configured: described.configured, writable: described.writable };
+  }
+
+  /**
+   * Save a complete setup form and make it effective immediately. The Web
+   * sends one user action; secret and non-secret fields still cross their
+   * dedicated storage seams on the host.
+   */
+  async applySetup(channelId: string, input: ChannelSetupInput): Promise<ChannelSetupResult> {
+    if (Object.keys(input.config).length > 0) {
+      await this.saveConfig(channelId, input.config);
+    }
+    for (const [field, value] of Object.entries(input.credentials)) {
+      await this.saveCredential(channelId, field, value);
+    }
+
+    const configured = await this.getConfiguredState(channelId);
+    if (!configured.configured) {
+      return { configured: false, connection: 'unknown' };
+    }
+
+    await this.runtime.start(channelId);
+    const status = await this.runtime.status(channelId);
+    return { configured: true, connection: status.connection };
+  }
+
+  /** Resolve a setup field of a channel or raise a stable error. */
+  private credentialField(channelId: string, fieldName: string) {
+    const definition = this.definitions.require(channelId);
+    const field = definition.setup.fields.find((f) => f.name === fieldName);
+    if (!field) {
+      throw new ControlError(
+        'UNKNOWN_FIELD',
+        `channel '${channelId}' has no setup field '${fieldName}'`,
+      );
+    }
+    return field;
+  }
+
+  beginAuth(channelId: string, input: AuthBeginInput) {
+    return this.auth.create(channelId, input);
+  }
+
+  pollAuth(sessionId: string) {
+    return this.auth.poll(sessionId);
+  }
+
+  submitAuthInput(sessionId: string, input: AuthInput) {
+    return this.auth.submit(sessionId, input);
+  }
+
+  cancelAuth(sessionId: string) {
+    return this.auth.cancel(sessionId);
+  }
+
+}
+
+// Re-export authored types on the service module for consistency.
+export type { ChannelDefinition, ChannelAdapter, InternalAuthSession };
+export { ControlError };

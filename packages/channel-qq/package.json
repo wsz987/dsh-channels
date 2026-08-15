@@ -33,7 +33,8 @@
     "@deepseek-ai/dsh-credentials": "^0.1.0-rc.6",
     "@deepseek-ai/schemastery": "^3.18.1",
     "@wsz987/channel-core": "workspace:*",
-    "@tencent-connect/qqbot-nodejs": "1.0.4"
+    "@tencent-connect/qqbot-nodejs": "1.0.4",
+    "@wsz987/channel-control": "workspace:*"
   },
   "devDependencies": {
     "@wsz987/channel-testkit": "workspace:*",

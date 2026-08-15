@@ -90,12 +90,18 @@ function makeChannels(adapters: ChannelAdapter[]) {
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => Promise<void> | void;
 
+/**
+ * Drive the real prefix handlers produced by apply() over a fake ctx. apply()
+ * registers both /dsh-channels/api/v1 and /dsh-channels/api/v2; this helper
+ * captures every registered handler by path and returns the v1 handler (or an
+ * arbitrary registered handler when `path` is supplied).
+ */
 function wireHandler(adapters: ChannelAdapter[]): Handler {
-  let captured: Handler | undefined;
+  const handlersByPath = new Map<string, Handler>();
   const channels = makeChannels(adapters);
   const fakeWebServer = {
     register(opts: { kind: string; path: string; handler: Handler }) {
-      captured = opts.handler;
+      handlersByPath.set(opts.path, opts.handler);
       return () => {};
     },
   };
@@ -105,7 +111,8 @@ function wireHandler(adapters: ChannelAdapter[]): Handler {
     },
   };
   apply(fakeCtx as never);
-  if (!captured) throw new Error('handler was not captured');
+  const captured = handlersByPath.get('/dsh-channels/api/v1');
+  if (!captured) throw new Error('v1 handler was not captured');
   return captured;
 }
 
@@ -182,7 +189,6 @@ beforeAll(async () => {
   const addr = server.address() as AddressInfo;
   base = 'http://127.0.0.1:' + addr.port + '/dsh-channels/api/v1';
 });
-
 afterAll(async () => {
   if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
 });

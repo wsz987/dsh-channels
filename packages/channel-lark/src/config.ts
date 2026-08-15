@@ -3,12 +3,21 @@
  *
  * Every deployment-tunable parameter is configurable here — no hardcoded
  * deployment constants. In 'gateway' mode platform credentials live inside the
- * self-hosted HTTP gateway; in 'sdk' mode the Lark AppId/AppSecret are
- * configured here as `upstream.appId` / `upstream.appSecret` and are handed
- * to the official SDK only. Credentials are never logged and never written
- * into fixtures.
+ * self-hosted HTTP gateway; in 'sdk' mode the Lark AppId is a plain config
+ * string (`upstream.appId` — not a secret) while the AppSecret is resolved via
+ * `ctx.credentials` (reference `DSH_CHANNEL_LARK_MAIN_APP_SECRET`). The secret
+ * value never appears in profile config, logs, or fixtures — only its reference
+ * name does.
+ *
+ * Migration note (doc §10 / §52 Task 5): legacy configs may still carry a
+ * plaintext `upstream.appSecret`. That field is deprecated and hidden; the
+ * plugin's apply() performs a one-time migration into ctx.credentials under
+ * `appSecretRef` and strips the plaintext.
  */
 import Schema from '@deepseek-ai/schemastery';
+
+/** Default credential reference name for the Lark AppSecret (web + config default). */
+export const LARK_APP_SECRET_REF = 'DSH_CHANNEL_LARK_MAIN_APP_SECRET';
 
 export interface LarkReconnectConfig {
   enabled: boolean;
@@ -34,23 +43,36 @@ export interface LarkCardConfig {
  * Upstream driver selection.
  *
  * - `'sdk'`     — inbound via the official `@larksuiteoapi/node-sdk`
- *                (WebSocket long-connection). Outbound (message send / media /
- *                editable card) still rides the HTTP transport against
- *                `baseUrl` in this iteration.
+ *                (WebSocket long-connection) AND outbound via the official
+ *                OpenAPI client. No localhost gateway / `baseUrl` is needed.
  * - `'gateway'` — inbound via the self-hosted HTTP gateway long-poll driver
  *                (legacy protocol-level integration; outbound unchanged).
  */
 export interface LarkUpstreamConfig {
   mode: 'sdk' | 'gateway';
-  /** Lark AppId for SDK mode. SECRET — never logged. */
+  /**
+   * Feishu/Lark AppId — a PLAIN config string (not a secret). The web UI writes
+   * it through the config endpoint (doc §30). Defaults to unset.
+   */
   appId?: string;
-  /** Lark AppSecret for SDK mode. SECRET — never logged. */
-  appSecret?: string;
+  /**
+   * Credential reference name for the Lark AppSecret (resolved via
+   * `ctx.credentials`). Defaults to `LARK_APP_SECRET_REF`. Only the
+   * reference name lives in config — the value never appears in profile / git.
+   */
+  appSecretRef?: string;
   /**
    * API domain for SDK mode: 'feishu' | 'lark' | custom base domain.
    * Defaults to 'feishu' (Feishu China).
    */
   domain?: string;
+  /**
+   * @deprecated Migration-only compatibility field (§52 Task 5). Legacy
+   * plaintext configs still parse; apply() migrates the value into
+   * `ctx.credentials` under `appSecretRef` and deletes this field. New
+   * configs must use `appSecretRef`. Never write secret values to config.
+   */
+  appSecret?: string;
 }
 
 export interface LarkConfig {
@@ -58,11 +80,9 @@ export interface LarkConfig {
   /** Account id within the lark channel (defaults to 'main'). */
   accountId: string;
   /**
-   * Base URL of the HTTP upstream. In 'gateway' mode this is the self-hosted
-   * gateway that owns inbound long-polling AND the outbound endpoints. In
-   * 'sdk' mode inbound comes from the official SDK and this base is used only
-   * for outbound HTTP calls (message send / media / editable card) through the
-   * transport.
+   * Base URL of the self-hosted HTTP gateway, used only in 'gateway' mode
+   * (inbound long-polling + outbound endpoints). 'sdk' mode ignores this and
+   * talks to the official Lark OpenAPI instead.
    */
   baseUrl: string;
   /** Per-request timeout. */
@@ -97,9 +117,14 @@ export const Config: Schema<LarkConfig> = Schema.object({
   }),
   upstream: Schema.object({
     mode: Schema.union(['sdk', 'gateway']).default('sdk'),
-    // Secret strings — never logged, never echoed into error messages.
+    // AppId is a plain (non-secret) config string, written via the config endpoint.
     appId: Schema.string(),
-    appSecret: Schema.string(),
+    // Credential reference name only — never the secret value itself.
+    appSecretRef: Schema.string().default(LARK_APP_SECRET_REF),
+    // DEPRECATED migration-only legacy plaintext field: kept so old configs
+    // still parse. apply() migrates its value to credentials a single time and
+    // deletes it. Never written, never read to build the SDK client.
+    appSecret: Schema.string().hidden(),
     // 'feishu' | 'lark' | custom base domain (resolved to the SDK Domain).
     domain: Schema.string().default('feishu'),
   }),

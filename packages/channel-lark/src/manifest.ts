@@ -5,10 +5,9 @@
  * the upgrade pipeline can govern compatibility without re-verifying by hand.
  *
  * Strategy: 'sdk' — inbound rides the official `@larksuiteoapi/node-sdk`
- * (WebSocket long-connection, `im.message.receive_v1`). Outbound (message
- * send / media / editable card) is not part of the WS long-connection event
- * path; it uses the HTTP transport (self-hosted gateway endpoints in this
- * iteration).
+ * (WebSocket long-connection, `im.message.receive_v1`) and outbound rides the
+ * same SDK's OpenAPI client (`im.v1.message.create` / `patch`,
+ * `im.v1.image.create`), so SDK mode needs no localhost gateway (R7B).
  *
  * Status 'tested' is justified by the Channel Contract + fixture tests plus
  * the SDK-mode offline tests (fake WS client, real EventDispatcher) passing

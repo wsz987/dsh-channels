@@ -8,11 +8,13 @@
  *
  * The upstream driver is selected by `config.upstream.mode`:
  * - 'sdk'     → `LarkSdkUpstream`: inbound via the official
- *   `@larksuiteoapi/node-sdk` WS long-connection, outbound delegated to the
- *   HTTP driver. The WS client comes from `deps.sdkClient` /
- *   `deps.sdkClientFactory`, defaulting to a real `WSClient` built from
- *   `upstream.appId/appSecret` at start time (missing credentials fail start
- *   loudly, not construction).
+ *   `@larksuiteoapi/node-sdk` WS long-connection, outbound via the official
+ *   OpenAPI client (`LarkOpenApiOutbound`) — no localhost gateway. The WS
+ *   client comes from `deps.sdkClient` / `deps.sdkClientFactory`, the OpenAPI
+ *   client from `deps.openApiClient` / `deps.openApiClientFactory`, each
+ *   defaulting to a real client built from the RESOLVED `deps.appId` / `deps.appSecret`,
+ *   resolved via ctx.credentials (the adapter never reads secrets from config).
+ *   Missing credentials fail start loudly, not construction.
  * - 'gateway' → `HttpLarkUpstream` over the transport (legacy).
  *
  * Auth is connection-state driven: the upstream driver owns the platform
@@ -32,15 +34,16 @@ import type {
   SendResult,
 } from '@wsz987/channel-core';
 import { ChannelError } from '@wsz987/channel-core';
-import { Domain, WSClient } from '@larksuiteoapi/node-sdk';
+import { Client, Domain, WSClient } from '@larksuiteoapi/node-sdk';
 import type { LarkConfig } from './config.js';
 import { FetchTransport, type HttpTransport } from './transport.js';
-import { HttpLarkUpstream, type LarkUpstream } from './upstream.js';
+import { HttpLarkUpstream, type LarkOutbound, type LarkUpstream } from './upstream.js';
 import {
   LarkSdkUpstream,
   type LarkSdkClient,
   type LarkSdkUpstreamOptions,
 } from './lark-sdk-upstream.js';
+import { LarkOpenApiOutbound, type LarkOpenApiClient } from './openapi-outbound.js';
 import { InboundProcessor } from './inbound.js';
 import { OutboundSender } from './outbound.js';
 import { LarkCardReply } from './card.js';
@@ -49,13 +52,31 @@ import { manifest as larkManifest, type LarkManifest } from './manifest.js';
 export interface LarkAdapterDeps {
   transport?: HttpTransport;
   /**
+   * Resolved Lark AppId for SDK mode (the plugin resolves it via
+   * `ctx.credentials` and hands it in; direct config never carries it).
+   */
+  appId?: string;
+  /**
+   * Resolved Lark AppSecret for SDK mode (resolved via `ctx.credentials` by
+   * the plugin; never present in profile config / logs).
+   */
+  appSecret?: string;
+  /**
    * Pre-built WS long-connection client for SDK mode (offline tests).
    * Overrides `sdkClientFactory`; when neither is given a real `WSClient`
-   * is built from `config.upstream.appId/appSecret` at start time.
+   * is built from `appId`/`appSecret` at start time.
    */
   sdkClient?: LarkSdkClient;
   /** Lazy WS client factory for SDK mode; overrides the default WSClient. */
   sdkClientFactory?: (config: LarkConfig) => LarkSdkClient;
+  /**
+   * Pre-built official OpenAPI client for SDK-mode outbound (offline tests).
+   * Overrides `openApiClientFactory`; when neither is given a real `Client`
+   * is built from `appId`/`appSecret` at start time.
+   */
+  openApiClient?: LarkOpenApiClient;
+  /** Lazy OpenAPI client factory for SDK-mode outbound. */
+  openApiClientFactory?: (config: LarkConfig) => LarkOpenApiClient;
   /** Injectable clock (tests). */
   now?: () => number;
 }
@@ -185,26 +206,38 @@ export class LarkAdapter implements ChannelAdapter {
 
   /** Select and build the upstream driver for the configured mode. */
   private buildUpstream(): void {
-    const httpUpstream = new HttpLarkUpstream({
-      transport: this.transport,
-      longPollTimeoutMs: this.config.longPollTimeoutMs,
-    });
     if (this.config.upstream.mode !== 'sdk') {
-      this.upstream = httpUpstream;
+      this.upstream = new HttpLarkUpstream({
+        transport: this.transport,
+        longPollTimeoutMs: this.config.longPollTimeoutMs,
+      });
       return;
     }
     const options: LarkSdkUpstreamOptions = {
       client: this.resolveSdkClient(),
-      outbound: httpUpstream,
+      outbound: this.resolveOpenApiOutbound(),
       onConnected: () => this.markConnected(),
     };
     this.upstream = new LarkSdkUpstream(options);
   }
 
+  /** Select the official OpenAPI outbound driver for SDK mode. */
+  private resolveOpenApiOutbound(): LarkOutbound {
+    if (this.deps.openApiClient) {
+      return new LarkOpenApiOutbound({ client: this.deps.openApiClient });
+    }
+    if (this.deps.openApiClientFactory) {
+      return new LarkOpenApiOutbound({ client: this.deps.openApiClientFactory(this.config) });
+    }
+    return new LarkOpenApiOutbound({
+      client: createDefaultOpenApiClient(this.deps.appId, this.deps.appSecret, this.config),
+    });
+  }
+
   private resolveSdkClient(): LarkSdkClient {
     if (this.deps.sdkClient) return this.deps.sdkClient;
     if (this.deps.sdkClientFactory) return this.deps.sdkClientFactory(this.config);
-    return createDefaultWSClient(this.config);
+    return createDefaultWSClient(this.deps.appId, this.deps.appSecret, this.config);
   }
 
   private async runReceiveLoop(): Promise<void> {
@@ -293,16 +326,38 @@ export class LarkAdapter implements ChannelAdapter {
   }
 }
 
-/** Build the real SDK WS client from SDK-mode credentials; never logs them. */
-function createDefaultWSClient(config: LarkConfig): LarkSdkClient {
-  const { appId, appSecret } = config.upstream;
+/** Build the real SDK WS client from resolved credentials; never logs them. */
+function createDefaultWSClient(
+  appId: string | undefined,
+  appSecret: string | undefined,
+  config: LarkConfig,
+): LarkSdkClient {
   if (!appId || !appSecret) {
     throw new ChannelError(
       'CHANNEL_ERROR',
-      'lark upstream mode "sdk" requires upstream.appId and upstream.appSecret',
+      'lark upstream mode "sdk" requires resolved appId and appSecret credentials',
     );
   }
   return new WSClient({
+    appId,
+    appSecret,
+    domain: resolveDomain(config.upstream.domain ?? 'feishu'),
+  });
+}
+
+/** Build the real SDK OpenAPI client from resolved credentials; never logs them. */
+function createDefaultOpenApiClient(
+  appId: string | undefined,
+  appSecret: string | undefined,
+  config: LarkConfig,
+): LarkOpenApiClient {
+  if (!appId || !appSecret) {
+    throw new ChannelError(
+      'CHANNEL_ERROR',
+      'lark upstream mode "sdk" requires resolved appId and appSecret credentials',
+    );
+  }
+  return new Client({
     appId,
     appSecret,
     domain: resolveDomain(config.upstream.domain ?? 'feishu'),

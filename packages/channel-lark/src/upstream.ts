@@ -30,16 +30,14 @@ export interface LarkMediaRef {
   alt?: string;
 }
 
-export interface LarkUpstream {
-  /**
-   * Long-poll for inbound payloads until `signal` aborts. Each raw payload is
-   * passed to `onMessage` as received (unstructured — the mapper owns shape).
-   */
-  receive(
-    signal: AbortSignal,
-    onMessage: (raw: unknown) => void,
-  ): Promise<void>;
-
+/**
+ * Outbound-only surface: message send + editable card operations. Both the
+ * legacy HTTP gateway driver (`HttpLarkUpstream`) and the official OpenAPI
+ * driver (`LarkOpenApiOutbound`) implement this. The inbound leg is kept
+ * separate so SDK mode can pair the official WS inbound with the official
+ * OpenAPI outbound — no localhost gateway (release plan R7B).
+ */
+export interface LarkOutbound {
   /** Send a plain text message (buffered fallback). */
   sendText(to: string, text: string): Promise<unknown>;
 
@@ -57,6 +55,18 @@ export interface LarkUpstream {
 
   /** Mark an editable card as failed, optionally with a reason. */
   failCard(cardId: string, reason?: string): Promise<unknown>;
+}
+
+/** Full upstream driver: inbound receive + outbound (extends {@link LarkOutbound}). */
+export interface LarkUpstream extends LarkOutbound {
+  /**
+   * Long-poll for inbound payloads until `signal` aborts. Each raw payload is
+   * passed to `onMessage` as received (unstructured — the mapper owns shape).
+   */
+  receive(
+    signal: AbortSignal,
+    onMessage: (raw: unknown) => void,
+  ): Promise<void>;
 }
 
 export interface HttpLarkUpstreamOptions {

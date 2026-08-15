@@ -90,10 +90,13 @@ const EXPECTED_ITEMS: PatchItem[] = [
   // channel-harness injects the command-plane capabilities: the Harness
   // `commands` registry plus the default-model selection it resolves routes against.
   { id: 'channels-harness', name: '@wsz987/channel-harness', inject: ['channels', 'agents', 'agentDefaultModel', 'commands'] },
-  { id: 'channels-weixin', name: '@wsz987/channel-weixin', inject: ['channels'] },
-  { id: 'channels-qq', name: '@wsz987/channel-qq', inject: ['channels', 'credentials'] },
-  { id: 'channels-dingtalk', name: '@wsz987/channel-dingtalk', inject: ['channels'] },
-  { id: 'channels-lark', name: '@wsz987/channel-lark', inject: ['channels'] },
+  // channel-control is the universal control plane: it must load before the
+  // channel plugins so ctx.channelControl exists when they register definitions.
+  { id: 'channels-control', name: '@wsz987/channel-control/plugin', inject: ['channels', 'credentials'] },
+  { id: 'channels-weixin', name: '@wsz987/channel-weixin', inject: ['channels', 'channelControl'] },
+  { id: 'channels-qq', name: '@wsz987/channel-qq', inject: ['channels', 'credentials', 'channelControl'] },
+  { id: 'channels-dingtalk', name: '@wsz987/channel-dingtalk', inject: ['channels', 'credentials', 'channelControl'] },
+  { id: 'channels-lark', name: '@wsz987/channel-lark', inject: ['channels', 'credentials', 'channelControl'] },
   // The Web client plugin has no module-level `inject` export on its host
   // entry (only `name` + `apply`); the client half declares inject and the
   // settings.section slot, which is not part of the host patch shape.
@@ -104,7 +107,7 @@ describe('DSH bundle patch (cordis.patch.yml)', () => {
   const patchSource = readFileSync(fileURLToPath(PATCH_URL), 'utf8');
   const items = parsePatch(patchSource);
 
-  it('inserts exactly the seven expected plugins, in order, with the right names and inject lists', () => {
+  it('inserts exactly the eight expected plugins, in order, with the right names and inject lists', () => {
     expect(items.map((i) => i.id)).toEqual(EXPECTED_ITEMS.map((i) => i.id));
     expect(items.map((i) => i.name)).toEqual(EXPECTED_ITEMS.map((i) => i.name));
     expect(items.map((i) => i.inject)).toEqual(EXPECTED_ITEMS.map((i) => i.inject));

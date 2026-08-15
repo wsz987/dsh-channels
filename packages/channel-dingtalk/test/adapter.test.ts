@@ -591,7 +591,9 @@ describe('DingTalkAdapter SDK mode (fake stream client)', () => {
 
   function sdkAdapter(client: FakeStreamClient): DingTalkAdapter {
     return new DingTalkAdapter(
-      makeConfig({ upstream: { mode: 'sdk', clientId: 'app-key', clientSecret: 'app-secret' } }),
+      // The AppSecret never lives in config in the ref model; the injected fake
+      // client means no default DWClient is built, so no deps.clientSecret needed.
+      makeConfig({ upstream: { mode: 'sdk', clientId: 'app-key' } }),
       { transport, sdkClient: client, now: () => 1000 },
     );
   }
@@ -658,7 +660,7 @@ describe('DingTalkAdapter SDK mode (fake stream client)', () => {
     const client = new FakeStreamClient();
     const factory = vi.fn(() => client);
     const a = new DingTalkAdapter(
-      makeConfig({ upstream: { mode: 'sdk', clientId: 'k', clientSecret: 's' } }),
+      makeConfig({ upstream: { mode: 'sdk', clientId: 'k' } }),
       { transport, sdkClientFactory: factory, now: () => 1000 },
     );
     await a.start(ctx);
@@ -673,8 +675,9 @@ describe('DingTalkAdapter SDK mode (fake stream client)', () => {
     const client = new FakeStreamClient();
     const secret = 'super-secret-app-secret';
     const a = new DingTalkAdapter(
-      makeConfig({ upstream: { mode: 'sdk', clientId: 'app-key', clientSecret: secret } }),
-      { transport, sdkClient: client, now: () => 1000 },
+      // AppSecret travels via deps.clientSecret (ref model), never in config.
+      makeConfig({ upstream: { mode: 'sdk', clientId: 'app-key' } }),
+      { transport, sdkClient: client, clientSecret: secret, now: () => 1000 },
     );
     await a.start(ctx);
     await vi.waitFor(() => expect(client.connects).toBe(1), { timeout: 2000 });

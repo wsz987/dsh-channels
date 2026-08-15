@@ -239,6 +239,17 @@ deepseek-harness-channels/
 │  │     ├─ version-policy.ts
 │  │     └─ doctor.ts
 │  │
+│  ├─ channel-control/
+│  │  └─ src/
+│  │     ├─ service.ts
+│  │     ├─ plugin.ts
+│  │     ├─ types.ts
+│  │     ├─ definitions/registry.ts
+│  │     ├─ credentials/manager.ts
+│  │     ├─ auth/session-manager.ts
+│  │     ├─ auth/sanitizer.ts
+│  │     └─ runtime/manager.ts
+│  │
 │  ├─ channel-weixin/
 │  │  └─ src/
 │  │     ├─ index.ts
@@ -433,6 +444,72 @@ export function apply(
 规则：
 
 > WebSocket、long-poll、Gateway、heartbeat 等手动资源，统一放在 `ctx.effect()` 生命周期里。
+
+---
+
+# 6.5 通用 Channel Control Plane（`channel-control`）
+
+多渠道配置与 Harness Web 接入的最终形态（见
+`docs/dsh-channels 多渠道扫码授权与 Harness Web 接入最终执行方案.md`）：不按渠道各写一套
+Web 业务代码。只有 Weixin 使用真实 QR Auth Session；QQ、钉钉、飞书使用统一凭证表单和官方控制台入口。
+
+## 6.5.1 职责分层
+
+```text
+channel-core     稳定 Channel Contract（Adapter / Event / Message / Health）
+channel-control  配置 · Credential · Auth Session · Runtime mount（ctx.channelControl）
+channel-web      HTTP API（/api/v1 兼容 + /api/v2 控制面）· Harness Settings UI
+channel-harness  ChannelEvent → Session Binding → Agent → ReplyRouter（不参与扫码）
+```
+
+- `ChannelDefinition`（doc §14）：平台差异的密封点。每个渠道插件在 `apply()` 里向
+  `ctx.channelControl.definitions` 注册自己的 Definition（QQ / DingTalk / Lark / Weixin），
+  控制面通过 `createAdapter()` 决定何时 mount，而不是插件一加载就必须连接（§25）。
+- 未配置的 channel 不会使 Harness Profile 启动失败：`autoStartAll()` 跳过
+  `configured=false` 的定义，失败只记日志（§27）。
+- headless 能力保留：预先在 profile config + `ctx.credentials` 配好的渠道仍然开机自动挂载。
+
+## 6.5.2 Auth Session 模型（§15–§20）
+
+```text
+AuthMethod = qr | device | portal-login | credentials | hybrid
+AuthPhase  = preparing | waiting-scan | scanned | waiting-confirm
+           | verification-required | credentials-required | authorized
+           | expired | failed | cancelled
+AuthState  = pending | authenticated | expired | failed   （M1 兼容）
+```
+
+- 浏览器只拿 `PublicAuthSession`（id / channelId / state / phase / qr / expiresAt / prompt），
+  Secret、token、internal challenge 永不出进程（§18）。
+- `AuthSessionManager`：一个 channel/account/method 默认最多一个 active session；新 session
+  会 cancel 旧 pending session；session id 用 `crypto.randomUUID()`（§19）。
+- 轮询节流由 Host 控制：`nextPollAt` 之前不真正访问 Provider（§20）。
+- QR 是结构化对象 `{ kind: 'content' | 'data-url' | 'external-url', value, expiresAt }`（§17）。
+- Auth Session 只用于平台确实提供、且 Host 能轮询验证的授权流程。当前内置渠道只有 Weixin；
+  QQ / DingTalk / Lark 的 Definition 均声明 `authMethods: []`，官方控制台 URL 通过
+  `setupUrl` 作为普通链接展示，不伪装成 QR 或授权状态机。
+
+## 6.5.3 Runtime 生命周期（§21–§24）
+
+- `mountChannelAdapter`（channel-core）现在返回 `ChannelMountHandle`（Cordis effect disposer，
+  幂等；父 fiber unload 仍自动清理）。
+- `ChannelRuntimeManager`：`Map<ChannelAccountKey, ChannelMountHandle>`，内部支持 start / stop / restart；
+  restart = resolve config → resolve secrets → build candidate adapter → dispose old mount →
+  mount → start → getHealth（§23）。
+- Web 通过一次 `PUT /channels/:id/setup` 提交普通配置与 Secret；Host 分流保存后自动重挂并读取 health。
+- start / stop / restart 不作为 Web 用户操作或公开控制面 API 暴露。
+- 授权完成 ≠ 已连接：最终必须 `adapter.getHealth()` 才算 runtime connected（§40，禁止 4）。
+
+## 6.5.4 凭据边界（§8–§11，§30–§31）
+
+- 配置只携带对机密的**引用**，绝不携带机密本身：`ctx.credentials.resolve/describe/set/unset`。
+- QQ `appSecretRef`、钉钉 `clientSecretRef`（默认 `DSH_CHANNEL_DINGTALK_MAIN_CLIENT_SECRET`）、
+  飞书 `appSecretRef`（默认 `DSH_CHANNEL_LARK_MAIN_APP_SECRET`）。
+- 旧明文 `clientSecret` / `appSecret` 配置一次性迁移到凭据存储并删除明文（§52）。
+- Web 永远读不到 Secret 原值或 credential ref；`GET setup` 只返回动态
+  `{ configured, writable }`，统一保存响应也不 echo Secret（§31）。
+- Weixin 的 bot token 仍走 Channel SecretStore（平台运行期产生的账号凭据），不与部署级
+  AppSecret 混淆（§11）。
 
 通过 `ctx.on()` 注册的 Cordis 事件监听器由框架自动清理。
 
@@ -1669,6 +1746,14 @@ Root package 安装所有渠道 SDK。
 
 ## 红线 9
 
+`channel-web` 直接调用 Harness Agent API（Agent/Session 只允许走 `channel-harness`）。
+
+## 红线 10
+
+浏览器业务层直接接触平台 Secret / deviceCode / token（Web 只允许消费 PublicAuthSession 等净化 DTO）。
+
+## 红线 11
+
 直接依赖 Harness private/internal source，而不是 public package API。
 
 ---
@@ -1685,6 +1770,17 @@ Root package 安装所有渠道 SDK。
          Agent Service                      ChannelService
              │                                   │
              │                            Adapter Registry
+             │                                   │
+             │                        ChannelControlService
+             │                        （channel-control）
+             │                        │ 配置 / Credential
+             │                        │ Auth Session / Runtime
+             │                        │
+             │                        ▼
+             │                  ChannelDefinitions
+             │                  WX / QQ / DingTalk / Lark
+             │                        │
+             │                        ▼
              │                          ┌────┬────┬────┬────┐
              │                          │    │    │    │    │
              │                         WX   QQ   DD   Lark  ...

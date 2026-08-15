@@ -51,6 +51,15 @@ export class QQAdapter implements ChannelAdapter {
   readonly manifest: QQManifest = qqManifest;
   readonly capabilities: ChannelCapabilities;
 
+  /**
+   * Test-only accessor exposing the injected `appSecret` so unit tests can
+   * assert the resolved credential reached the adapter without triggering the
+   * real Tencent client build. Produces no value in any production path.
+   */
+  get testAppSecret(): string | undefined {
+    return this.deps.appSecret;
+  }
+
   private ctx?: ChannelAdapterContext;
   private readonly deps: QQAdapterDeps;
   private readonly now: () => number;

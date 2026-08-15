@@ -6,9 +6,11 @@
  */
 import { type Context } from '@deepseek-ai/cordis';
 import { mountChannelAdapter } from '@wsz987/channel-core';
+import type { ChannelAdapter, ChannelDefinition } from '@wsz987/channel-control';
 import type { WeixinConfig } from './config.js';
 import { Config } from './config.js';
 import { WeixinAdapter, type WeixinAdapterDeps } from './adapter.js';
+import { createWeixinDefinition } from './definition.js';
 
 export const name = 'channel-weixin';
 export const inject: string[] = ['channels'];
@@ -19,6 +21,10 @@ export const inject: string[] = ['channels'];
 
 export { Config };
 export { WeixinAdapter, type WeixinAdapterDeps } from './adapter.js';
+export {
+  createWeixinDefinition,
+  type WeixinDefinitionOptions,
+} from './definition.js';
 export { ILinkClient, type ILinkClientOptions } from './ilink/client.js';
 export {
   buildHeaders,
@@ -108,8 +114,28 @@ export type {
   WeixinInboundMeta,
 } from './ilink/types.js';
 
+type ChannelControlLike = {
+  definitions: { register(d: ChannelDefinition): unknown };
+  runtime?: { adapter(channelId: string): ChannelAdapter | undefined };
+};
+
 export function apply(ctx: Context, config: WeixinConfig, deps: WeixinAdapterDeps = {}): void {
   if (!config.enabled) return;
+  const control = ctx.get('channelControl') as ChannelControlLike | undefined;
+  if (control) {
+    // Control-plane entry (doc §43): register the definition; the control
+    // plane auto-starts it (autoStart) and drives the M1 QR flow through the
+    // mounted adapter.
+    control.definitions.register(
+      createWeixinDefinition({
+        config,
+        deps,
+        getAdapter: () => control.runtime?.adapter('weixin'),
+      }),
+    );
+    return;
+  }
+  // Legacy headless/standalone path (no channel-control): mount as today.
   const adapter = new WeixinAdapter(config, deps);
   mountChannelAdapter(
     ctx,

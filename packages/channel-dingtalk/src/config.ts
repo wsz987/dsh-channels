@@ -3,12 +3,23 @@
  *
  * Every deployment-tunable parameter is configurable here — no hardcoded
  * deployment constants. In 'gateway' mode platform credentials live inside the
- * self-hosted HTTP gateway; in 'sdk' mode the DingTalk AppKey/AppSecret are
- * configured here as `upstream.clientId` / `upstream.clientSecret` and are
- * handed to the official SDK only. Credentials are never logged and never
- * written into fixtures.
+ * self-hosted HTTP gateway; in 'sdk' mode the DingTalk AppKey (clientId) is
+ * configured here as `upstream.clientId` while the AppSecret is resolved
+ * through `ctx.credentials` from the reference `upstream.clientSecretRef`
+ * (default `DSH_CHANNEL_DINGTALK_MAIN_CLIENT_SECRET`) and injected into the
+ * adapter as `deps.clientSecret`. Only the reference name — never the secret
+ * value — lives in config; credentials are never logged and never written into
+ * fixtures.
+ *
+ * A deprecated optional `upstream.clientSecret` field is kept so legacy
+ * plaintext configs still parse. It is migration-only: apply() writes its value
+ * into the credentials seam a single time and deletes it (see index.ts). It is
+ * never written and never read to build the SDK client.
  */
 import Schema from '@deepseek-ai/schemastery';
+
+/** Credential reference name for the DingTalk AppSecret (SDK mode, default). */
+export const DINGTALK_CLIENT_SECRET_REF = 'DSH_CHANNEL_DINGTALK_MAIN_CLIENT_SECRET';
 
 export interface DingTalkReconnectConfig {
   enabled: boolean;
@@ -41,10 +52,15 @@ export interface DingTalkCardConfig {
  */
 export interface DingTalkUpstreamConfig {
   mode: 'sdk' | 'gateway';
-  /** DingTalk AppKey (clientId) for SDK mode. SECRET — never logged. */
+  /** DingTalk AppKey (clientId) for SDK mode. Not a secret — may live in config. */
   clientId?: string;
-  /** DingTalk AppSecret (clientSecret) for SDK mode. SECRET — never logged. */
-  clientSecret?: string;
+  /**
+   * Credential reference name for the DingTalk AppSecret (SDK mode). Only the
+   * reference — never the real secret — is stored here; the value is resolved
+   * via `ctx.credentials` at startup and injected as `deps.clientSecret`.
+   * Defaults to `DSH_CHANNEL_DINGTALK_MAIN_CLIENT_SECRET`.
+   */
+  clientSecretRef?: string;
 }
 
 export interface DingTalkConfig {
@@ -90,8 +106,13 @@ export const Config: Schema<DingTalkConfig> = Schema.object({
   }),
   upstream: Schema.object({
     mode: Schema.union(['sdk', 'gateway']).default('sdk'),
-    // Secret strings — never logged, never echoed into error messages.
+    // The AppKey (clientId) is not a secret and may live in config.
     clientId: Schema.string(),
-    clientSecret: Schema.string(),
+    // Credential reference name — never the secret value itself.
+    clientSecretRef: Schema.string().default(DINGTALK_CLIENT_SECRET_REF),
+    // DEPRECATED migration-only legacy plaintext field: kept so old configs
+    // still parse. apply() migrates its value to credentials a single time and
+    // deletes it. Never written, never read to build the SDK client.
+    clientSecret: Schema.string().hidden(),
   }),
 });

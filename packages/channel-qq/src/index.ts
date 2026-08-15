@@ -11,6 +11,13 @@
  * to the adapter as `deps.appSecret`. The secret value never enters the
  * profile config — only its reference name does (v1.1 §7, QQ-R5).
  *
+ * Since M2B, apply() is channel-control-aware (doc §25/§27/§47): when the
+ * universal Channel Control Plane (ctx.channelControl) is present it registers
+ * the QQ `ChannelDefinition` and lets the plane drive setup / credentials /
+ * auto-start. When channel-control is absent it falls back to the legacy
+ * headless mount — mounting ONLY when configured, and never throwing on an
+ * unconfigured channel.
+ *
  * Streaming is target-aware: C2C with a triggering message id streams natively
  * (replace-semantics full-text); groups are buffered and delivered once at
  * `turn/end`.
@@ -19,15 +26,20 @@ import { type Context } from '@deepseek-ai/cordis';
 import { credentialRef } from '@deepseek-ai/dsh-credentials';
 import { mountChannelAdapter } from '@wsz987/channel-core';
 import type { QQConfig } from './config.js';
-import { Config } from './config.js';
+import { Config, QQ_APP_SECRET_REF } from './config.js';
 import { QQAdapter, type QQAdapterDeps } from './adapter.js';
+import { createQQDefinition } from './definition.js';
+import type { QQDefinitionOptions } from './definition.js';
+import type { CredentialSeam } from './definition.js';
 
 export const name = 'channel-qq';
 export const inject: string[] = ['channels', 'credentials'];
 
-export { Config };
+export { Config, QQ_APP_SECRET_REF };
 export type { QQConfig } from './config.js';
 export { QQAdapter, type QQAdapterDeps } from './adapter.js';
+export { createQQDefinition } from './definition.js';
+export type { CredentialSeam, QQDefinitionOptions } from './definition.js';
 export {
   TencentQQSdkClient,
   FakeQQSdkClient,
@@ -49,14 +61,34 @@ export { manifest, type QQManifest } from './manifest.js';
 
 export function apply(ctx: Context, config: QQConfig, deps: QQAdapterDeps = {}): void {
   if (!config.enabled) return;
-  // Resolve the AppSecret credential before constructing the adapter, then
-  // hand the mount to the shared transactional `mountChannelAdapter`
-  // (channel-core doc §5): register -> start; on start failure abort +
-  // best-effort stop + unregister + rethrow; on unload abort + stop + unregister.
+
+  const control = ctx.get('channelControl') as
+    | { definitions: { register(d: unknown): unknown } }
+    | undefined;
+
+  if (control) {
+    // Universal Channel Control Plane present: register the definition and
+    // let the control plane drive setup/credential/auto-start (doc §25/§27).
+    const credentials = (ctx as Context & { credentials: CredentialSeam }).credentials;
+    control.definitions.register(createQQDefinition({ config, deps, credentials }));
+    return;
+  }
+
+  // Legacy / headless fallback when channel-control is absent. Mount ONLY when
+  // configured: an unconfigured channel logs a warning and returns WITHOUT
+  // throwing, so it can never crash profile startup (doc §25).
+  if (!config.appSecretRef) {
+    ctx.logger.warn(`[channel-qq] no appSecretRef configured; skipping mount`);
+    return;
+  }
+
   ctx.effect(async () => {
     const credential = await ctx.credentials.resolve(credentialRef(config.appSecretRef));
     if (!credential) {
-      throw new Error(`QQ credential "${config.appSecretRef}" is not configured`);
+      ctx.logger.warn(
+        `[channel-qq] QQ credential "${config.appSecretRef}" is not configured; skipping mount`,
+      );
+      return () => {};
     }
 
     const adapter = new QQAdapter(config, { ...deps, appSecret: credential.value });

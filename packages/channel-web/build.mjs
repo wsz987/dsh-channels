@@ -11,10 +11,13 @@
  * package "build" script (`tsc -p tsconfig.json && node build.mjs`). The client
  * half is NOT typechecked by tsc (esbuild strips types).
  *
- * React and react/jsx-runtime are kept as runtime require() calls (the
- * Harness Web runtime provides them); every other bare-specifier import —
- * notably `qrcode`, which the client needs to render QR codes locally — is
- * bundled inline so the client has no undeclared runtime dependency.
+ * React and react/jsx-runtime are kept as runtime require() calls, and
+ * @deepseek-ai/dsh-client-ui-primitives stays external too — all three are
+ * provided by the Harness Web runtime module loader (primitives is registered
+ * under its bare id). Bundling primitives inline would drag in shiki/katex/
+ * markdown (megabytes). Every other bare-specifier import — notably `qrcode`,
+ * which the client needs to render QR codes locally — is bundled inline so the
+ * client has no undeclared runtime dependency.
  */
 import { build } from 'esbuild';
 import { writeFile, rm } from 'node:fs/promises';
@@ -34,10 +37,12 @@ async function buildClient() {
     jsx: 'automatic',
     sourcemap: 'external',
     sourcesContent: true,
-    // Harness provides React; bundle everything else (e.g. qrcode) into client.js.
+    // Harness provides React and the UI primitives; bundle everything else
+    // (e.g. qrcode) into client.js.
     external: [
       'react',
       'react/jsx-runtime',
+      '@deepseek-ai/dsh-client-ui-primitives',
     ],
     outfile: root + '/lib/.client.tmp.js',
     write: false,

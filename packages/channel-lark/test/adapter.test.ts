@@ -34,6 +34,7 @@ import type {
   LarkSdkDispatcher,
   LarkMessageEventData,
 } from '../src/index.ts';
+import type { LarkOpenApiClient } from '../src/index.ts';
 import type { LarkConfig } from '../src/config.ts';
 
 /** Deterministic fake transport: routes keyed by path, records calls. */
@@ -123,6 +124,41 @@ class FakeWsClient implements LarkSdkClient {
     if (!this.dispatcher) throw new Error('client not started');
     return this.dispatcher.invoke(payload, { needCheck: false });
   }
+}
+
+/**
+ * Fake official OpenAPI client for SDK-mode outbound (R7B): records calls,
+ * returns deterministic message/image ids, and can be made to fail `create`.
+ */
+class FakeOpenApiClient implements LarkOpenApiClient {
+  calls: { method: string; payload?: unknown }[] = [];
+  createError?: Error;
+  createResult: { code?: number; data?: { message_id?: string } } = {
+    code: 0,
+    data: { message_id: 'om_out_1' },
+  };
+
+  im = {
+    v1: {
+      message: {
+        create: async (payload: unknown) => {
+          this.calls.push({ method: 'message.create', payload });
+          if (this.createError) throw this.createError;
+          return this.createResult;
+        },
+        patch: async (payload: unknown) => {
+          this.calls.push({ method: 'message.patch', payload });
+          return { code: 0 };
+        },
+      },
+      image: {
+        create: async (payload: unknown) => {
+          this.calls.push({ method: 'image.create', payload });
+          return { image_key: 'img_v2_out' };
+        },
+      },
+    },
+  };
 }
 
 /** Build a flat parsed v1 payload (header + event merged, per the SDK). */
@@ -692,10 +728,10 @@ describe('LarkAdapter SDK mode (fake WS client)', () => {
     transport = new FakeTransport();
   });
 
-  function sdkAdapter(client: FakeWsClient): LarkAdapter {
+  function sdkAdapter(client: FakeWsClient, openApiClient: FakeOpenApiClient = new FakeOpenApiClient()): LarkAdapter {
     return new LarkAdapter(
-      makeConfig({ upstream: { mode: 'sdk', appId: 'cli_appid', appSecret: 'cli_secret' } }),
-      { transport, sdkClient: client, now: () => 1000 },
+      makeConfig({ upstream: { mode: 'sdk' } }),
+      { transport, sdkClient: client, openApiClient, now: () => 1000 },
     );
   }
 
@@ -793,8 +829,8 @@ describe('LarkAdapter SDK mode (fake WS client)', () => {
     const client = new FakeWsClient();
     const factory = vi.fn(() => client);
     const a = new LarkAdapter(
-      makeConfig({ upstream: { mode: 'sdk', appId: 'k', appSecret: 's' } }),
-      { transport, sdkClientFactory: factory, now: () => 1000 },
+      makeConfig({ upstream: { mode: 'sdk' } }),
+      { transport, sdkClientFactory: factory, openApiClient: new FakeOpenApiClient(), now: () => 1000 },
     );
     await a.start(ctx);
     expect(factory).toHaveBeenCalledTimes(1);
@@ -802,28 +838,45 @@ describe('LarkAdapter SDK mode (fake WS client)', () => {
     await a.stop();
   });
 
-  it('never leaks credentials into WS client calls or transport errors', async () => {
+  it('routes SDK-mode outbound through the OpenAPI client, not the gateway transport', async () => {
     const service = new ChannelService(new Context());
     const ctx = createTestContext(service);
     const client = new FakeWsClient();
+    const openApiClient = new FakeOpenApiClient();
+    const a = sdkAdapter(client, openApiClient);
+    await a.start(ctx);
+    await vi.waitFor(() => expect(client.starts).toBe(1), { timeout: 2000 });
+
+    const result = await a.send(makeChannelTarget(), makeOutboundMessage());
+    expect(result.delivered).toBe(true);
+    expect(openApiClient.calls.some((call) => call.method === 'message.create')).toBe(true);
+    // R7B acceptance: SDK mode performs no gateway HTTP calls.
+    expect(transport.calls).toHaveLength(0);
+    await a.stop();
+  });
+
+  it('never leaks credentials into WS client or OpenAPI client calls', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    const client = new FakeWsClient();
+    const openApiClient = new FakeOpenApiClient();
     const secret = 'super-secret-app-secret';
     const a = new LarkAdapter(
-      makeConfig({ upstream: { mode: 'sdk', appId: 'cli_appid', appSecret: secret } }),
-      { transport, sdkClient: client, now: () => 1000 },
+      makeConfig({ upstream: { mode: 'sdk' } }),
+      { transport, sdkClient: client, openApiClient, appId: 'cli_appid', appSecret: secret, now: () => 1000 },
     );
     await a.start(ctx);
     await vi.waitFor(() => expect(client.starts).toBe(1), { timeout: 2000 });
 
     // Outbound errors must not echo credentials either.
-    transport.route('/message/send', () => {
-      throw new Error('outbound exploded');
-    });
+    openApiClient.createError = new Error('outbound exploded');
     await expect(a.send(makeChannelTarget(), makeOutboundMessage())).rejects.toThrow('outbound exploded');
 
     await a.stop();
     expect(JSON.stringify(client.calls)).not.toContain(secret);
     expect(JSON.stringify(client.calls)).not.toContain('cli_appid');
-    expect(JSON.stringify(transport.calls)).not.toContain(secret);
+    expect(JSON.stringify(openApiClient.calls)).not.toContain(secret);
+    expect(JSON.stringify(openApiClient.calls)).not.toContain('cli_appid');
   });
 });
 

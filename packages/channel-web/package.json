@@ -32,7 +32,8 @@
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-ui-settings"
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-primitives"
       ]
     }
   },
@@ -48,13 +49,18 @@
   "dependencies": {
     "@wsz987/channel-core": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "@wsz987/channel-control": "workspace:*"
   },
   "devDependencies": {
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.6",
     "esbuild": "^0.28.2",
     "rimraf": "^6.0.0",
     "typescript": "^5.9.0",
     "vitest": "^3.2.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.6"
   },
   "license": "MIT"
 }

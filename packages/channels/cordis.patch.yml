@@ -21,25 +21,37 @@
         - agentDefaultModel
         - commands
 
+    - id: channels-control
+      name: '@wsz987/channel-control/plugin'
+      inject:
+        - channels
+        - credentials
+
     - id: channels-weixin
       name: '@wsz987/channel-weixin'
       inject:
         - channels
+        - channelControl
 
     - id: channels-qq
       name: '@wsz987/channel-qq'
       inject:
         - channels
         - credentials
+        - channelControl
 
     - id: channels-dingtalk
       name: '@wsz987/channel-dingtalk'
       inject:
         - channels
+        - credentials
+        - channelControl
 
     - id: channels-lark
       name: '@wsz987/channel-lark'
       inject:
         - channels
+        - credentials
+        - channelControl
     - id: channels-web
       name: '@wsz987/channel-web'

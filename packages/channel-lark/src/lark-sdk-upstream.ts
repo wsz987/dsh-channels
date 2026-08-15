@@ -14,10 +14,10 @@
  * OUTBOUND is deliberately delegated: message send / media / editable card
  * create-update are HTTP calls, not part of the WS long-connection event
  * path. `LarkSdkUpstream` forwards every outbound method to an injected
- * `LarkUpstream` (the existing HTTP driver over `HttpTransport`). This
- * bounded split keeps the change small and fully offline-testable; a future
- * iteration can point outbound at the Lark OpenAPI base without touching the
- * inbound path.
+ * `LarkOutbound` — the official OpenAPI driver (`LarkOpenApiOutbound`) in SDK
+ * mode (release plan R7B), or any injected driver in tests. This bounded
+ * split keeps the inbound and outbound legs independently swappable and
+ * fully offline-testable.
  *
  * Credentials never appear in this module (the client is built elsewhere from
  * config) and are never logged. Live verification against a real Lark app
@@ -25,7 +25,7 @@
  * client and drive a real `EventDispatcher` with v1 event envelopes.
  */
 import { EventDispatcher, LoggerLevel } from '@larksuiteoapi/node-sdk';
-import type { CardCreateResult, LarkMediaRef, LarkUpstream } from './upstream.js';
+import type { CardCreateResult, LarkMediaRef, LarkOutbound, LarkUpstream } from './upstream.js';
 
 /** Event type key for inbound message delivery (v1 event). */
 export const MESSAGE_EVENT_KEY = 'im.message.receive_v1';
@@ -57,8 +57,12 @@ export interface LarkSdkClient {
 export interface LarkSdkUpstreamOptions {
   /** The WS long-connection client (real WSClient or injected fake). */
   client: LarkSdkClient;
-  /** Outbound delegate: the HTTP driver over the transport (gateway endpoints). */
-  outbound: LarkUpstream;
+  /**
+   * Outbound delegate. In SDK mode this is the official OpenAPI driver
+   * (`LarkOpenApiOutbound`); tests may inject any `LarkOutbound` (e.g. the
+   * legacy `HttpLarkUpstream`) to observe delegation.
+   */
+  outbound: LarkOutbound;
   /** Invoked after the WS connection is established (connection state). */
   onConnected?: () => void;
 }

@@ -2,7 +2,8 @@
  * @wsz987/channel-core — stable cross-channel contract and Cordis ChannelService.
  *
  * Exports identity types, structured messages, channel events, capabilities,
- * the `ChannelAdapter` contract, `ReplyHandle`, the `ChannelService` (Cordis
+ * the `ChannelAdapter` contract, `ReplyHandle`, the `ChannelMountHandle`
+ * disposer (returned by `mountChannelAdapter`), the `ChannelService` (Cordis
  * Service at `ctx.channels`), error codes, health, storage and secrets.
  *
  * This package never imports Harness Agent APIs and never depends on any

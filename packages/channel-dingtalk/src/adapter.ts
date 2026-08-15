@@ -10,8 +10,11 @@
  * - 'sdk'     → `DingTalkStreamUpstream`: inbound via the official
  *   `dingtalk-stream` SDK, outbound delegated to the HTTP driver. The stream
  *   client comes from `deps.sdkClient` / `deps.sdkClientFactory`, defaulting
- *   to a real `DWClient` built from `upstream.clientId/clientSecret` at
- *   start time (missing credentials fail start loudly).
+ *   to a real `DWClient` built from `upstream.clientId` (AppKey) and the
+ *   resolved AppSecret at start time (missing credentials fail start loudly).
+ *   The AppSecret is resolved via `ctx.credentials` and injected as
+ *   `deps.clientSecret` — it never lives in config and is never read from
+ *   `config.upstream` (mirrors how channel-qq injects `deps.appSecret`).
  * - 'gateway' → `HttpDingTalkUpstream` over the transport (legacy).
  *
  * Auth is connection-state driven: the upstream driver owns the platform
@@ -48,9 +51,15 @@ import { manifest as dingTalkManifest, type DingTalkManifest } from './manifest.
 export interface DingTalkAdapterDeps {
   transport?: HttpTransport;
   /**
+   * Resolved DingTalk AppSecret (SDK mode). Never from config — the plugin
+   * resolves it via `ctx.credentials` (`upstream.clientSecretRef`) and
+   * injects it here. Used only to build the default `DWClient`.
+   */
+  clientSecret?: string;
+  /**
    * Pre-built stream client for SDK mode (offline tests). Overrides
    * `sdkClientFactory`; when neither is given a real `DWClient` is built
-   * from `config.upstream.clientId/clientSecret` at start time.
+   * from `config.upstream.clientId` and `deps.clientSecret` at start time.
    */
   sdkClient?: DingTalkStreamClient;
   /** Lazy stream client factory for SDK mode; overrides the default DWClient. */
@@ -203,7 +212,7 @@ export class DingTalkAdapter implements ChannelAdapter {
   private resolveStreamClient(): DingTalkStreamClient {
     if (this.deps.sdkClient) return this.deps.sdkClient;
     if (this.deps.sdkClientFactory) return this.deps.sdkClientFactory(this.config);
-    return createDefaultDWClient(this.config);
+    return createDefaultDWClient(this.config, this.deps.clientSecret);
   }
 
   private async runReceiveLoop(): Promise<void> {
@@ -292,13 +301,21 @@ export class DingTalkAdapter implements ChannelAdapter {
   }
 }
 
-/** Build the real SDK client from SDK-mode credentials; never logs them. */
-function createDefaultDWClient(config: DingTalkConfig): DingTalkStreamClient {
-  const { clientId, clientSecret } = config.upstream;
+/**
+ * Build the real SDK client from SDK-mode credentials; never logs them.
+ *
+ * Takes the RESOLVED AppSecret (injected by the plugin via ctx.credentials)
+ * rather than reading it from config. A missing secret fails start loudly.
+ */
+function createDefaultDWClient(
+  config: DingTalkConfig,
+  clientSecret: string | undefined,
+): DingTalkStreamClient {
+  const { clientId } = config.upstream;
   if (!clientId || !clientSecret) {
     throw new ChannelError(
       'CHANNEL_ERROR',
-      'dingtalk upstream mode "sdk" requires upstream.clientId and upstream.clientSecret',
+      'dingtalk upstream mode "sdk" requires resolved clientId and clientSecret credentials',
     );
   }
   return new DWClient({ clientId, clientSecret });

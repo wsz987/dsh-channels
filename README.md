@@ -25,8 +25,8 @@
 # 1. 安装 bundle 到 web profile（首次自动初始化 profile，装完自动合并 cordis.patch.yml）
 npx @deepseek-ai/dsh plugin --profile web add @wsz987/dsh-channels
 
-# 2. 确认合并：应看到 channels-service / channels-harness / channels-web /
-#    channels-weixin / channels-qq / channels-dingtalk / channels-lark
+# 2. 确认合并：应看到 channels-service / channels-harness / channels-control /
+#    channels-web / channels-weixin / channels-qq / channels-dingtalk / channels-lark
 npx @deepseek-ai/dsh --profile web --dump-config
 
 # 3. 启动 Harness（等价于 --profile web）
@@ -40,7 +40,7 @@ DSH profile（web） → @wsz987/dsh-channels bundle → ChannelService（ctx.ch
       → Harness Bridge（channel-harness） → Weixin / QQ / DingTalk / Lark Adapter
 ```
 
-不配置也能启动，完成对应渠道登录后即可收发消息。也可按需只装单渠道（`@wsz987/channel-weixin`、`-qq`、`-dingtalk`、`-lark`）。
+不配置也能启动；微信完成扫码登录，QQ / 钉钉 / 飞书填写平台凭证后即可收发消息。也可按需只装单渠道（`@wsz987/channel-weixin`、`-qq`、`-dingtalk`、`-lark`）。
 
 ### 本机开发（bundle 未发布时）
 
@@ -62,9 +62,9 @@ pnpm web:debug             # 调试模式启动 dsh web
 | 渠道 | 必需配置 | 登录方式 |
 | --- | --- | --- |
 | **微信** | 无需配置 | 通过 Web 面板或 `beginAuth()` 触发**扫码**登录（启动不会自动弹码），凭据持久化免登录 |
-| **QQ** | `appId` + `appSecretRef` | [QQ 开放平台](https://q.qq.com/) 创建机器人；AppSecret 存 `ctx.credentials` |
-| **钉钉** | `upstream.clientId` + `clientSecret` | [钉钉开放平台](https://open.dingtalk.com/) 创建应用，取 AppKey / AppSecret |
-| **飞书** | `upstream.appId` + `appSecret` | [飞书开放平台](https://open.feishu.cn/) 创建应用，取 AppId / AppSecret |
+| **QQ** | `appId` + `appSecretRef`（默认 `QQBOT_APP_SECRET`） | [QQ 开放平台](https://q.qq.com/) 创建机器人；AppSecret 存 `ctx.credentials` |
+| **钉钉** | `upstream.clientId` + `clientSecretRef`（默认 `DSH_CHANNEL_DINGTALK_MAIN_CLIENT_SECRET`） | [钉钉开放平台](https://open.dingtalk.com/) 创建应用，取 AppKey / AppSecret |
+| **飞书** | `upstream.appId` + `appSecretRef`（默认 `DSH_CHANNEL_LARK_MAIN_APP_SECRET`） | [飞书开放平台](https://open.feishu.cn/) 创建应用，取 AppId / AppSecret |
 
 配置通过 profile patch（`cordis.patch.yml`）下发，patch 会**整体替换**目标插件配置，需写全字段；完整示例见 [apps/example/minimal-profile/](apps/example/minimal-profile/)。
 
@@ -83,7 +83,7 @@ pnpm web:debug             # 调试模式启动 dsh web
     dedup: { enabled: true, windowMs: 5000 }
 ```
 
-**钉钉 / 飞书（SDK 模式）：**
+**钉钉（SDK 模式）：**
 
 ```yaml
 - id: channels-dingtalk
@@ -91,32 +91,40 @@ pnpm web:debug             # 调试模式启动 dsh web
   config:
     upstream:
       mode: sdk
-      clientId: "ding-xxx"        # AppKey
-      clientSecret: "SECRET"      # AppSecret
+      clientId: "ding-xxx"        # AppKey（非机密，可写 config）
+      # clientSecretRef 默认 DSH_CHANNEL_DINGTALK_MAIN_CLIENT_SECRET
+      # 真实 AppSecret 只存 ctx.credentials
+```
 
+**飞书（SDK 模式）：**
+
+```yaml
 - id: channels-lark
   name: '@wsz987/channel-lark'
   config:
     upstream:
       mode: sdk
-      appId: "cli_xxx"
-      appSecret: "SECRET"
+      appId: "cli_xxx"            # AppId（非机密，可写 config）
       domain: feishu              # feishu（国内）| lark（海外）
+      # appSecretRef 默认 DSH_CHANNEL_LARK_MAIN_APP_SECRET
+      # 真实 AppSecret 只存 ctx.credentials
 ```
+
+钉钉 / 飞书的 AppSecret 不再以明文写进 config：真值存 `ctx.credentials`（分别引用 `DSH_CHANNEL_DINGTALK_MAIN_CLIENT_SECRET` / `DSH_CHANNEL_LARK_MAIN_APP_SECRET`），可在 Harness Web「设置 → 渠道」直接填写，或用同名环境变量提供。旧配置里的明文 `clientSecret` / `appSecret` 会在插件启动时一次性迁移到凭据存储并删除明文。
 
 ## 📊 Web 可视化（新增）
 
-`channel-web` 为 Harness Web 提供「设置 → 渠道」仪表盘（随 bundle 自动启用），并在 `/dsh-channels/api/v1` 暴露本地 API：
+`channel-web` 为 Harness Web 提供「设置 → 渠道」设置页（随 bundle 自动启用），走统一的控制面 API：
 
-| 路由 | 说明 |
-| --- | --- |
-| `GET /channels` | 渠道状态总览（状态 / 健康 / 能力） |
-| `GET /channels/:id` | 单渠道详情 |
-| `POST /channels/:id/auth/start` | 发起登录挑战（微信出二维码） |
-| `POST /channels/:id/auth/poll` | 轮询扫码状态 |
-| `POST /channels/:id/auth/input` | 提交验证码等输入 |
+- **`/dsh-channels/api/v2`**（控制面，最终形态）：
+  - `GET /channels` — 渠道状态总览（configured / enabled / mounted / runtime / connection）
+  - `GET /channels/:id/setup` — 动态配置字段描述（Secret 只报是否已配置，绝不返回值或 credential ref）
+  - `PUT /channels/:id/setup` — 一次提交普通配置与 Secret；保存后由 Host 内部自动启动或重挂 Adapter
+  - `POST /channels/:id/auth/sessions` / `GET|DELETE .../sessions/:sid` / `POST .../input` — 仅用于具备真实 Provider Auth 的渠道（当前为微信扫码）
+  - `PATCH /channels/:id/config` / `PUT /channels/:id/credentials/:field` — 兼容的低层保存接口；Web 表单不再逐字段调用
+- **`/dsh-channels/api/v1`** — 兼容层（auth start/poll/input 保留，未来 major 版本移除）
 
-状态变更请求仅限 loopback（403 保护），凭据与适配器内部 payload 永不出进程。
+QQ / 钉钉 / 飞书的设置页只显示凭证表单和官方开放平台入口，不创建伪 Auth Session，也不把控制台 URL 渲染成二维码。Web 不暴露 Adapter 的启动、停止、重启按钮或 API；运行时生命周期由 `channel-control` 在 Host 内部负责。状态变更请求仅限 loopback（403 保护），凭据与适配器内部 payload 永不出进程；浏览器永远读不到 Secret 原值。
 
 ## 🧭 渠道总览
 

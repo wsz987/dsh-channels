@@ -13,7 +13,7 @@ interface LoadedModule {
 
 let captured: LoadedModule | undefined;
 
-/** Minimal external stubs for react / react/jsx-runtime / @deepseek-ai/cordis. */
+/** Minimal external stubs for react / react/jsx-runtime / @deepseek-ai/cordis / UI primitives. */
 function requireStub(id: string): unknown {
   switch (id) {
     case 'react':
@@ -21,6 +21,8 @@ function requireStub(id: string): unknown {
     case 'react/jsx-runtime':
       return { jsx: (t: unknown, p: unknown) => ({ type: t, props: p }), jsxs: (t: unknown, p: unknown) => ({ type: t, props: p }) };
     case '@deepseek-ai/cordis':
+      return {};
+    case '@deepseek-ai/dsh-client-ui-primitives':
       return {};
     default:
       throw new Error('unexpected require: ' + id);
@@ -128,5 +130,13 @@ describe('@wsz987/channel-web client bundle', () => {
     // React stays external (provided by the Harness runtime).
     expect(code).toContain('require("react")');
     expect(code).toContain('require("react/jsx-runtime")');
+  });
+
+  it('keeps the UI primitives external (runtime-provided)', () => {
+    const code = readFileSync(join(root, 'lib', 'client.js'), 'utf8');
+    // The Harness ModuleLoader registers the primitives under this bare id; the
+    // bundle must require() it at runtime rather than inlining it.
+    expect(code).toContain('require("@deepseek-ai/dsh-client-ui-primitives")');
+    expect(code).toContain('@deepseek-ai/dsh-client-ui-primitives');
   });
 });

@@ -13,6 +13,8 @@
  */
 import Schema from '@deepseek-ai/schemastery';
 
+export const QQ_APP_SECRET_REF = 'QQBOT_APP_SECRET';
+
 export interface QQStreamingConfig {
   /** Whether incremental outbound streaming is enabled. */
   enabled: boolean;
@@ -50,7 +52,7 @@ export const Config: Schema<QQConfig> = Schema.object({
   accountId: Schema.string().default('main'),
   // Secret strings — never logged, never echoed into error messages.
   appId: Schema.string(),
-  appSecretRef: Schema.string(),
+  appSecretRef: Schema.string().default(QQ_APP_SECRET_REF),
   markdownSupport: Schema.boolean().default(false),
   streaming: Schema.object({
     enabled: Schema.boolean().default(true),

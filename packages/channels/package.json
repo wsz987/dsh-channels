@@ -43,7 +43,8 @@
     "@wsz987/channel-qq": "workspace:*",
     "@wsz987/channel-weixin": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
-    "@wsz987/channel-web": "workspace:*"
+    "@wsz987/channel-web": "workspace:*",
+    "@wsz987/channel-control": "workspace:*"
   },
   "devDependencies": {
     "rimraf": "^6.0.0"

@@ -30,9 +30,11 @@
   },
   "dependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-credentials": "^0.1.0-rc.6",
     "@deepseek-ai/schemastery": "^3.18.1",
     "@wsz987/channel-core": "workspace:*",
-    "dingtalk-stream": "2.1.5"
+    "dingtalk-stream": "2.1.5",
+    "@wsz987/channel-control": "workspace:*"
   },
   "devDependencies": {
     "@wsz987/channel-testkit": "workspace:*",
