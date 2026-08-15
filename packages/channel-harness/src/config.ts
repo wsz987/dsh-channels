@@ -72,8 +72,10 @@ export interface WorkspaceConfig {
   /**
    * `channel-account` (default): one Workspace per channel/account pair, under
    * `<dsh-home>/workspaces/channels/<channel>/<account-key>`.
-   * `host-cwd`: keep the old Host-cwd semantics; attach if the cwd is already
-   * registered. `disabled`: no WorkspaceRegistry integration.
+   * `host-cwd`: keep the Host's real working directory (`process.cwd()`) and
+   * attach only when that cwd is already registered.
+   * `disabled`: no WorkspaceRegistry integration (cwd falls back to
+   * `config.cwd ?? process.cwd()`).
    */
   mode: 'channel-account' | 'host-cwd' | 'disabled';
   /** Channel Workspace root; unset defaults to `<dsh-home>/workspaces/channels`. */
@@ -108,7 +110,7 @@ export interface Config {
    * log. Deployment-tunable (was previously a hardcoded 5000).
    */
   drainTimeoutMs: number;
-  /** Prefix inbound user messages with `[channel=.. sender=.. message=..]`. */
+  /** Prefix inbound user messages with `[channel=.. sender=.. message=..]` when explicitly enabled. */
   includeMetadataPrefix: boolean;
 }
 
@@ -134,7 +136,7 @@ export const Config: Schema<Config> = Schema.object({
   }),
   bindingStore: Schema.object({
     // File-backed by default so session bindings survive restarts; the file
-    // path is resolved at runtime (`<dsh-home>/channels/bindings.json`) so
+    // path is resolved at runtime (`<channel-data-dir>/bindings.json`) so
     // bindings no longer depend on the process cwd (plan §5.2).
     type: Schema.union(['memory', 'file']).default('file'),
     path: Schema.string(),
@@ -153,5 +155,5 @@ export const Config: Schema<Config> = Schema.object({
   }),
   maxConcurrency: Schema.natural().default(4),
   drainTimeoutMs: Schema.natural().default(5000),
-  includeMetadataPrefix: Schema.boolean().default(true),
+  includeMetadataPrefix: Schema.boolean().default(false),
 });

@@ -1,7 +1,7 @@
 /**
  * M5 workspace integration tests (plan §21, Test 1–4).
  *
- * Proves the bridge's `createFreshSession` transaction (plan §12/M3):
+ * Proves the channel Session factory transaction (plan §12/M3):
  *
  *   A. workspaceResolver.resolve(conversation)  -> cwd (+ workspace)
  *   B. agentManager.create(sessionId, route, ..., { cwd })
@@ -10,10 +10,10 @@
  *   E. registerBinding(binding)
  *   F. structured success log
  *
- * and its rollback on a Workspace attach failure (plan §11): the freshly
- * created agent is disposed, the binding is never updated, no followup runs,
- * and a `ChannelWorkspaceAttachError` is raised with the session/channel/
- * workspace identity in the error log.
+ * and its failure semantics (plan §11 revision — SOFT attach): a Workspace
+ * attach failure keeps the freshly-created agent (NOT disposed), persists the
+ * binding, and followup still runs — the session merely stays ungrouped — while
+ * a binding-write failure still rolls back (detach + dispose).
  *
  * Fixture design mirrors `channel-harness.test.ts` (FakeGateway, FakeAdapter,
  * baseConfig with `workspace: { mode: 'disabled' }`), but the bridge under
@@ -25,7 +25,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Context } from '@deepseek-ai/cordis';
 import CommandRuntime from '@deepseek-ai/dsh-commands';
 import { createScope } from '@deepseek-ai/dsh-scope';
-import { SessionId } from '@deepseek-ai/dsh-session';
+import SessionStore, { SessionId } from '@deepseek-ai/dsh-session';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { MessageReceived } from '@wsz987/channel-core';
 import {
@@ -37,7 +37,7 @@ import {
 } from '../src/agent-manager.ts';
 import { AgentRouter } from '../src/agent-router.ts';
 import { MemoryBindingStore } from '../src/binding-store.ts';
-import { ChannelHarnessBridge, ChannelWorkspaceAttachError } from '../src/bridge.ts';
+import { ChannelHarnessBridge } from '../src/bridge.ts';
 import { Config } from '../src/config.ts';
 import { ReplyContextStore } from '../src/reply-context-store.ts';
 import { SESSION_BINDING_SCHEMA_VERSION, type SessionBinding } from '../src/session-router.ts';
@@ -191,6 +191,7 @@ class FakeGateway implements AgentGateway {
   createCalls: string[] = [];
   resumeCalls: string[] = [];
   createMetas: Record<string, AgentCreateMeta | undefined> = {};
+  failCreateWith?: Error;
   followed: string[] = [];
   followups: { sessionId: string; message: unknown }[] = [];
   disposed: string[] = [];
@@ -214,6 +215,7 @@ class FakeGateway implements AgentGateway {
   async create(sessionId: string, route: AgentRouteSpec, setup?: Parameters<AgentGateway['create']>[2], meta?: AgentCreateMeta) {
     this.createCalls.push(sessionId);
     this.createMetas[sessionId] = meta;
+    if (this.failCreateWith) throw this.failCreateWith;
     const handle = this.makeHandle(sessionId, setup);
     void route;
     return handle;
@@ -224,10 +226,10 @@ class FakeGateway implements AgentGateway {
     return this.makeHandle(sessionId, setup);
   }
 
-  private makeHandle(sessionId: string, setup?: Parameters<AgentGateway['create']>[2]): GatewayAgentHandle {
+  private async makeHandle(sessionId: string, setup?: Parameters<AgentGateway['create']>[2]): Promise<GatewayAgentHandle> {
     const agent = fakeScopedAgent(this.rootCtx, sessionId);
     if (setup) {
-      const commit = setup(agent.ctx as never) as { commit: () => void } | undefined;
+      const commit = await setup(agent.ctx as never);
       commit?.commit();
     }
     const handle: GatewayAgentHandle = {
@@ -283,9 +285,14 @@ class FakeWorkspaceResolver implements ChannelWorkspaceResolver {
 }
 
 /** Bridge over a real CommandRuntime + the injecting resolver (mirrors makeBridge in commands.test.ts + channel-harness). */
-function makeBridge(options: { resolver?: FakeWorkspaceResolver; logger?: ReturnType<typeof capturingLogger> } = {}) {
+function makeBridge(options: {
+  resolver?: FakeWorkspaceResolver;
+  logger?: ReturnType<typeof capturingLogger>;
+  mountSessions?: boolean;
+} = {}) {
   const rootCtx = new Context();
   new CommandRuntime(rootCtx);
+  if (options.mountSessions) new SessionStore(rootCtx);
   const gateway = new FakeGateway(rootCtx);
   const manager = new AgentManager(gateway, silentLogger, 4);
   const adapter = new FakeAdapter('weixin');
@@ -392,34 +399,87 @@ describe('M5 workspace integration (plan §21)', () => {
     expect(gateway.followups.length).toBe(aFollowupsBefore);
   });
 
-  it('Test 4 — workspace.attachSession fails rolls back: binding untouched, new agent disposed, no followup, error log has identity', async () => {
+  it('Test 4 — workspace.attachSession failure is NON-FATAL: session kept, binding persisted, followup runs, logged ungrouped', async () => {
     const resolver = new FakeWorkspaceResolver();
     resolver.failAttachWith = new Error('attach exploded');
     const logger = capturingLogger();
     const { gateway, bridge, bindingStore } = makeBridge({ resolver, logger });
 
-    // Ordinary first message -> create + attach fails -> rejection.
-    await expect(bridge.handleChannelEvent(makeMessageEvent())).rejects.toBeInstanceOf(ChannelWorkspaceAttachError);
+    // Ordinary first message -> create + attach fails, but does NOT reject:
+    // the session stays alive, the binding persists, and followup runs.
+    await expect(bridge.handleChannelEvent(makeMessageEvent())).resolves.toBeUndefined();
 
-    // Binding NOT updated — the failed attach left no binding persisted.
+    // Binding WAS persisted — the soft attach failure does not orphan the session.
     const binding = await bindingStore.get('weixin:main:user_123');
-    expect(binding).toBeUndefined();
+    expect(binding).toBeDefined();
+    expect(binding?.sessionId).toBe(gateway.createCalls[0]!);
 
-    // Newly created agent disposed as part of the rollback.
+    // Newly created agent is NOT disposed (soft attach keeps the live session).
     expect(gateway.createCalls).toHaveLength(1);
-    expect(gateway.disposed).toContain(gateway.createCalls[0]!);
+    expect(gateway.disposed).not.toContain(gateway.createCalls[0]!);
 
-    // No followup happened.
-    expect(gateway.followups).toHaveLength(0);
+    // Followup still ran for the ordinary message.
+    expect(gateway.followups).toHaveLength(1);
 
-    // Error log carries the session/channel/workspace identity.
-    const errorLog = logger.error.mock.calls.find((c) => c[0] === '[channel-harness] workspace attach failed');
+    // Error log carries the session/channel/workspace identity + diagnostic fields.
+    const errorLog = logger.error.mock.calls.find(
+      (c) => c[0] === '[channel-harness] workspace attach failed; keeping session alive',
+    );
     expect(errorLog).toBeDefined();
     const fields = errorLog![1] as Record<string, unknown>;
     expect(fields).toBeDefined();
     expect(fields.sessionId).toBe(gateway.createCalls[0]!);
-    expect(fields.channelId).toBe('weixin');
-    expect(fields.accountId).toBe('main');
     expect(fields.workspaceId).toBe(resolver.workspace.id);
+    expect(fields.requestedCwd).toBe(resolver.cwd);
+    expect(fields.error).toMatchObject({ name: 'Error', message: 'attach exploded' });
+  });
+
+  it('logs an agent creation failure with enumerable Error fields and cause', async () => {
+    const logger = capturingLogger();
+    const { gateway, bridge } = makeBridge({ logger });
+    gateway.failCreateWith = new Error('agent create exploded', {
+      cause: new TypeError('invalid cwd'),
+    });
+
+    await expect(bridge.handleChannelEvent(makeMessageEvent())).rejects.toThrow(
+      'agent create exploded',
+    );
+
+    const errorLog = logger.error.mock.calls.find((call) =>
+      String(call[0]).startsWith('[channel-harness] message handling failed for conversation'),
+    );
+    expect(errorLog?.[1]).toMatchObject({
+      name: 'Error',
+      message: 'agent create exploded',
+      cause: { name: 'TypeError', message: 'invalid cwd' },
+    });
+  });
+
+  it('disposes a fresh agent when it was not published to the mounted SessionStore', async () => {
+    const resolver = new FakeWorkspaceResolver();
+    const { gateway, bridge, bindingStore } = makeBridge({ resolver, mountSessions: true });
+
+    await expect(bridge.handleChannelEvent(makeMessageEvent())).rejects.toThrow(
+      /absent from ctx\.sessions/,
+    );
+
+    const sessionId = gateway.createCalls[0]!;
+    expect(gateway.disposed).toContain(sessionId);
+    expect(resolver.attachCalls).toHaveLength(0);
+    expect(gateway.followups).toHaveLength(0);
+    expect(await bindingStore.get('weixin:main:user_123')).toBeUndefined();
+  });
+
+  it('handles a message from a caller fiber without sessions injection', async () => {
+    const { rootCtx, gateway, bridge } = makeBridge();
+    const caller = rootCtx.plugin(async function uninjectedCaller() {
+      await bridge.handleChannelEvent(makeMessageEvent());
+    });
+
+    await caller.await();
+
+    expect(gateway.createCalls).toHaveLength(1);
+    expect(gateway.followups).toHaveLength(1);
+    await caller.dispose();
   });
 });

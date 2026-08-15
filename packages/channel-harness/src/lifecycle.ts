@@ -27,8 +27,7 @@ import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence';
 import { SessionId, type Session, type SessionStore } from '@deepseek-ai/dsh-session';
 import type { ChannelAdapter, ChannelEvent, ChannelLogger } from '@wsz987/channel-core';
 import type { Config } from './config.js';
-import { createBindingStore, migrateLegacyBindingStore } from './binding-store.js';
-import { resolveDefaultBindingStorePath } from './dsh-home.js';
+import { createBindingStore } from './binding-store.js';
 import { AgentManager, HarnessAgentGateway } from './agent-manager.js';
 import { AgentRouter } from './agent-router.js';
 import { ReplyRouter } from './reply-router.js';
@@ -37,6 +36,7 @@ import { HarnessChannelWorkspaceResolver } from './workspace-resolver.js';
 import { ReplyContextStore } from './reply-context-store.js';
 import type { ChannelCommandDependencies } from './commands/index.js';
 import type { SaveImageHook } from './message-converter.js';
+import { installDebugConsoleExporter } from './debug-logger.js';
 
 export interface BridgeLifecycle {
   dispose(): Promise<void>;
@@ -48,17 +48,8 @@ export function startBridge(
   config: Config,
   persistence?: SessionPersistence | undefined,
 ): BridgeLifecycle {
+  installDebugConsoleExporter(ctx);
   const logger: ChannelLogger = ctx.logger('channel-harness');
-
-  // One-time legacy binding migration (plan §19.1): before the file-backed
-  // store is created, copy an old `<cwd>/data/channels/bindings.json` to
-  // `<dsh-home>/channels/bindings.json` when the new file is absent. The helper
-  // no-ops otherwise, and `createBindingStore` resolves the same path at runtime
-  // (via `resolveDefaultBindingStorePath()`) when `config.bindingStore.path`
-  // is omitted — so the migration target always matches what the store reads.
-  if (config.bindingStore.type === 'file') {
-    migrateLegacyBindingStore(resolveDefaultBindingStorePath(), logger);
-  }
 
   const bindingStore = createBindingStore(config.bindingStore);
   const agentGateway = new HarnessAgentGateway(ctx, persistence);
@@ -255,4 +246,3 @@ function withTimeout(promise: Promise<void>, ms: number): Promise<boolean> {
     );
   });
 }
-

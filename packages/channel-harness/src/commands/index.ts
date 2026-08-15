@@ -33,10 +33,11 @@ const commandFactories = [
 export function installChannelCommands(
   agentCtx: Context,
   deps: ChannelCommandDependencies,
-): void {
-  agentCtx.effect(function* () {
+): Promise<void> {
+  const fiber = agentCtx.inject(['commands'], function* channelCommands(ctx) {
     for (const factory of commandFactories) {
-      yield agentCtx.commands.register(factory(deps));
+      yield ctx.commands.register(factory(deps));
     }
-  }, 'channel command registrations');
+  });
+  return fiber.await().then(() => undefined);
 }

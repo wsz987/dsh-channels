@@ -20,6 +20,7 @@ export * from './file-storage.js';
 export * from './health.js';
 export * from './messages.js';
 export * from './mount.js';
+export * from './paths.js';
 export * from './registry.js';
 export * from './reply.js';
 export * from './runtime-resources.js';

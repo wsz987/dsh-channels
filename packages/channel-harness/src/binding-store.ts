@@ -16,9 +16,7 @@
  * get/put.
  */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import type { ChannelLogger } from '@wsz987/channel-core';
+import { dirname } from 'node:path';
 import { resolveDefaultBindingStorePath } from './dsh-home.js';
 import { bindingKey, SESSION_BINDING_SCHEMA_VERSION, type SessionBinding } from './session-router.js';
 
@@ -192,33 +190,6 @@ export class FileBindingStore implements SessionBindingStore {
     });
     return this.writeChain;
   }
-}
-
-/**
- * Pre-refactor default binding store path, relative to the process cwd. This
- * is the old location (so bindings could "disappear" when the host started
- * from a different directory). It is retained ONLY for the one-time migration
- * performed by {@link migrateLegacyBindingStore}; new stores resolve their path
- * from the Harness Home at runtime.
- */
-export const LEGACY_BINDING_STORE_PATH = './data/channels/bindings.json';
-
-/**
- * One-time migration of a v2-era bindings file from the legacy default
- * (`<cwd>/data/channels/bindings.json`) to the given `targetPath` (normally
- * `<dsh-home>/channels/bindings.json`). No-op when the legacy and target paths
- * coincide, the target already exists, or no legacy file exists. The legacy
- * file is NEVER deleted — it is copied so nothing is lost if migration is
- * later rolled back.
- */
-export function migrateLegacyBindingStore(targetPath: string, logger: ChannelLogger): void {
-  const legacy = join(process.cwd(), LEGACY_BINDING_STORE_PATH);
-  if (legacy === targetPath) return;
-  if (existsSync(targetPath)) return; // new path already exists — nothing to do
-  if (!existsSync(legacy)) return; // no legacy file — nothing to migrate
-  mkdirSync(dirname(targetPath), { recursive: true });
-  copyFileSync(legacy, targetPath); // copy, never delete the legacy file
-  logger.info(`[channel-harness] migrated bindings to DSH_HOME: '${legacy}' -> '${targetPath}'`);
 }
 
 /** Build the store selected by configuration (file without a path falls back to the default). */

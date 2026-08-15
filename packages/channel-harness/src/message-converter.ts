@@ -36,7 +36,7 @@ export type UserMessageLike = UserMessage;
 export type SaveImageHook = (input: SaveImageAttachment) => Promise<ImageAttachmentRef>;
 
 export interface MessageConvertOptions {
-  /** Whether to prepend the `[channel=.. sender=.. message=..]` prefix. */
+  /** Whether to prepend the `[channel=.. sender=.. message=..]` prefix. Defaults to false. */
   includeMetadataPrefix?: boolean;
   /** Optional image-commit hook enabling the real attachment path. */
   saveImage?: SaveImageHook;
@@ -48,7 +48,7 @@ export async function toHarnessUserMessage(
   options: MessageConvertOptions = {},
 ): Promise<UserMessageLike> {
   const blocks: ContentBlock[] = [];
-  const includePrefix = options.includeMetadataPrefix ?? true;
+  const includePrefix = options.includeMetadataPrefix ?? false;
   if (includePrefix) {
     const prefix = metadataPrefix(event);
     if (prefix) blocks.push({ type: 'text', text: prefix });
@@ -65,7 +65,10 @@ export async function toHarnessUserMessage(
 
   return createUserMessage({
     content: blocks,
-    source: { kind: 'plugin', plugin: 'channel-harness' },
+    // Channel inbound messages are authored by the remote human. Marking
+    // them as plugin context makes Harness skip user-only behavior such as
+    // deterministic and LLM-backed session title generation.
+    source: { kind: 'user' },
   });
 }
 

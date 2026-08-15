@@ -10,26 +10,19 @@
  *
  * Data directory resolution order:
  *   1. DSH_CHANNELS_DATA_DIR        (explicit override)
- *   2. DSH_HOME + '/channels'       (Harness home convention)
- *   3. './data/channels'            (cwd fallback)
+ *   2. <Harness home>/dsh-channels  ($DSH_HOME, else ~/.dsh)
  */
 import { type Context } from '@deepseek-ai/cordis';
-import { env } from 'node:process';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { ChannelService, type ChannelServiceOptions } from './service.js';
 import { FileStorage } from './file-storage.js';
 import { FileSecretStore } from './file-secret-store.js';
+import { resolveChannelDataDirectory } from './paths.js';
 
 export const name = 'channel-core';
 
-function resolveDataDirectory(): string {
-  if (env.DSH_CHANNELS_DATA_DIR) return resolve(env.DSH_CHANNELS_DATA_DIR);
-  if (env.DSH_HOME) return join(resolve(env.DSH_HOME), 'channels');
-  return resolve('data', 'channels');
-}
-
 function resolveServiceOptions(): ChannelServiceOptions {
-  const dir = resolveDataDirectory();
+  const dir = resolveChannelDataDirectory();
   return {
     resources: {
       secrets: new FileSecretStore({ directory: join(dir, 'secrets') }),

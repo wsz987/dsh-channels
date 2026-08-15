@@ -181,7 +181,7 @@ C:\Users\wsz987\.dsh
 建议：
 
 ```text
-%DSH_HOME%\channels\
+%DSH_HOME%\dsh-channels\
 ├─ bindings.json
 └─ ...
 ```
@@ -189,7 +189,7 @@ C:\Users\wsz987\.dsh
 例如：
 
 ```text
-C:\Users\wsz987\.dsh\channels\bindings.json
+C:\Users\wsz987\.dsh\dsh-channels\bindings.json
 ```
 
 这个位置应独立于 `process.cwd()`。
@@ -454,7 +454,7 @@ workspace:
 改成运行时解析：
 
 ```text
-$DSH_HOME/channels/bindings.json
+$DSH_HOME/dsh-channels/bindings.json
 ```
 
 建议新增：
@@ -471,7 +471,7 @@ function resolveDshHome(): string {
 
 ```ts
 function defaultBindingStorePath(): string {
-  return join(resolveDshHome(), 'channels', 'bindings.json');
+  return join(resolveDshHome(), 'dsh-channels', 'bindings.json');
 }
 ```
 
@@ -1102,7 +1102,7 @@ M1 只处理 fresh session attach
 
 ---
 
-# 19. 旧数据迁移
+# 19. 首次发布前的数据路径
 
 ## 19.1 Binding 文件
 
@@ -1115,23 +1115,12 @@ C:\Users\wsz987\data\channels\bindings.json
 新：
 
 ```text
-C:\Users\wsz987\.dsh\channels\bindings.json
+C:\Users\wsz987\.dsh\dsh-channels\bindings.json
 ```
 
-建议实现一次自动迁移：
-
-```text
-新路径不存在
-+
-旧默认路径存在
-        ↓
-复制 / rename 至新路径
-        ↓
-日志：
-[channel-harness] migrated bindings to DSH_HOME
-```
-
-不要自动删除无法解析的旧文件。
+该路径约定仍处于 dev、尚未发布，因此不实现自动迁移。首次发布统一使用
+`$DSH_HOME/dsh-channels`；开发期遗留文件由开发者按需手动清理，避免把一次性
+迁移逻辑带入正式库代码。
 
 ---
 
@@ -1196,7 +1185,7 @@ $DSH_HOME
 结果：
 
 ```text
-~/.dsh/channels/bindings.json
+~/.dsh/dsh-channels/bindings.json
 ```
 
 ---
@@ -1377,7 +1366,7 @@ process.cwd() = B
 都断言：
 
 ```text
-binding path = $DSH_HOME/channels/bindings.json
+binding path = $DSH_HOME/dsh-channels/bindings.json
 ```
 
 ### Test 6
@@ -1439,7 +1428,7 @@ C:\Users\wsz987\.dsh
 
 ```text
 C:\Users\wsz987\.dsh\
-├─ channels\
+├─ dsh-channels\
 │  └─ bindings.json
 │
 └─ workspaces\
@@ -1521,7 +1510,7 @@ Channels · Telegram
 .dsh
 = Harness Home
 
-.dsh/channels
+.dsh/dsh-channels
 = Channel 插件持久状态
 
 .dsh/workspaces/channels/<channel>/<account>
@@ -1555,7 +1544,7 @@ SessionBinding
 
 ```text
 P0
-├─ binding path → $DSH_HOME/channels
+├─ binding path → $DSH_HOME/dsh-channels
 ├─ WorkspaceResolver
 ├─ Agent create 接收显式 cwd
 ├─ createFreshSession attach Workspace

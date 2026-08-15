@@ -38,6 +38,7 @@ import { AgentRouter } from '../src/agent-router.ts';
 import { MemoryBindingStore } from '../src/binding-store.ts';
 import { ChannelHarnessBridge } from '../src/bridge.ts';
 import { Config } from '../src/config.ts';
+import { installChannelCommands } from '../src/commands/index.ts';
 import { ReplyContextStore } from '../src/reply-context-store.ts';
 import type { ChannelWorkspaceResolver } from '../src/workspace-resolver.ts';
 
@@ -165,10 +166,10 @@ class CommandGateway implements AgentGateway {
     return this.makeHandle(sessionId, setup);
   }
 
-  private makeHandle(sessionId: string, setup?: Parameters<AgentGateway['create']>[2]): GatewayAgentHandle {
+  private async makeHandle(sessionId: string, setup?: Parameters<AgentGateway['create']>[2]): Promise<GatewayAgentHandle> {
     const agent = fakeScopedAgent(this.rootCtx, sessionId);
     if (setup) {
-      const commit = setup(agent.ctx) as { commit: () => void } | undefined;
+      const commit = await setup(agent.ctx);
       commit?.commit();
     }
     this.agents.set(sessionId, agent);
@@ -195,7 +196,11 @@ interface BridgeFixture {
   bindingStore: MemoryBindingStore;
 }
 
-function makeBridge(rootCtx: Context, config: Config = baseConfig()): BridgeFixture {
+function makeBridge(
+  rootCtx: Context,
+  config: Config = baseConfig(),
+  workspaceResolver: ChannelWorkspaceResolver = noopResolver,
+): BridgeFixture {
   const gateway = new CommandGateway(rootCtx);
   const manager = new AgentManager(gateway, silentLogger, 4);
   const adapter = new FakeAdapter('weixin');
@@ -211,7 +216,7 @@ function makeBridge(rootCtx: Context, config: Config = baseConfig()): BridgeFixt
     logger: silentLogger,
     ctx: rootCtx,
     commandDeps: { startNewSession: (agent) => bridge.startNewSession(agent) },
-    workspaceResolver: noopResolver,
+    workspaceResolver,
   });
   return { gateway, manager, bridge, adapter, bindingStore };
 }
@@ -240,8 +245,11 @@ function makeRealGatewayBridge(defaultSelection?: { provider: string; model: str
     const agent = fakeScopedAgent(rootCtx, id);
     return agent;
   };
-  const registerAndReturn = (agent: CommandFakeAgent, setup: unknown, meta: Record<string, unknown>, options: Record<string, unknown>) => {
-    if (setup) { const commit = (setup as (c: Context) => unknown)(agent.ctx) as { commit: () => void } | undefined; commit?.commit(); }
+  const registerAndReturn = async (agent: CommandFakeAgent, setup: unknown, meta: Record<string, unknown>, options: Record<string, unknown>) => {
+    if (setup) {
+      const commit = await (setup as (c: Context) => Promise<{ commit(): void } | void> | { commit(): void } | void)(agent.ctx);
+      commit?.commit();
+    }
     agents.register(agent as never);
     return { agent: agent as never, dispose: async () => {} };
   };
@@ -310,6 +318,20 @@ describe('A. official dsh-commands compatibility', () => {
     const execution = await ctx.commands.execute(agent as never, '/nope', new AbortController().signal);
     expect(execution).toBeUndefined();
     expect(agent.session.events).toEqual([]);
+  });
+
+  it('installs Agent-scoped commands from a caller fiber without commands injection', async () => {
+    const ctx = new Context();
+    new CommandRuntime(ctx);
+    const agent = fakeScopedAgent(ctx, 's-injected');
+    const caller = ctx.plugin(async function uninjectedCaller() {
+      await installChannelCommands(agent.ctx, { startNewSession: async () => {} });
+    });
+
+    await caller.await();
+
+    expect(ctx.commands.find(agent as never, 'new')).toBeDefined();
+    await caller.dispose();
   });
 });
 describe('B. ordinary message regression', () => {
@@ -417,6 +439,75 @@ describe('C. /new flow', () => {
     for (const entry of lastTwo) {
       expect((entry.meta as { agentPreset?: string })?.agentPreset).toBe('default');
     }
+  });
+});
+
+describe('C2. archived binding rollover', () => {
+  it('routes the next ordinary message into a fresh visible session', async () => {
+    const rootCtx = new Context();
+    new CommandRuntime(rootCtx);
+    const archived = new Set<string>();
+    const resolver: ChannelWorkspaceResolver = {
+      resolve: async () => ({}),
+      isSessionArchived: (sessionId) => archived.has(sessionId),
+    };
+    const { gateway, bridge, bindingStore } = makeBridge(rootCtx, baseConfig(), resolver);
+
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
+    const A = gateway.createCalls[0]!;
+    archived.add(A);
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', 'after archive')));
+
+    const B = gateway.createCalls[1]!;
+    expect(B).not.toBe(A);
+    expect(gateway.followups.map((entry) => entry.sessionId)).toEqual([A, B]);
+    expect(gateway.disposed).toContain(A);
+    expect((await bindingStore.get('weixin:main:user_123'))?.sessionId).toBe(B);
+  });
+
+  it('handles /new on an archived binding without resuming the hidden session', async () => {
+    const rootCtx = new Context();
+    new CommandRuntime(rootCtx);
+    const archived = new Set<string>();
+    const resolver: ChannelWorkspaceResolver = {
+      resolve: async () => ({}),
+      isSessionArchived: (sessionId) => archived.has(sessionId),
+    };
+    const { gateway, bridge, adapter, bindingStore } = makeBridge(rootCtx, baseConfig(), resolver);
+
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
+    const A = gateway.createCalls[0]!;
+    archived.add(A);
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', '/new')));
+
+    const B = gateway.createCalls[1]!;
+    expect(B).not.toBe(A);
+    expect(gateway.followups).toHaveLength(1);
+    expect(gateway.disposed).toContain(A);
+    expect(adapter.sent.map((entry) => entry.text)).toContain('已开启新会话。');
+    expect((await bindingStore.get('weixin:main:user_123'))?.sessionId).toBe(B);
+  });
+
+  it('preserves the archived binding when replacement creation fails', async () => {
+    const rootCtx = new Context();
+    new CommandRuntime(rootCtx);
+    const archived = new Set<string>();
+    const resolver: ChannelWorkspaceResolver = {
+      resolve: async () => ({}),
+      isSessionArchived: (sessionId) => archived.has(sessionId),
+    };
+    const { gateway, bridge, bindingStore } = makeBridge(rootCtx, baseConfig(), resolver);
+
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
+    const A = gateway.createCalls[0]!;
+    archived.add(A);
+    gateway.failCreateWith = new Error('replacement failed');
+
+    await expect(
+      bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', 'after archive'))),
+    ).rejects.toThrow('replacement failed');
+    expect((await bindingStore.get('weixin:main:user_123'))?.sessionId).toBe(A);
+    expect(gateway.disposed).not.toContain(A);
   });
 });
 

@@ -46,6 +46,7 @@ class FakeWorkspace implements ChannelWorkspaceLike {
 
 /** Fake registry recording resolve/create calls and creating fake workspaces. */
 class FakeRegistry implements WorkspaceRegistryLike {
+  archivedSessionIds: SessionId[] = [];
   createCalls: { path: string; title?: string }[] = [];
   resolveCalls: string[] = [];
   private byPath = new Map<string, FakeWorkspace>();
@@ -131,6 +132,22 @@ describe('channel-account mode (plan Test 6 / Test 7)', () => {
 });
 
 describe('mode variations', () => {
+  it('reads the official global archived-session set', () => {
+    const ctx = new Context();
+    const registry = new FakeRegistry();
+    registry.archivedSessionIds.push(SessionId('ch-archived'));
+    ctx.provide('workspaceRegistry', registry);
+
+    const resolver = new HarnessChannelWorkspaceResolver(
+      ctx,
+      { mode: 'channel-account', autoCreate: true },
+      silentLogger,
+    );
+
+    expect(resolver.isSessionArchived('ch-archived')).toBe(true);
+    expect(resolver.isSessionArchived('ch-visible')).toBe(false);
+  });
+
   it('disabled resolves to {} without touching the registry', async () => {
     const ctx = new Context();
     const registry = new FakeRegistry();
@@ -207,11 +224,9 @@ describe('undefined config (schema default not applied)', () => {
       const defaultRoot = resolveChannelWorkspaceRoot(undefined);
       expect(defaultRoot).toBe(join(dir, 'workspaces', 'channels'));
       expect(resolved.cwd?.startsWith(join(dir, 'workspaces', 'channels'))).toBe(true);
-      // mode is channel-account, so a workspace is created.
       expect(resolved.workspace?.id).toBeDefined();
       expect(registry.createCalls).toHaveLength(1);
     } finally {
-
       await rm(dir, { recursive: true, force: true });
     }
   });

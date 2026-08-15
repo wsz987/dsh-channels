@@ -4,9 +4,9 @@
  * Maps a channel conversation identity to the Session working directory and
  * (optionally) a Harness `WorkspaceRegistry` member. The default
  * `channel-account` mode gives every channel/account pair its own workspace
- * under `<dsh-home>/workspaces/channels/<channel>/<account-key>` and attaches
- * it to the registry; `host-cwd` keeps the old Host-cwd semantics; `disabled`
- * returns nothing.
+ * under `<dsh-home>/workspaces/channels/<channel>/<account-key>`; `host-cwd`
+ * keeps the Host's real working directory; `disabled` returns nothing (the
+ * bridge falls back to `config.cwd ?? process.cwd()`).
  *
  * This module deliberately uses *structural* types for the official
  * `@deepseek-ai/dsh-workspace` entities and service (`WorkspaceRegistryLike`,
@@ -49,6 +49,8 @@ export interface ChannelWorkspaceLike {
  * this interface is only the shape this module relies on.
  */
 export interface WorkspaceRegistryLike {
+  /** Official global archive set; archived sessions stay attached but are hidden by the Host UI. */
+  readonly archivedSessionIds?: readonly SessionId[];
   resolveByPath(path: string): Promise<ChannelWorkspaceLike | undefined>;
   create(path: string, title?: string): Promise<ChannelWorkspaceLike>;
 }
@@ -62,6 +64,8 @@ export interface ResolvedChannelWorkspace {
 /** Resolves a channel conversation to a Session cwd and workspace. */
 export interface ChannelWorkspaceResolver {
   resolve(input: ChannelWorkspaceInput): Promise<ResolvedChannelWorkspace>;
+  /** Whether the Host has archived a session, making it unsuitable for new channel input. */
+  isSessionArchived?(sessionId: string): boolean;
 }
 
 /**
@@ -74,8 +78,8 @@ export function resolveChannelWorkspaceRoot(config: WorkspaceConfig | undefined)
 
 /**
  * Default effective workspace config used when the schema default did not
- * apply (i.e. `config.workspace` validated as `undefined`): the plan's
- * recommended default — `channel-account` with auto-create enabled.
+ * apply (i.e. `config.workspace` validated as `undefined`): group by
+ * channel/account with auto-create enabled.
  */
 const DEFAULT_WORKSPACE_CONFIG: WorkspaceConfig = { mode: 'channel-account', autoCreate: true };
 
@@ -99,6 +103,15 @@ export class HarnessChannelWorkspaceResolver implements ChannelWorkspaceResolver
 
   private effectiveConfig(): WorkspaceConfig {
     return this.config ?? DEFAULT_WORKSPACE_CONFIG;
+  }
+
+  isSessionArchived(sessionId: string): boolean {
+    try {
+      return this.registry()?.archivedSessionIds?.some((id) => String(id) === sessionId) ?? false;
+    } catch (error) {
+      this.logger.warn('[channel-harness] failed to inspect archived sessions', error);
+      return false;
+    }
   }
 
   async resolve(input: ChannelWorkspaceInput): Promise<ResolvedChannelWorkspace> {

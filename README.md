@@ -164,6 +164,7 @@ npx @deepseek-ai/dsh web      # 启动
 
 - 首个会话前直接发 `/new` 可跳过普通首条消息的建会话流程
 - 会话运行中执行 `/new` 会被拒绝（"当前会话仍在运行"）
+- 当前渠道会话在 Harness Web 中被归档后，下一条普通消息会自动创建并绑定同一渠道 Workspace 下的新会话；发送 `/new` 也会直接创建新会话，不再写入已归档历史
 - 指令注册在 Agent 作用域，随 Agent 生命周期自动装卸；**新增指令**只需在 `packages/channel-harness/src/commands/` 加一个 factory（见文末二次开发规范）
 
 ## 🛠 开发

@@ -3,24 +3,21 @@
  *
  * Verifies that resolveDshHome honors $DSH_HOME, that the default binding
  * store path lives under the Harness Home (not `process.cwd()`), that a
- * path-less file binding store writes there, and that the legacy bindings file
- * migrates to the new location (plan §5.2 / §19.1).
+ * path-less file binding store writes there.
  */
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { join, sep } from 'node:path';
-import type { ChannelLogger } from '@wsz987/channel-core';
+import { join, resolve, sep } from 'node:path';
 import {
+  CHANNELS_DATA_DIR_NAME,
   resolveChannelDataDir,
   resolveDefaultBindingStorePath,
   resolveDshHome,
 } from '../src/dsh-home.ts';
 import {
   FileBindingStore,
-  LEGACY_BINDING_STORE_PATH,
-  migrateLegacyBindingStore,
   createBindingStore,
   type SessionBindingStore,
 } from '../src/binding-store.ts';
@@ -30,8 +27,6 @@ import {
   sessionKey,
   type SessionBinding,
 } from '../src/session-router.ts';
-
-const silentLogger = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} } as ChannelLogger;
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -53,8 +48,9 @@ function makeBinding(overrides: Partial<SessionBinding> = {}): SessionBinding {
 
 describe('dsh-home', () => {
   it('uses $DSH_HOME when set', () => {
-    vi.stubEnv('DSH_HOME', '/custom/dsh');
-    expect(resolveDshHome()).toBe('/custom/dsh');
+    const customHome = resolve('custom-dsh-home');
+    vi.stubEnv('DSH_HOME', customHome);
+    expect(resolveDshHome()).toBe(customHome);
   });
 
   it('expands a leading ~ in $DSH_HOME against homedir()', () => {
@@ -68,9 +64,17 @@ describe('dsh-home', () => {
     expect(resolveDshHome()).toBe(join(homedir(), '.dsh'));
   });
 
-  it('resolveChannelDataDir is <dsh-home>/channels', () => {
-    vi.stubEnv('DSH_HOME', '/x');
-    expect(resolveChannelDataDir()).toBe(join('/x', 'channels'));
+  it('resolveChannelDataDir uses the plugin namespace under DSH_HOME', () => {
+    const customHome = resolve('custom-dsh-home');
+    vi.stubEnv('DSH_HOME', customHome);
+    expect(resolveChannelDataDir()).toBe(join(customHome, CHANNELS_DATA_DIR_NAME));
+  });
+
+  it('resolveChannelDataDir honors DSH_CHANNELS_DATA_DIR', () => {
+    const customDir = resolve('custom-channel-data');
+    vi.stubEnv('DSH_CHANNELS_DATA_DIR', customDir);
+    vi.stubEnv('DSH_HOME', resolve('ignored-dsh-home'));
+    expect(resolveChannelDataDir()).toBe(customDir);
   });
 });
 
@@ -82,7 +86,7 @@ describe('resolveDefaultBindingStorePath (plan Test 5)', () => {
       const resolved = resolveDefaultBindingStorePath();
       // Stubbed DSH_HOME is an absolute path — no ~ expansion involved.
       expect(resolved).toBe(join(resolveChannelDataDir(), 'bindings.json'));
-      expect(resolved).toBe(join(dir, 'channels', 'bindings.json'));
+      expect(resolved).toBe(join(dir, CHANNELS_DATA_DIR_NAME, 'bindings.json'));
       expect(resolved.startsWith(dir)).toBe(true);
     } finally {
       vi.unstubAllEnvs();
@@ -113,51 +117,6 @@ describe('createBindingStore path-less file store (plan Test 5)', () => {
     } finally {
       vi.unstubAllEnvs();
       await rm(dir, { recursive: true, force: true });
-    }
-  });
-});
-
-describe('migrateLegacyBindingStore (plan §19.1)', () => {
-  it('copies the legacy file to the target when target is absent', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'dsh-home-'));
-    const targetPath = join(dir, 'channels', 'bindings.json');
-    const legacyPath = join(process.cwd(), LEGACY_BINDING_STORE_PATH);
-    try {
-      mkdirSync(legacyPath.replace(/[\\/][^\\/]*$/, ''), { recursive: true });
-      const legacyContent = JSON.stringify({ k: 1 });
-      writeFileSync(legacyPath, legacyContent, 'utf8');
-
-      migrateLegacyBindingStore(targetPath, silentLogger);
-
-      expect(existsSync(targetPath)).toBe(true);
-      expect(readFileSync(targetPath, 'utf8')).toBe(legacyContent);
-      // Legacy file is never deleted.
-      expect(existsSync(legacyPath)).toBe(true);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-      if (existsSync(legacyPath)) {
-        await rm(legacyPath.replace(/[\\/][^\\/]*$/, ''), { recursive: true, force: true });
-      }
-    }
-  });
-
-  it('is a no-op when the target already exists', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'dsh-home-'));
-    const targetPath = join(dir, 'bindings.json');
-    const legacyPath = join(process.cwd(), LEGACY_BINDING_STORE_PATH);
-    try {
-      writeFileSync(targetPath, '{"new":true}', 'utf8');
-      mkdirSync(legacyPath.replace(/[\\/][^\\/]*$/, ''), { recursive: true });
-      writeFileSync(legacyPath, '{"legacy":true}', 'utf8');
-
-      migrateLegacyBindingStore(targetPath, silentLogger);
-
-      expect(readFileSync(targetPath, 'utf8')).toBe('{"new":true}');
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-      if (existsSync(legacyPath)) {
-        await rm(legacyPath.replace(/[\\/][^\\/]*$/, ''), { recursive: true, force: true });
-      }
     }
   });
 });

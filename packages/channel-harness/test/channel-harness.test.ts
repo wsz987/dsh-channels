@@ -56,6 +56,20 @@ const silentLogger = {
   error: () => {},
 };
 
+describe('Config', () => {
+  it('keeps channel metadata out of user text by default', () => {
+    const config = Config({
+      agent: { default: defaultRoute },
+      routing: { mode: 'global' },
+      bindingStore: { type: 'memory' },
+      workspace: { mode: 'disabled' },
+      reply: {},
+    });
+
+    expect(config.includeMetadataPrefix).toBe(false);
+  });
+});
+
 /** Hermetic no-op workspace resolver: no workspace, no cwd (bridge falls back to config.cwd ?? process.cwd()). */
 const noopResolver: ChannelWorkspaceResolver = {
   resolve: async () => ({}),
@@ -411,7 +425,7 @@ describe('AgentRouter', () => {
   });
 });
 describe('message conversion', () => {
-  it('converts structured parts to text and folds metadata', async () => {
+  it('converts structured parts to clean user text by default', async () => {
     const event = makeMessageEvent({
       message: {
         id: 'm1',
@@ -425,10 +439,24 @@ describe('message conversion', () => {
     const text = message.content
       .map((block) => (block.type === 'text' ? block.text : ''))
       .join('');
-    expect(text).toContain('[channel=weixin sender=user_123 message=m1]');
+    expect(text).not.toContain('[channel=');
     expect(text).toContain('look at ');
     expect(text).toContain('[image: chart]');
-    expect(message.source).toEqual({ kind: 'plugin', plugin: 'channel-harness' });
+    // Human channel input must stay eligible for Harness session titles.
+    expect(message.source).toEqual({ kind: 'user' });
+  });
+
+  it('includes channel metadata only when explicitly enabled', async () => {
+    const event = makeMessageEvent({
+      message: { id: 'm1', content: [{ type: 'text', text: 'hello' }] },
+    });
+
+    const message = await toHarnessUserMessage(event, { includeMetadataPrefix: true });
+    const text = message.content
+      .map((block) => (block.type === 'text' ? block.text : ''))
+      .join('');
+
+    expect(text).toBe('[channel=weixin sender=user_123 message=m1] hello');
   });
 
   it('maps every part kind without embedding raw payloads', async () => {
