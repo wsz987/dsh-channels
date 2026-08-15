@@ -44,19 +44,18 @@ DSH profile（web） → @wsz987/dsh-channels bundle → ChannelService（ctx.ch
 
 ### 本机开发（bundle 未发布时）
 
-在**仓库根目录**用 dev 脚本链接本地构建产物（symlink 直连源码，改代码后 `pnpm build` + 重启即生效）：
+仓库根目录跑 dev 脚本，把本地构建产物直链到 dsh profile（symlink 指源码，改完代码 `pnpm build` + 重启即生效）：
 
 ```bash
-pnpm build                    # 构建所有包
-pnpm channels                 # 全部渠道（默认 profile: web）
-pnpm channels weixin          # 只装微信，其余渠道自动禁用
-pnpm channels qq dingtalk     # 多选
-pnpm channels --profile dev qq
-npx @deepseek-ai/dsh web      # 启动
+pnpm build                 # 构建
+pnpm channels              # 不带参 = 全装
+pnpm channels weixin       # 只装微信
+pnpm channels weixin qq    # 装多个，空格隔开
+pnpm web:debug             # 调试模式启动 dsh web
 ```
 
-- **渠道名自动发现**：来自 `packages/channels/cordis.patch.yml` 的行 id，新增渠道行即被识别；别名 `wx` → weixin、`feishu` → lark
-- **单装语义**：脚本在 profile 的 `cordis.patch.yml` 中 `GENERATED` 标记后生成 `disabled: true` 禁用其余渠道；手写配置请放在标记之前（不会被覆盖）
+- 渠道名自动识别（新增一行即生效，别名 `wx` → weixin、`feishu` → lark）；未选渠道自动禁用
+- `web:debug`：`dsh web` + 调试日志，落盘 `dsh-web.log`
 
 ## 🔌 渠道配置与登录
 

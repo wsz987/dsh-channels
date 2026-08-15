@@ -80,8 +80,9 @@ export const manifest: WeixinManifest = {
 live gate 通过后，本次版本可标记 `Release Verified`，但表述应精确：
 
 > dsh-channels v0.x Release Verified：核心架构、Harness bridge、adapter contract、CI/governance
-> 与目标 live gate 已验证。DingTalk/Lark official-direct outbound 和 Lark multimodal
+> 与目标 live gate 已验证。DingTalk official-direct outbound 和 Lark multimodal
 > attachment 属于后续 hardening。
 
-（当前 QQ=官方 SDK；Weixin=官方协议 source-port（等 live）；DingTalk/Lark=官方 SDK inbound
-+ gateway outbound。所以不要写成"四渠道全部 official-direct verified"。）
+（当前 QQ=官方 SDK；Weixin=官方协议 source-port（等 live）；Lark=官方 SDK inbound + 官方
+OpenAPI outbound（R7B 已官方化）；DingTalk=官方 SDK inbound + gateway outbound。所以不要写成
+"四渠道全部 official-direct verified"。）

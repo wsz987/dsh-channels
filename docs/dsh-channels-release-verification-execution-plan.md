@@ -33,8 +33,8 @@
 1. CI 的 `channel-verify` 门禁没有真正闭环。
 2. DingTalk Stream 模式缺少官方 ACK。
 3. QQ 没有完全使用统一 Channel runtime resources。
-4. Lark 仍是低层 SDK + 自建 outbound gateway，且媒体未真正进入 Harness attachment。
-5. DingTalk / Lark 的 `sdk` 模式仍然依赖本地 HTTP gateway 做出站。
+4. Lark 仍是低层 SDK（出站已官方化，见 §13 R7B），媒体未真正进入 Harness attachment。
+5. DingTalk 的 `sdk` 模式仍然依赖本地 HTTP gateway 做出站（Lark 已消除）。
 6. Weixin 真实 live verification 尚未完成。
 7. compatibility manifest 中部分 `versionRange: '*'` 过宽。
 
@@ -112,7 +112,7 @@ Live gates          PASS / 明确标记 Experimental
 | P1 | QQ 统一 AdapterContext | 否，但必须收口 |
 | P1 | Lark media → Harness attachment | 建议 |
 | P1 | Lark domain 配置化 | 建议 |
-| P1 | DingTalk/Lark sdk 模式消除隐式 localhost gateway | 建议 |
+| P1 | DingTalk sdk 模式消除隐式 localhost gateway（Lark 已官方化，见 §13 R7B） | 建议 |
 | P2 | Lark 高层 Channel SDK 评估/迁移 | 否 |
 | P2 | Weixin source-port drift 对齐 | 否 |
 | P2 | compatibility versionRange 收紧 | 发布前建议完成 |
@@ -859,8 +859,8 @@ LarkSdkUpstream
 mapper
 InboundProcessor
 dedup
-HTTP gateway outbound
-card streaming
+OpenAPI outbound（im.v1.*，R7B 已官方化）
+card streaming（整卡 patch；typewriter 需 cardkit）
 ```
 
 存在重复实现。
@@ -909,6 +909,14 @@ error
 
 再转成 Channel Contract。
 
+> 官方核对（`@larksuiteoapi/node-sdk@1.73.0`）：高层 `createLarkChannel()` 已内置流式卡片
+> —— 暴露 `stream()` 与 `streamThrottleMs` / `streamMaxElementChars` / `streamInitialText`，
+> 底层走 **cardkit** `card.element.content`（typewriter 打字机效果）。该接口要求卡片 JSON
+> 里 `streaming_mode: true`，且 `update_multi` 不得为 `false`，并用 `card_id + element_id`
+> （而非 `message_id`）做增量更新。当前 R7B 的 `updateCard` 走 `im.v1.message.patch`
+> （按 `message_id` 整卡替换，由 ReplyRouter 节流），是「edit 卡」而非 typewriter；要升级
+> 为打字机流式，应评估迁移到 `createLarkChannel().stream()` 或直接接 cardkit。
+
 ---
 
 ## R6.3 迁移原则
@@ -929,12 +937,14 @@ error
 
 ## 当前问题
 
-两个 SDK 模式目前都是：
+两个 SDK 模式原来是：
 
 ```text
 Inbound → official SDK
 Outbound → localhost gateway
 ```
+
+（Lark 出站已官方化，见 §13 R7B；DingTalk 仍待 R7A。）
 
 配置默认甚至类似：
 
@@ -1023,6 +1033,12 @@ upstream:
 ---
 
 # 13. R7B — Lark outbound
+
+> 状态（2026-08）：**Lark 已完成**。`channel-lark` SDK 模式出站已改为官方
+> `@larksuiteoapi/node-sdk` OpenAPI client（`im.v1.message.create/patch`、
+> `im.v1.image.create`），无需 localhost gateway / `baseUrl`；`gateway` 模式
+> 保留为 legacy。离线契约 + `openapi-outbound` 测试通过。live 验证仍需真实
+> AppId/AppSecret（手动步骤）。DingTalk（R7A）仍待做。
 
 建议官方化为：
 
@@ -1653,7 +1669,7 @@ Implementation Complete
 - [ ] QQ 使用统一 `createAdapterContext`
 - [ ] Lark domain 可配置
 - [ ] Lark inbound image 真正进入 Harness ImageBlock
-- [ ] SDK 模式不再隐式依赖 localhost gateway，或明确重命名为 hybrid
+- [ ] SDK 模式不再隐式依赖 localhost gateway，或明确重命名为 hybrid（Lark 已官方化，DingTalk 待做）
 - [ ] Weixin live gate 通过
 - [ ] Weixin manifest 写入真实 testedVersion / testedCommit
 - [ ] DingTalk / Lark `versionRange: '*'` 收紧
