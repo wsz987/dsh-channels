@@ -47,6 +47,8 @@ export interface QQDefinitionOptions {
   deps: QQAdapterDeps;
   /** The credential seam used to resolve/describe `appSecretRef`. */
   credentials: CredentialSeam;
+  /** Durable store for the non-secret setup field when the host provides one. */
+  persistSetup?: (patch: Pick<QQConfig, 'appId'>) => Promise<void>;
 }
 
 /**
@@ -164,6 +166,11 @@ export function createQQDefinition(options: QQDefinitionOptions): ChannelDefinit
     setupUrl: qqConsoleUrl(snapshot.appId),
   };
 
+  const refreshSetup = () => {
+    setup.fields[0]!.configured = Boolean(snapshot.appId);
+    setup.setupUrl = qqConsoleUrl(snapshot.appId);
+  };
+
   return {
     id: 'qq',
     enabled: snapshot.enabled,
@@ -205,8 +212,18 @@ export function createQQDefinition(options: QQDefinitionOptions): ChannelDefinit
         // Unknown (incl. secret) keys are ignored; the control plane already
         // rejects secret field names before reaching the definition.
       }
-      // Keep the console deep-link in sync with the configured appId.
-      setup.setupUrl = qqConsoleUrl(snapshot.appId);
+      refreshSetup();
+      if (patch.appId !== undefined) await options.persistSetup?.({ appId: snapshot.appId });
+    },
+
+    snapshotConfig: () => cloneSnapshot(snapshot),
+    async restoreConfig(saved: unknown) {
+      const restored = cloneSnapshot(saved as QQConfig);
+      Object.assign(snapshot, restored);
+      snapshot.streaming = restored.streaming;
+      snapshot.dedup = restored.dedup;
+      refreshSetup();
+      await options.persistSetup?.({ appId: snapshot.appId });
     },
 
     async createAdapter(): Promise<ChannelAdapter> {

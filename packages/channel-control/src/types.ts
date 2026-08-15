@@ -224,6 +224,13 @@ export interface ChannelDefinition {
    * control plane before reaching the definition (see saveConfig rules).
    */
   saveConfig(patch: Record<string, unknown>): Promise<void>;
+  /**
+   * Optional host-only snapshot/restore hooks for transactional setup updates.
+   * Definitions with mutable config implement both methods so a failed adapter
+   * restart can restore the exact prior runtime configuration.
+   */
+  snapshotConfig?(): unknown;
+  restoreConfig?(snapshot: unknown): Promise<void> | void;
   /** Begin an auth session (optional: channels without provider auth omit). */
   beginAuth?(input: AuthBeginInput): Promise<AuthProviderSession>;
   /** Poll a provider session (optional). Receives the SAME AuthProviderSession returned by beginAuth. */

@@ -34,6 +34,8 @@ export interface DingTalkDefinitionOptions {
   deps: DingTalkAdapterDeps;
   /** The injected ctx.credentials seam (never the secret values themselves). */
   credentials: DingTalkCredentialSeam;
+  /** Durable store for the non-secret setup field when the host provides one. */
+  persistSetup?: (patch: { upstream: Pick<DingTalkConfig['upstream'], 'clientId'> }) => Promise<void>;
 }
 
 /** Non-secret config keys accepted by saveConfig (deep-merged sub-objects). */
@@ -80,6 +82,14 @@ export function createDingTalkDefinition(options: DingTalkDefinitionOptions): Ch
     setupUrl: dingtalkConsoleUrl(state.upstream.clientId),
   };
 
+  const refreshSetup = () => {
+    setup.fields = [
+      { name: 'clientId', kind: 'text', secret: false, configured: Boolean(state.upstream.clientId), writable: true },
+      { name: 'clientSecret', kind: 'secret', secret: true, configured: false, writable: true, ref: clientSecretRef() },
+    ];
+    setup.setupUrl = dingtalkConsoleUrl(state.upstream.clientId);
+  };
+
   return {
     id: 'dingtalk',
     enabled: state.enabled,
@@ -112,13 +122,22 @@ export function createDingTalkDefinition(options: DingTalkDefinitionOptions): Ch
 
     async saveConfig(patch: Record<string, unknown>): Promise<void> {
       applyPatch(state, patch);
-      // Reflect the updated fields in the descriptor (kept in sync for the UI).
-      setup.fields = [
-        { name: 'clientId', kind: 'text', secret: false, configured: Boolean(state.upstream.clientId), writable: true },
-        { name: 'clientSecret', kind: 'secret', secret: true, configured: false, writable: true, ref: clientSecretRef() },
-      ];
-      // Keep the console deep-link in sync with the configured clientId.
-      setup.setupUrl = dingtalkConsoleUrl(state.upstream.clientId);
+      refreshSetup();
+      if (patch.clientId !== undefined || isPlainObject(patch.upstream) && patch.upstream.clientId !== undefined) {
+        await options.persistSetup?.({ upstream: { clientId: state.upstream.clientId } });
+      }
+    },
+
+    snapshotConfig: () => cloneConfig(state),
+    async restoreConfig(saved: unknown) {
+      const restored = cloneConfig(saved as DingTalkConfig);
+      Object.assign(state, restored);
+      state.reconnect = restored.reconnect;
+      state.dedup = restored.dedup;
+      state.card = restored.card;
+      state.upstream = restored.upstream;
+      refreshSetup();
+      await options.persistSetup?.({ upstream: { clientId: state.upstream.clientId } });
     },
 
     async createAdapter() {

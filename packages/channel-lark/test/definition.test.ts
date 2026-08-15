@@ -156,7 +156,7 @@ describe('lark ChannelDefinition', () => {
     });
     const state = await definition.getConfiguredState();
     expect(state.configured).toBe(true);
-    expect(state.fields.appId).toMatchObject({ configured: true, writable: true });
+    expect(state.fields.appId).toMatchObject({ configured: true, writable: true, value: 'cli_abc' });
     expect(state.fields.appSecret).toMatchObject({ configured: true, writable: true });
     expect(JSON.stringify(state)).not.toContain('secret');
   });
@@ -276,6 +276,26 @@ describe('lark ChannelDefinition', () => {
     } finally {
       vi.restoreAllMocks();
     }
+  });
+
+  it('persists appId changes and a transactional restore without touching credentials', async () => {
+    const persistSetup = vi.fn(async () => {});
+    const definition = createLarkDefinition({
+      config: makeConfig({ upstream: { mode: 'sdk', appId: 'cli_old' } }),
+      credentials: {
+        resolve: async () => undefined,
+        describe: async () => ({ configured: false, writable: true }),
+        set: async () => {},
+      },
+      persistSetup,
+    });
+    const before = definition.snapshotConfig!();
+
+    await definition.saveConfig({ appId: 'cli_replacement' });
+    await definition.restoreConfig!(before);
+
+    expect(persistSetup).toHaveBeenNthCalledWith(1, { upstream: { appId: 'cli_replacement' } });
+    expect(persistSetup).toHaveBeenNthCalledWith(2, { upstream: { appId: 'cli_old' } });
   });
 });
 

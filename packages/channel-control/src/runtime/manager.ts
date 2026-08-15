@@ -91,11 +91,51 @@ export class ChannelRuntimeManager {
     this.errors.delete(key);
   }
 
-  async restart(channelId: string, accountId?: string): Promise<void> {
-    // Doc §23: resolve current config → resolve secrets → build candidate
-    // adapter → dispose old mount → mount candidate → start → health.
-    await this.stop(channelId, accountId);
-    await this.start(channelId, accountId);
+  async restart(
+    channelId: string,
+    accountId?: string,
+    rollback?: () => Promise<void> | void,
+  ): Promise<void> {
+    const key = this.key(channelId, accountId);
+    const existing = this.mounts.get(key);
+    const definition = this.registry.require(channelId);
+    let candidate: ChannelAdapter;
+    try {
+      // Resolve credentials/build before touching the active connection.
+      candidate = await definition.createAdapter();
+    } catch (error) {
+      try {
+        await rollback?.();
+      } catch (recoveryError) {
+        this.errors.set(
+          key,
+          recoveryError instanceof Error ? recoveryError.message : String(recoveryError),
+        );
+      }
+      throw error;
+    }
+
+    if (existing) {
+      await existing.handle.dispose();
+      this.mounts.delete(key);
+    }
+    try {
+      await this.mount(key, channelId, candidate);
+      this.errors.delete(key);
+    } catch (error) {
+      try {
+        // Restore setup before restarting the old instance: adapters retain a
+        // reference to their definition's mutable config snapshot.
+        await rollback?.();
+        if (existing) await this.mount(key, channelId, existing.adapter);
+      } catch (recoveryError) {
+        this.errors.set(
+          key,
+          recoveryError instanceof Error ? recoveryError.message : String(recoveryError),
+        );
+      }
+      throw error;
+    }
   }
 
   async status(channelId: string, accountId?: string): Promise<ChannelRuntimeStatus> {
@@ -286,5 +326,16 @@ export class ChannelRuntimeManager {
 
     const handle: ChannelMountHandle = { dispose: () => dispose() };
     return { handle, settled };
+  }
+
+  private async mount(key: string, channelId: string, adapter: ChannelAdapter): Promise<void> {
+    try {
+      const { handle, settled } = this.mountTransactional(channelId, adapter);
+      await settled;
+      this.mounts.set(key, { handle, adapter });
+    } catch (error) {
+      this.errors.set(key, error instanceof Error ? error.message : String(error));
+      throw error;
+    }
   }
 }

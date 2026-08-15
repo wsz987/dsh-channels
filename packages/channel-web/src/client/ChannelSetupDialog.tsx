@@ -145,7 +145,7 @@ export function ChannelSetupDialog(props: ChannelSetupDialogProps) {
             channelId={channelId}
             descriptor={descriptor}
             t={t}
-            onComplete={() => complete('setupSaved')}
+            onComplete={(configured) => complete(configured ? 'setupSaved' : 'setupDisabled')}
           />
         )}
 
@@ -186,7 +186,7 @@ function CredentialsForm({
   channelId: string;
   descriptor: ChannelSetupDescriptor;
   t: (key: string) => string;
-  onComplete: () => void;
+  onComplete: (configured: boolean) => void;
 }) {
   // Seed non-secret fields with their current values (appId/clientId are
   // viewable); secret fields start empty so an untouched secret is never resent.
@@ -197,10 +197,13 @@ function CredentialsForm({
     }
     return seed;
   });
+  const [edited, setEdited] = useState<Set<string>>(() => new Set());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const changed = descriptor.fields.filter((field) => (drafts[field.name] ?? '').trim());
+  const changed = descriptor.fields.filter((field) =>
+    field.secret ? Boolean((drafts[field.name] ?? '').trim()) : edited.has(field.name),
+  );
   const missing = descriptor.fields.filter(
     (field) => field.writable && !field.configured && !(drafts[field.name] ?? '').trim(),
   );
@@ -226,8 +229,7 @@ function CredentialsForm({
         }
         return next;
       });
-      if (!result.configured) throw new Error(t('incompleteSetup'));
-      onComplete();
+      onComplete(result.configured);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -249,7 +251,10 @@ function CredentialsForm({
             key={field.name}
             field={field}
             value={drafts[field.name] ?? ''}
-            onChange={(value) => setDrafts((current) => ({ ...current, [field.name]: value }))}
+            onChange={(value) => {
+              setDrafts((current) => ({ ...current, [field.name]: value }));
+              if (!field.secret) setEdited((current) => new Set(current).add(field.name));
+            }}
             t={t}
             disabled={saving}
           />

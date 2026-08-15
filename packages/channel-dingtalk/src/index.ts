@@ -18,6 +18,7 @@
  */
 import { type Context } from '@deepseek-ai/cordis';
 import { credentialRef } from '@deepseek-ai/dsh-credentials';
+import { settingsNamespace, type SettingsProvider } from '@deepseek-ai/dsh-settings';
 import { mountChannelAdapter } from '@wsz987/channel-core';
 import type { DingTalkConfig } from './config.js';
 import { Config, DINGTALK_CLIENT_SECRET_REF } from './config.js';
@@ -85,8 +86,15 @@ export function apply(ctx: Context, config: DingTalkConfig, deps: DingTalkAdapte
   const control = ctx.get('channelControl') as ChannelControlLike | undefined;
   if (control) {
     // The control plane owns lifecycle: register only, runtime auto-starts.
+    const settings = ctx.get('settings') as SettingsProvider | undefined;
+    const scope = settings?.register(settingsNamespace('channels-dingtalk'), Config, { base: config });
     control.definitions.register(
-      createDingTalkDefinition({ config, deps, credentials: ctx.credentials }),
+      createDingTalkDefinition({
+        config: scope?.get() ?? config,
+        deps,
+        credentials: ctx.credentials,
+        persistSetup: (patch) => scope?.update(patch) ?? Promise.resolve(),
+      }),
     );
     return;
   }

@@ -166,7 +166,7 @@ describe('createDingTalkDefinition getConfiguredState', () => {
     });
     const state = await def.getConfiguredState();
     expect(state.configured).toBe(true);
-    expect(state.fields.clientId.configured).toBe(true);
+    expect(state.fields.clientId).toMatchObject({ configured: true, value: 'app-key' });
     expect(state.fields.clientSecret.configured).toBe(true);
     expect(state.fields.clientSecret.source).toBe('test');
   });
@@ -278,6 +278,23 @@ describe('createDingTalkDefinition saveConfig', () => {
     expect(probe.config.timeoutMs).toBe(5000);
     expect(probe.config.upstream.mode).toBe('sdk');
     expect(probe.config.upstream.clientId).toBe('new-key');
+  });
+
+  it('persists clientId changes and a transactional restore without touching credentials', async () => {
+    const persistSetup = vi.fn(async () => {});
+    const def = createDingTalkDefinition({
+      config: makeConfig({ upstream: { mode: 'sdk', clientId: 'old-key' } }),
+      deps: {},
+      credentials: new FakeSeam({ values: {} }),
+      persistSetup,
+    });
+    const before = def.snapshotConfig!();
+
+    await def.saveConfig({ clientId: 'replacement-key' });
+    await def.restoreConfig!(before);
+
+    expect(persistSetup).toHaveBeenNthCalledWith(1, { upstream: { clientId: 'replacement-key' } });
+    expect(persistSetup).toHaveBeenNthCalledWith(2, { upstream: { clientId: 'old-key' } });
   });
 
   it('deep-merges sub-objects without losing untouched sibling keys', async () => {

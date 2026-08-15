@@ -53,6 +53,8 @@ export interface CreateLarkDefinitionOptions {
   deps?: LarkAdapterDeps;
   /** Injected credentials seam (wraps ctx.credentials in apply()). */
   credentials: LarkCredentialSeam;
+  /** Durable store for the non-secret setup field when the host provides one. */
+  persistSetup?: (patch: { upstream: Pick<LarkConfig['upstream'], 'appId'> }) => Promise<void>;
 }
 
 /** Allowed non-secret nested sub-config keys merged by saveConfig. */
@@ -145,7 +147,7 @@ export function createLarkDefinition(
     return {
       configured,
       fields: {
-        appId: { configured: appIdConfigured, writable: true },
+        appId: { configured: appIdConfigured, writable: true, value: state.upstream.appId },
         appSecret: {
           configured: secret.configured,
           writable: secret.writable,
@@ -183,6 +185,25 @@ export function createLarkDefinition(
     if (patch.accountId !== undefined) state.accountId = String(patch.accountId);
     if (patch.enabled !== undefined) state.enabled = Boolean(patch.enabled);
     setup.setupUrl = larkConsoleAppUrl(state.upstream.domain, state.upstream.appId);
+    const hasUpstreamAppId =
+      patch.upstream !== null &&
+      typeof patch.upstream === 'object' &&
+      !Array.isArray(patch.upstream) &&
+      (patch.upstream as Record<string, unknown>).appId !== undefined;
+    if (patch.appId !== undefined || hasUpstreamAppId) {
+      await options.persistSetup?.({ upstream: { appId: state.upstream.appId } });
+    }
+  };
+
+  const restoreConfig = async (saved: unknown): Promise<void> => {
+    const restored = snapshotOf(saved as LarkConfig);
+    Object.assign(state, restored);
+    state.reconnect = restored.reconnect;
+    state.dedup = restored.dedup;
+    state.card = restored.card;
+    state.upstream = restored.upstream;
+    setup.setupUrl = larkConsoleAppUrl(state.upstream.domain, state.upstream.appId);
+    await options.persistSetup?.({ upstream: { appId: state.upstream.appId } });
   };
 
   const createAdapter = async () => {
@@ -208,6 +229,8 @@ export function createLarkDefinition(
     setup,
     getConfiguredState: configuredState,
     saveConfig,
+    snapshotConfig: () => snapshotOf(state),
+    restoreConfig,
     createAdapter,
     autoStart: true,
   };

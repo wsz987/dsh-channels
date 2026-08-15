@@ -213,6 +213,133 @@ describe('ChannelControlService', () => {
     expect(result).toEqual({ configured: true, connection: 'connected' });
   });
 
+  it('applySetup restores the prior setup and running adapter when replacement startup fails', async () => {
+    let appId = 'old-app';
+    const stored = new Map<string, string>([['QQBOT_APP_SECRET', 'old-secret']]);
+    const credentials: CredentialSeam = {
+      async resolve(ref) {
+        const value = stored.get(ref);
+        return value ? { value, source: 'test' } : undefined;
+      },
+      async describe(ref) {
+        return { configured: stored.has(ref), writable: true, source: 'test' };
+      },
+      async set(ref, value) {
+        stored.set(ref, value);
+      },
+      async unset(ref) {
+        stored.delete(ref);
+      },
+    };
+    const oldAdapter = makeAdapter('qq');
+    const failingAdapter = makeAdapter('qq');
+    failingAdapter.start = vi.fn(async () => {
+      throw new Error('invalid replacement credentials');
+    });
+    const def = makeDef('qq', {
+      setup: {
+        fields: [
+          { name: 'appId', kind: 'text', secret: false, configured: true, writable: true },
+          { name: 'appSecret', kind: 'secret', secret: true, configured: true, writable: true, ref: 'QQBOT_APP_SECRET' },
+        ],
+        authMethods: [],
+      },
+      getConfiguredState: async () => ({
+        configured: Boolean(appId) && stored.has('QQBOT_APP_SECRET'),
+        fields: {
+          appId: { configured: Boolean(appId), writable: true, value: appId },
+          appSecret: { configured: stored.has('QQBOT_APP_SECRET'), writable: true },
+        },
+      }),
+      saveConfig: vi.fn(async (patch) => {
+        if (typeof patch.appId === 'string') appId = patch.appId;
+      }),
+      snapshotConfig: () => appId,
+      restoreConfig: (snapshot) => {
+        appId = snapshot as string;
+      },
+      createAdapter: async () => (appId === 'old-app' ? oldAdapter : failingAdapter),
+    });
+    const { ctx, service } = harness([def], credentials);
+
+    await service.runtime.start('qq');
+    await expect(
+      service.applySetup('qq', {
+        config: { appId: 'new-app' },
+        credentials: { appSecret: 'new-secret' },
+      }),
+    ).rejects.toThrow('invalid replacement credentials');
+
+    expect(ctx.channels.get('qq')).toBe(oldAdapter);
+    expect(service.runtime.isRunning('qq')).toBe(true);
+    expect(appId).toBe('old-app');
+    expect(stored.get('QQBOT_APP_SECRET')).toBe('old-secret');
+    expect(oldAdapter.stop).toHaveBeenCalledTimes(1);
+    expect(oldAdapter.start).toHaveBeenCalledTimes(2);
+    await service.runtime.stop('qq');
+  });
+
+  it('applySetup stops a running channel when the submitted setup becomes incomplete', async () => {
+    let appId = 'old-app';
+    const stored = new Map<string, string>([['QQBOT_APP_SECRET', 'old-secret']]);
+    const credentials: CredentialSeam = {
+      async resolve(ref) {
+        const value = stored.get(ref);
+        return value ? { value, source: 'test' } : undefined;
+      },
+      async describe(ref) {
+        return { configured: stored.has(ref), writable: true, source: 'test' };
+      },
+      async set(ref, value) {
+        stored.set(ref, value);
+      },
+      async unset(ref) {
+        stored.delete(ref);
+      },
+    };
+    const adapter = makeAdapter('qq');
+    const def = makeDef('qq', {
+      setup: {
+        fields: [
+          { name: 'appId', kind: 'text', secret: false, configured: true, writable: true },
+          { name: 'appSecret', kind: 'secret', secret: true, configured: true, writable: true, ref: 'QQBOT_APP_SECRET' },
+        ],
+        authMethods: [],
+      },
+      getConfiguredState: async () => ({
+        configured: Boolean(appId) && stored.has('QQBOT_APP_SECRET'),
+        fields: {
+          appId: { configured: Boolean(appId), writable: true, value: appId },
+          appSecret: { configured: stored.has('QQBOT_APP_SECRET'), writable: true },
+        },
+      }),
+      saveConfig: vi.fn(async (patch) => {
+        if (typeof patch.appId === 'string') appId = patch.appId;
+      }),
+      snapshotConfig: () => appId,
+      restoreConfig: (snapshot) => {
+        appId = snapshot as string;
+      },
+      createAdapter: async () => adapter,
+    });
+    const { ctx, service } = harness([def], credentials);
+
+    await service.runtime.start('qq');
+    await expect(
+      service.applySetup('qq', {
+        config: { appId: '' },
+        credentials: { appSecret: 'new-secret' },
+      }),
+    ).resolves.toEqual({ configured: false, connection: 'unknown' });
+
+    expect(ctx.channels.get('qq')).toBeUndefined();
+    expect(service.runtime.isRunning('qq')).toBe(false);
+    expect(appId).toBe('');
+    expect(stored.get('QQBOT_APP_SECRET')).toBe('new-secret');
+    expect(adapter.stop).toHaveBeenCalledTimes(1);
+    expect(adapter.start).toHaveBeenCalledTimes(1);
+  });
+
   it('describeCredential maps a setup field to its credential ref without returning the value', async () => {
     const store = new Map<string, string>([['LARK_APP_SECRET', 's3cret']]);
     const seamWithValues: CredentialSeam = {

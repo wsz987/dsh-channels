@@ -71,11 +71,17 @@ function makeDefinition(overrides: {
   config?: Partial<QQConfig>;
   deps?: { sdkClient?: FakeQQSdkClient };
   seam?: FakeSeam;
+  persistSetup?: (patch: Pick<QQConfig, 'appId'>) => Promise<void>;
 } = {}) {
   const config = makeConfig(overrides.config);
   const seam = overrides.seam ?? new FakeSeam();
   const deps = overrides.deps ?? {};
-  const definition = createQQDefinition({ config, deps, credentials: seam });
+  const definition = createQQDefinition({
+    config,
+    deps,
+    credentials: seam,
+    persistSetup: overrides.persistSetup,
+  });
   return { definition, seam, config, deps };
 }
 
@@ -221,6 +227,18 @@ describe('createQQDefinition', () => {
     // The snapshot now feeds getConfiguredState: appId reflects the patch.
     const state = await definition.getConfiguredState();
     expect(state.fields.appId.configured).toBe(true);
+  });
+
+  it('persists appId changes and a transactional restore without touching credentials', async () => {
+    const persistSetup = vi.fn(async () => {});
+    const { definition } = makeDefinition({ persistSetup });
+    const before = definition.snapshotConfig!();
+
+    await definition.saveConfig({ appId: 'replacement-app-id' });
+    await definition.restoreConfig!(before);
+
+    expect(persistSetup).toHaveBeenNthCalledWith(1, { appId: 'replacement-app-id' });
+    expect(persistSetup).toHaveBeenNthCalledWith(2, { appId: 'dummy-app-id' });
   });
 
   it('saveConfig deep-merges streaming/dedup sub-objects and ignores unknown keys', async () => {

@@ -231,21 +231,62 @@ export class ChannelControlService extends Service {
    * dedicated storage seams on the host.
    */
   async applySetup(channelId: string, input: ChannelSetupInput): Promise<ChannelSetupResult> {
-    if (Object.keys(input.config).length > 0) {
-      await this.saveConfig(channelId, input.config);
-    }
-    for (const [field, value] of Object.entries(input.credentials)) {
-      await this.saveCredential(channelId, field, value);
-    }
-
-    const configured = await this.getConfiguredState(channelId);
-    if (!configured.configured) {
-      return { configured: false, connection: 'unknown' };
+    const definition = this.definitions.require(channelId);
+    const running = this.runtime.isRunning(channelId);
+    if (running && Object.keys(input.config).length > 0 && (!definition.snapshotConfig || !definition.restoreConfig)) {
+      throw new ControlError('CONTROL_ERROR', `channel '${channelId}' does not support transactional config updates`);
     }
 
-    await this.runtime.start(channelId);
-    const status = await this.runtime.status(channelId);
-    return { configured: true, connection: status.connection };
+    const configSnapshot = definition.snapshotConfig?.();
+    const credentialSnapshots = await Promise.all(
+      Object.keys(input.credentials).map(async (fieldName) => {
+        const field = this.credentialField(channelId, fieldName);
+        if (!field.ref) return undefined;
+        return { ref: field.ref, previous: await this.credentials.resolve(field.ref) };
+      }),
+    );
+    let rolledBack = false;
+    const rollback = async () => {
+      if (rolledBack) return;
+      rolledBack = true;
+      if (configSnapshot !== undefined) await definition.restoreConfig?.(configSnapshot);
+      for (const snapshot of credentialSnapshots) {
+        if (!snapshot) continue;
+        if (snapshot.previous) await this.credentials.set(snapshot.ref, snapshot.previous.value);
+        else await this.credentials.unset(snapshot.ref);
+      }
+    };
+
+    try {
+      if (Object.keys(input.config).length > 0) await this.saveConfig(channelId, input.config);
+      for (const [field, value] of Object.entries(input.credentials)) {
+        await this.saveCredential(channelId, field, value);
+      }
+
+      const configured = await this.getConfiguredState(channelId);
+      if (!configured.configured) {
+        // Clearing a required setup value is an intentional disable. End the
+        // existing connection so its in-memory credentials cannot outlive the
+        // persisted unconfigured state.
+        if (running) await this.runtime.stop(channelId);
+        return { configured: false, connection: 'unknown' };
+      }
+
+      if (running) await this.runtime.restart(channelId, undefined, rollback);
+      else await this.runtime.start(channelId);
+      const status = await this.runtime.status(channelId);
+      return { configured: true, connection: status.connection };
+    } catch (error) {
+      try {
+        await rollback();
+      } catch (recoveryError) {
+        this.ctx.logger('channel-control').error(
+          `[channel-control] failed to restore setup for '${channelId}'`,
+          recoveryError,
+        );
+      }
+      throw error;
+    }
   }
 
   /** Resolve a setup field of a channel or raise a stable error. */

@@ -9,7 +9,6 @@ export const locales = {
     title: '渠道',
     loading: '加载中…',
     // dashboard
-    connect: '连接微信',
     connecting: '连接中…',
     configure: '配置',
     configured: '已配置',
@@ -36,6 +35,7 @@ export const locales = {
     openPlatform: '打开官方开放平台',
     incompleteSetup: '请填写所有尚未配置的必填项',
     setupSaved: '配置已保存，渠道连接已启动',
+    setupDisabled: '配置已保存，渠道已停止',
     done: '完成',
     // auth progress
     waitingScan: '等待扫码',
@@ -65,7 +65,6 @@ export const locales = {
     title: 'Channels',
     loading: 'Loading…',
     // dashboard
-    connect: 'Connect Weixin',
     connecting: 'Connecting…',
     configure: 'Configure',
     configured: 'Configured',
@@ -92,6 +91,7 @@ export const locales = {
     openPlatform: 'Open official developer console',
     incompleteSetup: 'Complete every required field that is not configured yet',
     setupSaved: 'Configuration saved and channel connection started',
+    setupDisabled: 'Configuration saved and channel stopped',
     done: 'Done',
     // auth progress
     waitingScan: 'Waiting for scan',

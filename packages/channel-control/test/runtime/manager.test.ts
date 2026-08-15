@@ -174,6 +174,54 @@ describe('ChannelRuntimeManager', () => {
     await tick();
   });
 
+  it('restart restores the previous adapter when the replacement fails to start', async () => {
+    const oldAdapter = makeAdapter('fake');
+    const failingAdapter = makeAdapter('fake', {
+      start: async () => {
+        throw new Error('replacement start failed');
+      },
+    });
+    let cursor = oldAdapter;
+    const { ctx, manager } = harness(
+      [makeDef('fake')],
+      new Map([['fake', () => cursor]]),
+    );
+
+    await manager.start('fake');
+    cursor = failingAdapter;
+    let rolledBack = false;
+    await expect(manager.restart('fake', undefined, () => { rolledBack = true; })).rejects.toThrow('replacement start failed');
+
+    expect(rolledBack).toBe(true);
+    expect(ctx.channels.get('fake')).toBe(oldAdapter);
+    expect(manager.isRunning('fake')).toBe(true);
+    expect(oldAdapter.stop).toHaveBeenCalledTimes(1);
+    expect(oldAdapter.start).toHaveBeenCalledTimes(2);
+    await manager.stop('fake');
+    await tick();
+  });
+
+  it('keeps the candidate failure when rollback itself fails before replacement startup', async () => {
+    const oldAdapter = makeAdapter('fake');
+    const { ctx, manager, registry } = harness(
+      [makeDef('fake')],
+      new Map([['fake', () => oldAdapter]]),
+    );
+    await manager.start('fake');
+    (registry.get('fake') as ChannelDefinition).createAdapter = async () => {
+      throw new Error('candidate build failed');
+    };
+
+    await expect(
+      manager.restart('fake', undefined, async () => { throw new Error('rollback failed'); }),
+    ).rejects.toThrow('candidate build failed');
+
+    expect(ctx.channels.get('fake')).toBe(oldAdapter);
+    expect(manager.isRunning('fake')).toBe(true);
+    await manager.stop('fake');
+    await tick();
+  });
+
   it('adapter start() throwing is surfaced with no residual registry entry and lastError set', async () => {
     const failing = makeAdapter('fake', {
       start: async () => {

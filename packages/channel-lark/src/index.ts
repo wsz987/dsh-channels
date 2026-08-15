@@ -26,6 +26,7 @@
  */
 import { type Context } from '@deepseek-ai/cordis';
 import { credentialRef } from '@deepseek-ai/dsh-credentials';
+import { settingsNamespace, type SettingsProvider } from '@deepseek-ai/dsh-settings';
 import { mountChannelAdapter } from '@wsz987/channel-core';
 import type { ChannelDefinition } from '@wsz987/channel-control';
 import type { LarkConfig } from './config.js';
@@ -124,7 +125,16 @@ export function apply(ctx: Context, config: LarkConfig, deps: LarkAdapterDeps = 
   if (control) {
     // Control plane present (doc §12/§26/§27): register the definition; the
     // plane owns adapter instantiation + headless auto-start.
-    control.definitions.register(createLarkDefinition({ config, deps, credentials: seam }));
+    const settings = ctx.get('settings') as SettingsProvider | undefined;
+    const scope = settings?.register(settingsNamespace('channels-lark'), Config, { base: config });
+    control.definitions.register(
+      createLarkDefinition({
+        config: scope?.get() ?? config,
+        deps,
+        credentials: seam,
+        persistSetup: (patch) => scope?.update(patch) ?? Promise.resolve(),
+      }),
+    );
     return;
   }
 
