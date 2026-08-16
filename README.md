@@ -13,11 +13,11 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](package.json)
 
+[English](README.en.md) | 简体中文
+
 </div>
 
 > 本项目参考各平台面向 OpenClaw 提供的渠道接入方案，结合官方 SDK / API 适配到 DeepSeek Harness。运行时不依赖 OpenClaw。
->
-> 社区项目，非 DeepSeek 官方组件。
 
 ## 效果预览
 

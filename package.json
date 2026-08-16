@@ -2,7 +2,7 @@
   "name": "dsh-channels",
   "version": "0.0.1",
   "private": true,
-  "description": "Harness-native Channel SDK for DeepSeek Harness (DSH Bundle + Channel Core + Adapters)",
+  "description": "Connect WeChat, QQ, DingTalk and Lark to DeepSeek Harness — unified config, QR-code auth, chat with your Agent from IM",
   "type": "module",
   "engines": {
     "node": ">=22"
