@@ -3,7 +3,7 @@
   "version": "0.8.1",
   "repository": {
     "type": "git",
-    "url": "https://github.com/wsz987/dsh-channels.git"
+    "url": "git+https://github.com/wsz987/dsh-channels.git"
   },
   "publishConfig": {
     "access": "public"

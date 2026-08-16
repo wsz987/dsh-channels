@@ -15,9 +15,9 @@ npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@beta
 
 > The profile directory is itself a pnpm workspace, so `-w` (`--workspace-root`)
 > is required to add the bundle to the workspace root (otherwise pnpm fails with
-> `ERR_PNPM_ADDING_TO_ROOT`). `@beta` selects the beta dist-tag — currently the
-> only published version is `0.1.0-beta.0`. Drop `@beta` once a stable release
-> ships.
+> `ERR_PNPM_ADDING_TO_ROOT`). `@beta` selects the beta dist-tag. Run
+> `npm view @wsz987/dsh-channels dist-tags` to inspect the current `beta` and
+> `latest` targets.
 
 The bundle patch (`cordis.patch.yml`) inserts the `ChannelService`
 (`@wsz987/channel-core`), the optional generic-file extension
@@ -37,6 +37,19 @@ npx @deepseek-ai/dsh --profile web --dump-config
 
 # 3. start the profile — all four channels load
 npx @deepseek-ai/dsh web
+```
+
+## Update and uninstall
+
+```bash
+# Install or switch package.json to the latest beta
+npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@beta
+
+# Update within the package.json semver range
+npx @deepseek-ai/dsh plugin --profile web update -w @wsz987/dsh-channels
+
+# Remove the bundle; also remove any channels-* overrides from your profile patch
+npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 ```
 
 Disable a channel you don't use by setting its plugin `enabled` flag to `false`
@@ -79,13 +92,13 @@ surfaces (`@deepseek-ai/dsh-client-runtime`, `-locale`, `-ui-settings`,
 `-ui-primitives`), which the Harness itself provides at runtime — nothing extra
 to install for that panel beyond a Harness version that ships them.
 
-## Individual adapters
+## Selecting adapters
 
-Advanced users may install a single adapter:
-
-```bash
-npx @deepseek-ai/dsh plugin --profile minimal add -w @wsz987/channel-weixin@beta
-```
+The individual adapter packages do not currently carry their own `dsh.bundle`
+profile patches, so installing one with `plugin add` is not a complete Harness
+setup. Install `@wsz987/dsh-channels`, then disable or override unwanted
+`channels-*` rows in the profile patch. See `apps/example/minimal-profile/` for
+the complete row shapes.
 
 ## Architecture
 

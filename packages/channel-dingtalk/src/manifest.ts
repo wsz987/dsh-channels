@@ -14,6 +14,8 @@
  * Live verification against a real DingTalk app (AppKey/AppSecret) is a
  * manual step.
  */
+import pkg from '../package.json' with { type: 'json' };
+
 export interface DingTalkUpstreamManifest {
   reference: string;
   testedVersion: string;
@@ -40,7 +42,7 @@ export interface DingTalkManifest {
 /** Current manifest: inbound via the official dingtalk-stream SDK. */
 export const manifest: DingTalkManifest = {
   id: 'dingtalk',
-  adapterVersion: '0.7.0',
+  adapterVersion: pkg.version,
   upstream: {
     reference: 'open-dingtalk/dingtalk-stream-sdk-nodejs (https://github.com/open-dingtalk/dingtalk-stream-sdk-nodejs)',
     testedVersion: '2.1.5',

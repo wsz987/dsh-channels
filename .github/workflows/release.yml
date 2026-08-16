@@ -1,20 +1,3 @@
-# Release automation (docs/release.md).
-#
-# Tag-driven publish: this workflow runs ONLY when a `v*` release tag is pushed
-# (or manually via workflow_dispatch). Normal commits and pull requests do NOT
-# trigger it.
-#
-# Release flow (manual, before tagging):
-#   1. `pnpm changeset version`  — bump versions + write changelogs locally.
-#   2. commit the version bump.
-#   3. `git tag vX.Y.Z && git push origin vX.Y.Z`
-# The tag push runs this workflow, which publishes every package whose current
-# version is not yet on npm (`pnpm release` = `changeset publish`).
-#
-# The publish stays INERT until the `NPM_TOKEN` repository secret is configured
-# (an npm automation token with publish rights for the @wsz987 scope). Without it the
-# publish step fails — configure the secret to activate releases.
-
 name: Release
 
 on:
@@ -22,17 +5,23 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  release:
-    name: Publish to npm
+  pack:
+    name: Verify and pack npm artifacts
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout tagged source
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -44,17 +33,62 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      # lib/ is gitignored — build before publishing so the tarball ships the
-      # prebuilt JS + types described in docs/release.md.
+      - name: Verify release metadata and tag
+        run: pnpm release:verify
+      - name: Test release scripts
+        run: pnpm test:release
       - name: Build packages
         run: pnpm build
-      - name: Configure npm registry auth
-        run: |
-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - name: Publish packages
-        run: pnpm release
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Typecheck packages
+        run: pnpm typecheck
+      - name: Test packages
+        run: pnpm test
+      - name: Run governance gates
+        run: pnpm check:fixtures && pnpm check:manifests && pnpm doctor && pnpm check:bundle
+      - name: Pack and inspect npm artifacts
+        run: pnpm release:pack
+      - name: Upload exact npm artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-${{ github.sha }}
+          path: dist/npm/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish npm packages
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: pack
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: npm-publish
+      cancel-in-progress: false
+    steps:
+      - name: Checkout release scripts
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.3
+      - name: Setup Node and npm registry
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Install npm with Trusted Publishing support
+        run: npm install --global npm@11.5.1
+      - name: Check publish runtime
+        run: node --version && npm --version
+      - name: Download verified npm artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-${{ github.sha }}
+          path: dist/npm
+      - name: Publish exact artifacts
+        run: pnpm release:publish

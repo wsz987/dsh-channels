@@ -1284,15 +1284,13 @@ npx @deepseek-ai/dsh plugin --profile web add -w @foo/dsh-channel-telegram@beta
 
 ---
 
-# 30. 独立 Adapter 安装
+# 30. 独立 Adapter 安装（未来能力）
 
-高级用户可以：
+当前内置 adapter package 不携带 `dsh.bundle`，因此不能只执行
+`plugin add @wsz987/channel-weixin` 就完成 Harness 配置。正式入口仍是
+`@wsz987/dsh-channels`，按需启停通过 profile patch 完成。
 
-```bash
-npx @deepseek-ai/dsh plugin --profile minimal add -w @wsz987/channel-weixin@beta
-```
-
-前提：
+未来若支持独立安装，前提是：
 
 ```text
 adapter package 自己提供 dsh.bundle

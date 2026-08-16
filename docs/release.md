@@ -6,9 +6,16 @@ workflow and the manual DSH bundle release validation.
 
 ## Versioning policy
 
-Every publishable package is versioned **independently** — Changesets is
+Every release-family package is versioned **independently** — Changesets is
 configured with no `fixed` / `linked` groups
 (`.changeset/config.json`, `baseBranch: main`, `access: public`).
+
+The automated release family is an explicit allowlist: the bundle plus its nine
+runtime dependencies (`channel-core`, `channel-harness`, `channel-control`,
+`channel-files`, `channel-web`, and the four built-in adapters). The ignored
+development/governance packages (`channel-compat`, `channel-testkit`,
+`channel-verify`) and the unsupported Telegram example are not packed or
+published by this workflow.
 
 | Package                | Version |
 | ---------------------- | ------- |
@@ -17,15 +24,11 @@ configured with no `fixed` / `linked` groups
 | @wsz987/channel-control   | 0.1.0   |
 | @wsz987/channel-files     | 0.1.0   |
 | @wsz987/channel-web       | 0.1.0   |
-| @wsz987/channel-testkit   | 0.2.0   |
-| @wsz987/channel-compat    | 0.2.0   |
 | @wsz987/channel-weixin    | 0.8.1   |
 | @wsz987/channel-qq        | 0.5.4   |
 | @wsz987/channel-dingtalk  | 0.7.0   |
 | @wsz987/channel-lark      | 0.6.3   |
 | @wsz987/dsh-channels      | 0.9.0   |
-| @wsz987/channel-verify    | 0.1.0   |
-| @wsz987/channel-telegram  | 0.1.0   |
 
 `apps/*` are private (`"private": true`) and never published.
 
@@ -45,8 +48,9 @@ the published version by `changeset version` at release time.
 4. **Tag** — commit the version bump, then push a release tag:
    `git tag vX.Y.Z && git push origin vX.Y.Z`.
 5. **Publish** — the tag push runs `.github/workflows/release.yml`, which
-   executes `pnpm release` (`changeset publish`) and publishes every
-   package whose version is not yet on the npm registry.
+   verifies and packs every public workspace package, then publishes those
+   exact tarballs with npm Trusted Publishing. Versions already present on npm
+   are skipped so a partial release can be retried safely.
 
 Steps 3–5 are the tag-driven release flow (see the workflow section below).
 
@@ -135,7 +139,7 @@ Every publishable package carries:
 ```json
 "repository": {
   "type": "git",
-  "url": "https://github.com/wsz987/dsh-channels.git"
+  "url": "git+https://github.com/wsz987/dsh-channels.git"
 },
 "publishConfig": {
   "access": "public"
@@ -217,18 +221,30 @@ and a **Live Platform Gate** (manual only — live 测试不放在普通 PR)。
 
 ## `.github/workflows/release.yml`
 
-Tag-driven publish — it runs **only when a `v*` release tag is pushed** (or via
-`workflow_dispatch`); normal commits and PRs do not trigger it:
+Tag-driven publish — validation also supports `workflow_dispatch`, but npm
+publication runs **only when a `v*` release tag is pushed**. Normal commits and
+PRs do not trigger it:
 
 1. checkout + pnpm 9.15.3 + Node 22 (cache pnpm);
 2. `pnpm install --frozen-lockfile`;
-3. `pnpm build` — `lib/` is gitignored, so packages are built before
-   publishing (the tarball ships prebuilt JS + types);
-4. writes `~/.npmrc` from `NPM_TOKEN`;
-5. `pnpm release` (`changeset publish`) — publishes every package whose
-   current version is not yet on npm.
+3. verifies release metadata and requires the `v*` tag to match the independently
+   versioned `@wsz987/dsh-channels` bundle;
+4. runs release-script tests, build, typecheck, the full test suite, fixtures,
+   manifests, doctor and bundle validation;
+5. packs the ten allowlisted release-family packages in dependency order,
+   checks the packed manifests and records SHA-512 checksums;
+6. uploads the exact tarballs and downloads them in an isolated publish job;
+7. installs npm 11.5.1 and publishes missing versions with npm Trusted
+   Publishing. Prerelease bundle versions use the `beta` dist-tag, stable
+   versions use `latest`, and `NPM_DIST_TAG` can explicitly override either.
 
-The workflow **stays inert until the `NPM_TOKEN` repository secret is
-configured**: without registry credentials the publish step cannot run (it only
-ever publishes packages whose version is not yet on npm). Set `NPM_TOKEN` to an
-npm automation token with publish rights for the `@wsz987` scope to activate it.
+Every published package must configure npm Trusted Publishing for GitHub user
+`wsz987`, repository `dsh-channels`, workflow `release.yml`, environment
+`npm-publish`, and the `npm publish` action. Only the publish job receives
+`id-token: write`; no long-lived `NPM_TOKEN` is used.
+
+Already-published versions are skipped to make partial releases retryable. This
+workflow intentionally does not promote an existing prerelease version between
+dist-tags. A stable release must have a new stable SemVer (without a prerelease
+suffix); it is then published under `latest`, while prerelease versions use
+`beta`.

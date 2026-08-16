@@ -14,6 +14,7 @@
  * QQSdkClient) passing — fully offline. Live verification against a real QQ
  * app (AppId/AppSecret) is a manual step.
  */
+import pkg from '../package.json' with { type: 'json' };
 
 export interface QQUpstreamManifest {
   reference: string;
@@ -40,7 +41,7 @@ export interface QQManifest {
 /** Current manifest: Tencent official `qqbot-nodejs` SDK @ 1.0.4. */
 export const manifest: QQManifest = {
   id: 'qq',
-  adapterVersion: '0.5.4',
+  adapterVersion: pkg.version,
   upstream: {
     reference: 'tencent-connect/qqbot-nodejs (https://www.npmjs.com/package/@tencent-connect/qqbot-nodejs)',
     testedVersion: '1.0.4',

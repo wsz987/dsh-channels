@@ -26,7 +26,11 @@
     "clean": "turbo run clean",
     "changeset": "changeset",
     "version": "changeset version",
-    "release": "changeset publish"
+    "release": "changeset publish",
+    "test:release": "node --test scripts/release-scripts.test.mjs",
+    "release:verify": "node scripts/release-verify.mjs",
+    "release:pack": "node scripts/release-pack.mjs",
+    "release:publish": "node scripts/release-publish.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.0",

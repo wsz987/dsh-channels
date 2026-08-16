@@ -14,6 +14,7 @@
  * — fully offline. Live verification against a real Lark app (AppId/AppSecret)
  * is a manual step.
  */
+import pkg from '../package.json' with { type: 'json' };
 
 export interface LarkUpstreamManifest {
   reference: string;
@@ -41,7 +42,7 @@ export interface LarkManifest {
 /** Current manifest: inbound via the official @larksuiteoapi/node-sdk. */
 export const manifest: LarkManifest = {
   id: 'lark',
-  adapterVersion: '0.6.3',
+  adapterVersion: pkg.version,
   upstream: {
     reference: 'larksuite/node-sdk (https://github.com/larksuite/node-sdk)',
     testedVersion: '1.73.0',

@@ -34,9 +34,12 @@
 
 前提：能运行 DeepSeek Harness CLI（`npx @deepseek-ai/dsh`，官方推荐用法，详见 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)）。
 
+> **迭代期提示**：项目仍在快速迭代，版本升级可能调整配置或本地数据格式。
+> 升级前请备份相关数据；现阶段不要把重要数据的唯一副本存放在项目工作区或插件数据目录中。
+
 ```bash
 # 1. 安装 bundle 到 web profile（首次自动初始化 profile，装完自动合并 cordis.patch.yml）
-npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@beta
+npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels
 
 # 2. 确认合并：应看到 channels-service / channels-files / channels-harness /
 #    channels-control / channels-web 及四个渠道插件
@@ -46,10 +49,21 @@ npx @deepseek-ai/dsh --profile web --dump-config
 npx @deepseek-ai/dsh web
 ```
 
-> **安装说明**：profile 目录本身是一个 pnpm workspace（含 `pnpm-workspace.yaml`），
-> 不加 `-w`（`--workspace-root`）时 pnpm 会以 `ERR_PNPM_ADDING_TO_ROOT` 拒绝安装，
-> 因此安装命令必须带 `-w`。`@beta` 显式选择 beta 发行标签——当前 bundle 仅发布了
-> `0.1.0-beta.0`（`beta` 与 `latest` 均指向它）。若后续发布了 stable 版本，可去掉 `@beta`。
+> **安装说明**：安装、更新或卸载插件时，请保留命令中的 `-w` 参数。
+> 安装命令默认使用 npm 的 `latest` 发行标签；可通过 `npm view @wsz987/dsh-channels dist-tags` 查看当前指向。
+
+**更新与卸载：**
+
+```bash
+# 安装或切换到最新稳定版（同时更新 package.json 中的版本范围）
+npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels
+
+# 在当前 package.json semver 范围内更新
+npx @deepseek-ai/dsh plugin --profile web update -w @wsz987/dsh-channels
+
+# 卸载 bundle；如有自定义 profile patch，请一并删除其中的 channels-* 覆盖行
+npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
+```
 
 装一个包即集成微信 / QQ / 钉钉 / 飞书等，各渠道在 Harness Web「设置 → 渠道」面板完成登录：
 
@@ -57,7 +71,8 @@ npx @deepseek-ai/dsh web
 - **钉钉 / 飞书**：扫码授权，或填写平台凭证
 - **QQ**：填写 AppID / AppSecret 即可收发
 
-按需可只装单渠道（`@wsz987/channel-weixin`、`-qq`、`-dingtalk`、`-lark`），详细配置见下文。
+安装 `@wsz987/dsh-channels` 即可使用微信、QQ、钉钉和飞书。只需部分渠道时，
+可在 Harness Web「设置 → 渠道」中启用需要的渠道，其余保持关闭。
 
 ### 📸 效果预览
 
@@ -85,7 +100,7 @@ npx @deepseek-ai/dsh web
 
 | 指令 | 说明 |
 | --- | --- |
-| `/new` | 开启全新会话 |
+| `/new` | 开启全新会话（遇到 bug 可以尝试使用） |
 
 未注册的指令会被拦截（"未知指令"），不会发给模型。
 
@@ -103,7 +118,7 @@ pnpm web:debug             # 启动 dsh web
 - `pnpm channels` 不带参 = 全装；可指定渠道（`pnpm channels weixin`、`pnpm channels weixin qq`），渠道名自动识别（别名 `wx` → weixin、`feishu` → lark），未选渠道自动禁用
 - 改完代码 `pnpm build` + 重启即生效
 - `web:debug`：`dsh web` + 调试日志，落盘 `dsh-web.log`
-- 切回发布版（如测 `@beta`）：先 `pnpm channels:clean` 清掉源码直链，再 `npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@beta`
+- 切回发布版：先 `pnpm channels:clean` 清掉源码直链，再 `npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels`
 
 ## 🔌 渠道配置与登录
 

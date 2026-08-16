@@ -7,6 +7,9 @@
  * structurally readable manifest without being started.
  */
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { FakeChannelAdapter } from '@wsz987/channel-testkit';
 import type { ChannelHealth } from '@wsz987/channel-core';
 import {
@@ -26,6 +29,13 @@ import { WeixinAdapter } from '../../channel-weixin/src/adapter.ts';
 import { Config as WeixinConfig } from '../../channel-weixin/src/config.ts';
 import { DingTalkAdapter } from '../../channel-dingtalk/src/adapter.ts';
 import { Config as DingTalkConfig } from '../../channel-dingtalk/src/config.ts';
+
+const testDir = dirname(fileURLToPath(import.meta.url));
+
+function packageVersion(packageName: string): string {
+  const raw = readFileSync(join(testDir, '..', '..', packageName, 'package.json'), 'utf8');
+  return (JSON.parse(raw) as { version: string }).version;
+}
 
 /** Build a manifest fixture, structurally compatible with `AdapterManifest`. */
 function makeManifest(overrides: Partial<AdapterManifest> = {}): AdapterManifest {
@@ -349,7 +359,7 @@ describe('integration: real adapters expose a readable manifest', () => {
     const manifest = getAdapterManifest(adapter);
     expect(manifest?.id).toBe('weixin');
     expect(manifest?.status).toBe('experimental');
-    expect(manifest?.adapterVersion).toBe('0.8.1');
+    expect(manifest?.adapterVersion).toBe(packageVersion('channel-weixin'));
     expect(adapter.id).toBe('weixin');
   });
 
@@ -370,7 +380,7 @@ describe('integration: real adapters expose a readable manifest', () => {
     const manifest = getAdapterManifest(adapter);
     expect(manifest?.id).toBe('dingtalk');
     expect(manifest?.status).toBe('tested');
-    expect(manifest?.adapterVersion).toBe('0.7.0');
+    expect(manifest?.adapterVersion).toBe(packageVersion('channel-dingtalk'));
     expect(adapter.id).toBe('dingtalk');
   });
 });

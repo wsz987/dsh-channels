@@ -17,6 +17,7 @@
  * Workspace package at runtime (see AGENTS.md §2).
  */
 import { describe, expect, it } from 'vitest';
+import { resolve } from 'node:path';
 import { Context } from '@deepseek-ai/cordis';
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session';
 
@@ -25,7 +26,7 @@ describe('M5.1 real Harness live-Session contract', () => {
     const ctx = new Context();
     const sessions = new SessionStore(ctx);
 
-    const cwd = 'C:\\Users\\test\\.dsh\\workspaces\\channels\\weixin\\1f8a20';
+    const cwd = resolve('test-workspaces', 'channels', 'weixin', '1f8a20');
     const sessionId = SessionId('ch-live-contract');
     const session = sessions.create(sessionId, { meta: { cwd } });
 
@@ -53,7 +54,8 @@ describe('M5.1 real Harness live-Session contract', () => {
     const ctx = new Context();
     const sessions = new SessionStore(ctx);
     const sessionId = SessionId('ch-dup');
-    sessions.create(sessionId, { meta: { cwd: 'C:\\tmp' } });
-    expect(() => sessions.create(sessionId, { meta: { cwd: 'C:\\tmp' } })).toThrow();
+    const cwd = resolve('test-workspaces', 'duplicate-session');
+    sessions.create(sessionId, { meta: { cwd } });
+    expect(() => sessions.create(sessionId, { meta: { cwd } })).toThrow();
   });
 });
