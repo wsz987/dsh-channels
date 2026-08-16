@@ -13,19 +13,19 @@
 #     in `ctx.credentials` and is never written here.
 
 - id: channels-weixin
-  name: '@wsz987/channel-weixin'
+  name: '@wsz987/dsh-channels/weixin'
   disabled: true
 
 - id: channels-dingtalk
-  name: '@wsz987/channel-dingtalk'
+  name: '@wsz987/dsh-channels/dingtalk'
   disabled: true
 
 - id: channels-lark
-  name: '@wsz987/channel-lark'
+  name: '@wsz987/dsh-channels/lark'
   disabled: true
 
 - id: channels-qq
-  name: '@wsz987/channel-qq'
+  name: '@wsz987/dsh-channels/qq'
   inject:
     - channels
     - credentials

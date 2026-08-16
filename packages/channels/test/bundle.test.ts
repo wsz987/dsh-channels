@@ -3,10 +3,9 @@
  *
  * Parses `cordis.patch.yml` with a hand-rolled minimal parser (the file is a
  * fixed `- insert:` list of `- id:` / `name:` pairs — no YAML dependency),
- * asserts the seven plugin insertions, resolves every plugin specifier through
- * the package `exports` maps (dynamic import enforces Node ESM exports
- * resolution), and checks that each channel adapter Config exposes an
- * `enabled` boolean so every channel can be disabled via config.
+ * asserts the plugin insertions, resolves every bundle-owned plugin specifier,
+ * validates the Web client face, and checks that each channel adapter Config
+ * exposes an `enabled` boolean so every channel can be disabled via config.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -84,26 +83,40 @@ function packageJsonPath(dir: string): string {
 // directory up (packages/channels/cordis.patch.yml).
 const PATCH_URL = new URL('../cordis.patch.yml', import.meta.url);
 const DEV_INSTALLER_URL = new URL('../../../scripts/dev-channels.mjs', import.meta.url);
+const BUNDLE_PACKAGE_URL = new URL('../package.json', import.meta.url);
+const BUNDLE_CLIENT_URL = new URL('../lib/client.js', import.meta.url);
 
 // Expected bundle result — the exact plugins cordis.patch.yml inserts.
 const EXPECTED_ITEMS: PatchItem[] = [
-  { id: 'channels-service', name: '@wsz987/channel-core/plugin' },
-  { id: 'channels-files', name: '@wsz987/channel-files' },
+  { id: 'channels-service', name: '@wsz987/dsh-channels/service' },
+  { id: 'channels-files', name: '@wsz987/dsh-channels/files' },
   // channel-harness injects the command-plane capabilities: the Harness
   // `commands` registry plus the default-model selection it resolves routes against.
-  { id: 'channels-harness', name: '@wsz987/channel-harness', inject: ['channels', 'agents', 'agentDefaultModel', 'llm', 'commands'] },
+  { id: 'channels-harness', name: '@wsz987/dsh-channels/harness', inject: ['channels', 'agents', 'agentDefaultModel', 'llm', 'commands'] },
   // channel-control is the universal control plane: it must load before the
   // channel plugins so ctx.channelControl exists when they register definitions.
-  { id: 'channels-control', name: '@wsz987/channel-control/plugin', inject: ['channels', 'credentials'] },
-  { id: 'channels-weixin', name: '@wsz987/channel-weixin', inject: ['channels', 'channelControl'] },
-  { id: 'channels-qq', name: '@wsz987/channel-qq', inject: ['channels', 'credentials', 'channelControl'] },
-  { id: 'channels-dingtalk', name: '@wsz987/channel-dingtalk', inject: ['channels', 'credentials', 'channelControl'] },
-  { id: 'channels-lark', name: '@wsz987/channel-lark', inject: ['channels', 'credentials', 'channelControl'] },
+  { id: 'channels-control', name: '@wsz987/dsh-channels/control', inject: ['channels', 'credentials'] },
+  { id: 'channels-weixin', name: '@wsz987/dsh-channels/weixin', inject: ['channels', 'channelControl'] },
+  { id: 'channels-qq', name: '@wsz987/dsh-channels/qq', inject: ['channels', 'credentials', 'channelControl'] },
+  { id: 'channels-dingtalk', name: '@wsz987/dsh-channels/dingtalk', inject: ['channels', 'credentials', 'channelControl'] },
+  { id: 'channels-lark', name: '@wsz987/dsh-channels/lark', inject: ['channels', 'credentials', 'channelControl'] },
   // The Web client plugin has no module-level `inject` export on its host
   // entry (only `name` + `apply`); the client half declares inject and the
   // settings.section slot, which is not part of the host patch shape.
-  { id: 'channels-web', name: '@wsz987/channel-web' },
+  { id: 'channels-web', name: '@wsz987/dsh-channels' },
 ];
+
+const EXPECTED_MODULE_NAMES = new Map([
+  ['channels-service', 'channel-core'],
+  ['channels-files', 'channel-files'],
+  ['channels-harness', 'channel-harness'],
+  ['channels-control', 'channel-control'],
+  ['channels-weixin', 'channel-weixin'],
+  ['channels-qq', 'channel-qq'],
+  ['channels-dingtalk', 'channel-dingtalk'],
+  ['channels-lark', 'channel-lark'],
+  ['channels-web', 'channel-web'],
+]);
 
 describe('DSH bundle patch (cordis.patch.yml)', () => {
   const patchSource = readFileSync(fileURLToPath(PATCH_URL), 'utf8');
@@ -117,7 +130,7 @@ describe('DSH bundle patch (cordis.patch.yml)', () => {
 
   it.each(EXPECTED_ITEMS.map((item) => [item.id, item.name] as const))(
     'resolves plugin %s through the exports map and exports a Cordis plugin shape',
-    async (_id, specifier) => {
+    async (id, specifier) => {
       // Dynamic import() enforces Node ESM exports resolution: a specifier not
       // covered by the package.json exports map (e.g. @wsz987/channel-core/plugin
       // before the subpath export was added) fails here.
@@ -134,10 +147,7 @@ describe('DSH bundle patch (cordis.patch.yml)', () => {
         }
       }
 
-      // The module name matches the package short name (@wsz987/channel-core ->
-      // channel-core; @wsz987/channel-core/plugin -> channel-core).
-      const shortName = splitSpecifier(specifier).packageName.replace('@wsz987/', '');
-      expect(mod.name).toBe(shortName);
+      expect(mod.name).toBe(EXPECTED_MODULE_NAMES.get(id));
     },
     15_000,
   );
@@ -145,16 +155,47 @@ describe('DSH bundle patch (cordis.patch.yml)', () => {
   it('covers every referenced plugin subpath in the package exports map', () => {
     for (const item of EXPECTED_ITEMS) {
       const { packageName, subpath } = splitSpecifier(item.name);
-      // Workspace package dir mirrors the package name without the scope.
-      const pkgJson = JSON.parse(
-        readFileSync(packageJsonPath(packageName.replace('@wsz987/', '')), 'utf8'),
-      ) as { name?: string; exports?: Record<string, unknown> };
-      expect(pkgJson.name, `${packageName} exists in the workspace`).toBe(packageName);
+      const pkgJson = JSON.parse(readFileSync(fileURLToPath(BUNDLE_PACKAGE_URL), 'utf8')) as {
+        name?: string;
+        exports?: Record<string, unknown>;
+      };
+      expect(packageName).toBe('@wsz987/dsh-channels');
+      expect(pkgJson.name).toBe(packageName);
       expect(
         pkgJson.exports?.[subpath],
         `${packageName} exports map covers ${subpath}`,
       ).toBeTruthy();
     }
+  });
+
+  it('references no transitive implementation package from the profile patch', () => {
+    expect(items.every((item) => item.name.startsWith('@wsz987/dsh-channels'))).toBe(true);
+  });
+});
+
+describe('bundle-owned Web client face', () => {
+  it('declares dsh.client and exports its built client bundle', () => {
+    const manifest = JSON.parse(readFileSync(fileURLToPath(BUNDLE_PACKAGE_URL), 'utf8')) as {
+      dsh?: { client?: { platform?: string; inject?: string[] } };
+      exports?: Record<string, unknown>;
+    };
+
+    expect(manifest.dsh?.client).toMatchObject({
+      platform: 'web',
+      inject: [
+        '@deepseek-ai/dsh-client-runtime',
+        '@deepseek-ai/dsh-client-locale',
+        '@deepseek-ai/dsh-client-ui-settings',
+        '@deepseek-ai/dsh-client-ui-primitives',
+      ],
+    });
+    expect(manifest.exports?.['./client']).toBeTruthy();
+  });
+
+  it('registers the client under the bundle package id', () => {
+    const client = readFileSync(fileURLToPath(BUNDLE_CLIENT_URL), 'utf8');
+    expect(client).toContain('id: "@wsz987/dsh-channels"');
+    expect(client).not.toContain('id: "@wsz987/channel-web"');
   });
 });
 
@@ -230,12 +271,12 @@ describe('optional generic-file package boundary', () => {
 });
 
 describe('local development installer', () => {
-  it('passes only the real bundle through dsh plugin management', () => {
+  it('installs only the bundle as a direct profile dependency', () => {
     const installer = readFileSync(fileURLToPath(DEV_INSTALLER_URL), 'utf8');
 
     expect(installer).toContain("'plugin', '--profile', profile, 'add', '-w', BUNDLE_DIR");
-    expect(installer).toContain("spawnSync('pnpm', ['add', '-w', ...[...selectedDirs].map((dir) => resolve(dir))]");
-    expect(installer).not.toContain("'plugin', '--profile', profile, 'add', '-w', ...toLink");
+    expect(installer).not.toContain("spawnSync('pnpm', ['add', '-w'");
+    expect(installer).toContain('removeLegacyImplementationDependencies(profileDir)');
     expect(installer).toContain('owned.has(name)');
     expect(installer).not.toContain("name.startsWith('@wsz987/')");
     expect(installer).toContain("'plugin', '--profile', profile, 'remove', bundleName");

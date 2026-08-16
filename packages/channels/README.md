@@ -19,12 +19,11 @@ npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@beta
 > `npm view @wsz987/dsh-channels dist-tags` to inspect the current `beta` and
 > `latest` targets.
 
-The bundle patch (`cordis.patch.yml`) inserts the `ChannelService`
-(`@wsz987/channel-core`), the optional generic-file extension
-(`@wsz987/channel-files`), the Harness bridge (`@wsz987/channel-harness`), the
-control plane (`@wsz987/channel-control`), the Web settings panel
-(`@wsz987/channel-web`) and the four channel adapters. Every channel can be
-disabled through its plugin config.
+The bundle patch (`cordis.patch.yml`) references only entrypoints exported by
+`@wsz987/dsh-channels` itself. Those entrypoints delegate to the ChannelService,
+generic-file extension, Harness bridge, control plane, Web settings panel and
+the four channel adapters through the bundle's own dependency tree. Every
+channel can be disabled through its plugin config.
 
 ## Quick start
 
@@ -75,8 +74,9 @@ npx @deepseek-ai/dsh --profile release-validation
 
 ## Dependencies
 
-The bundle is a thin entry point. Its npm `dependencies` pull in the rest of the
-channel suite automatically, so **you only ever install `@wsz987/dsh-channels`**:
+The bundle owns every Harness loader entry and its Web client face. Its npm
+`dependencies` provide the implementations behind those entries, so **you only
+ever install `@wsz987/dsh-channels`**:
 
 | Package                  | Role |
 | ------------------------ | ---- |

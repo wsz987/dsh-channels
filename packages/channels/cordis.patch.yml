@@ -11,15 +11,15 @@
 
 - insert:
     - id: channels-service
-      name: '@wsz987/channel-core/plugin'
+      name: '@wsz987/dsh-channels/service'
 
     # Optional generic-file extension. Remove this line to keep placeholders
     # only; Harness-native image attachments remain available either way.
     - id: channels-files
-      name: '@wsz987/channel-files'
+      name: '@wsz987/dsh-channels/files'
 
     - id: channels-harness
-      name: '@wsz987/channel-harness'
+      name: '@wsz987/dsh-channels/harness'
       inject:
         - channels
         - agents
@@ -28,36 +28,36 @@
         - commands
 
     - id: channels-control
-      name: '@wsz987/channel-control/plugin'
+      name: '@wsz987/dsh-channels/control'
       inject:
         - channels
         - credentials
 
     - id: channels-weixin
-      name: '@wsz987/channel-weixin'
+      name: '@wsz987/dsh-channels/weixin'
       inject:
         - channels
         - channelControl
 
     - id: channels-qq
-      name: '@wsz987/channel-qq'
+      name: '@wsz987/dsh-channels/qq'
       inject:
         - channels
         - credentials
         - channelControl
 
     - id: channels-dingtalk
-      name: '@wsz987/channel-dingtalk'
+      name: '@wsz987/dsh-channels/dingtalk'
       inject:
         - channels
         - credentials
         - channelControl
 
     - id: channels-lark
-      name: '@wsz987/channel-lark'
+      name: '@wsz987/dsh-channels/lark'
       inject:
         - channels
         - credentials
         - channelControl
     - id: channels-web
-      name: '@wsz987/channel-web'
+      name: '@wsz987/dsh-channels'

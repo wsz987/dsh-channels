@@ -84,12 +84,13 @@ the consumer side requires TypeScript compilation**:
    `inject` lists (`channels-harness` → `[channels, agents, agentDefaultModel,
    commands]`, `channels-control` → `[channels, credentials]`, the channel
    adapters → `[channels, (credentials,) channelControl]`);
-2. dynamically `import()`s every plugin specifier — this enforces Node ESM
-   **exports-map resolution** (`@wsz987/channel-core/plugin` fails the test if
-   the subpath export is missing) — and asserts the Cordis plugin shape
+2. dynamically `import()`s every bundle-owned plugin specifier — this enforces
+   Node ESM **exports-map resolution** (`@wsz987/dsh-channels/service`, etc.)
+   and asserts the Cordis plugin shape
    (`name`, `apply`, optional `inject`);
-3. asserts each referenced package exists in the workspace and its
-   `package.json` `exports` map covers the referenced subpath;
+3. asserts every patch row resolves through the bundle package itself, so a
+   profile needs only `@wsz987/dsh-channels` as a direct dependency, and checks
+   that its `package.json` `exports` map covers every referenced subpath;
 4. asserts every channel adapter's `Config` exposes an `enabled` boolean
    (Schemastery object-schema introspection) so all channels can be disabled
    via config.

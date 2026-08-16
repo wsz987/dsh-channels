@@ -1211,53 +1211,72 @@ Harness latest-compatible
 ```json
 {
   "name": "@wsz987/dsh-channels",
-  "version": "0.1.0",
+  "version": "0.9.0",
   "type": "module",
+  "exports": {
+    ".": "./lib/index.js",
+    "./service": "./lib/service.js",
+    "./files": "./lib/files.js",
+    "./harness": "./lib/harness.js",
+    "./control": "./lib/control.js",
+    "./weixin": "./lib/weixin.js",
+    "./qq": "./lib/qq.js",
+    "./dingtalk": "./lib/dingtalk.js",
+    "./lark": "./lib/lark.js",
+    "./client": "./lib/client.js"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
     }
   }
 }
 ```
+
+patch 只引用该 bundle 自己的 exports；实现包是 bundle 的内部依赖，不要求
+pnpm 将传递依赖提升到 profile 根目录。根入口同时承载 Web host 插件，
+`./client` 是同一包的 Harness Web 客户端产物。
 
 实际 patch（`packages/channels/cordis.patch.yml`，共 9 个插件，可逐项在 profile patch 中删除/禁用）：
 
 ```yaml
 - insert:
     - id: channels-service
-      name: '@wsz987/channel-core/plugin'
+      name: '@wsz987/dsh-channels/service'
 
     # 可选通用文件扩展；删除此行则仅保留文本占位符
     - id: channels-files
-      name: '@wsz987/channel-files'
+      name: '@wsz987/dsh-channels/files'
 
     - id: channels-harness
-      name: '@wsz987/channel-harness'
-      inject: [channels, agents, agentDefaultModel, commands]
+      name: '@wsz987/dsh-channels/harness'
+      inject: [channels, agents, agentDefaultModel, llm, commands]
 
     - id: channels-control
-      name: '@wsz987/channel-control/plugin'
+      name: '@wsz987/dsh-channels/control'
       inject: [channels, credentials]
 
     - id: channels-weixin
-      name: '@wsz987/channel-weixin'
+      name: '@wsz987/dsh-channels/weixin'
       inject: [channels, channelControl]
 
     - id: channels-qq
-      name: '@wsz987/channel-qq'
+      name: '@wsz987/dsh-channels/qq'
       inject: [channels, credentials, channelControl]
 
     - id: channels-dingtalk
-      name: '@wsz987/channel-dingtalk'
+      name: '@wsz987/dsh-channels/dingtalk'
       inject: [channels, credentials, channelControl]
 
     - id: channels-lark
-      name: '@wsz987/channel-lark'
+      name: '@wsz987/dsh-channels/lark'
       inject: [channels, credentials, channelControl]
 
     - id: channels-web
-      name: '@wsz987/channel-web'
+      name: '@wsz987/dsh-channels'
 ```
 
 `inject` 名称以 Harness 当前 public service 面为准（已在 `channel-harness` 收敛）。

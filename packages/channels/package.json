@@ -17,11 +17,55 @@
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./service": {
+      "types": "./lib/service.d.ts",
+      "default": "./lib/service.js"
+    },
+    "./files": {
+      "types": "./lib/files.d.ts",
+      "default": "./lib/files.js"
+    },
+    "./harness": {
+      "types": "./lib/harness.d.ts",
+      "default": "./lib/harness.js"
+    },
+    "./control": {
+      "types": "./lib/control.d.ts",
+      "default": "./lib/control.js"
+    },
+    "./weixin": {
+      "types": "./lib/weixin.d.ts",
+      "default": "./lib/weixin.js"
+    },
+    "./qq": {
+      "types": "./lib/qq.d.ts",
+      "default": "./lib/qq.js"
+    },
+    "./dingtalk": {
+      "types": "./lib/dingtalk.d.ts",
+      "default": "./lib/dingtalk.js"
+    },
+    "./lark": {
+      "types": "./lib/lark.d.ts",
+      "default": "./lib/lark.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
     "./package.json": "./package.json"
   },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ]
     }
   },
   "files": [
@@ -30,7 +74,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "clean": "rimraf lib"

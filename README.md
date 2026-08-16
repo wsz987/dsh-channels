@@ -136,7 +136,7 @@ pnpm web:debug             # 启动 dsh web
 
 ```yaml
 - id: channels-qq
-  name: '@wsz987/channel-qq'
+  name: '@wsz987/dsh-channels/qq'
   inject: [channels, credentials]
   config:
     accountId: main
@@ -151,7 +151,7 @@ pnpm web:debug             # 启动 dsh web
 
 ```yaml
 - id: channels-dingtalk
-  name: '@wsz987/channel-dingtalk'
+  name: '@wsz987/dsh-channels/dingtalk'
   config:
     upstream:
       mode: sdk
@@ -164,7 +164,7 @@ pnpm web:debug             # 启动 dsh web
 
 ```yaml
 - id: channels-lark
-  name: '@wsz987/channel-lark'
+  name: '@wsz987/dsh-channels/lark'
   config:
     upstream:
       mode: sdk
@@ -207,7 +207,7 @@ Agent 会在正常回复之外，再主动给你发一条「主动外发成功�
 
 ```yaml
 - id: channels-harness
-  name: '@wsz987/channel-harness'
+  name: '@wsz987/dsh-channels/harness'
   config:
     workspace:
       mode: channel-account   # channel-account（默认）| host-cwd | disabled

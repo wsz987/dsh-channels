@@ -1,8 +1,8 @@
 /**
- * @wsz987/dsh-channels — DSH Bundle.
+ * @wsz987/dsh-channels — DSH Bundle and Web host entry.
  *
- * The bundle composes the ChannelService, the Harness bridge and the four
- * official adapters through `cordis.patch.yml`; it carries no business
- * implementation itself.
+ * Official Harness bundles expose the plugin modules referenced by their own
+ * patch. The package root is the Web host entry so Harness can also discover
+ * this package's dsh.client declaration.
  */
-export {};
+export * from '@wsz987/channel-web';

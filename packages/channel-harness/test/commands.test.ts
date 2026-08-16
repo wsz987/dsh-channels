@@ -358,6 +358,26 @@ describe('A. official dsh-commands compatibility', () => {
     expect(ctx.commands.find(agent as never, 'new')).toBeDefined();
     await secondDispose();
   });
+
+  it('hands off command ownership when a replacement installs before the old disposer runs', async () => {
+    const ctx = new Context();
+    new CommandRuntime(ctx);
+    const agent = fakeScopedAgent(ctx, 's-overlap');
+
+    const firstDispose = await installChannelCommands(agent.ctx, {
+      startNewSession: async () => {},
+    });
+    const secondDispose = await installChannelCommands(agent.ctx, {
+      startNewSession: async () => {},
+    });
+
+    expect(ctx.commands.find(agent as never, 'new')).toBeDefined();
+    await firstDispose();
+    expect(ctx.commands.find(agent as never, 'new')).toBeDefined();
+
+    await secondDispose();
+    expect(ctx.commands.find(agent as never, 'new')).toBeUndefined();
+  });
 });
 describe('B. ordinary message regression', () => {
   it('sends hello to toHarnessUserMessage -> followup with no adapter send and no command events', async () => {
