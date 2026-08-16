@@ -84,6 +84,11 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      # The bundle tests resolve the package's own exports map and Web client
+      # artifact. `lib/` is gitignored, and Turbo only builds dependencies of
+      # a task by default, so build the bundle graph before running tests.
+      - name: Build bundle (for bundle tests)
+        run: pnpm build --filter=@wsz987/dsh-channels...
       - name: Test
         run: pnpm test
       # The verify CLI validates each target adapter's RELEASE artifact
