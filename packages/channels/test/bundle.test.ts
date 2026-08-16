@@ -183,6 +183,23 @@ describe('every channel adapter can be disabled through its config', () => {
 });
 
 describe('optional generic-file package boundary', () => {
+  it('uses the Harness-owned tool runtime for every registered channel tool', () => {
+    for (const dir of ['channel-files', 'channel-harness']) {
+      const manifest = JSON.parse(readFileSync(packageJsonPath(dir), 'utf8')) as {
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+        peerDependencies?: Record<string, string>;
+        peerDependenciesMeta?: Record<string, { optional?: boolean }>;
+      };
+      // Tool definitions carry private runtime symbols. A bundled dsh-tools
+      // copy cannot register with the host registry that executes the tool.
+      expect(manifest.dependencies).not.toHaveProperty('@deepseek-ai/dsh-tools');
+      expect(manifest.peerDependencies?.['@deepseek-ai/dsh-tools']).toBe('^0.1.0-rc.6');
+      expect(manifest.peerDependenciesMeta?.['@deepseek-ai/dsh-tools']?.optional).toBe(true);
+      expect(manifest.devDependencies?.['@deepseek-ai/dsh-tools']).toBe('0.1.0-rc.6');
+    }
+  });
+
   it('links channel-files as shared infrastructure in source installs', () => {
     const installer = readFileSync(fileURLToPath(DEV_INSTALLER_URL), 'utf8');
     const infrastructure = installer.match(/const INFRASTRUCTURE_ROWS = new Set\(\[([\s\S]*?)\]\);/)?.[1];

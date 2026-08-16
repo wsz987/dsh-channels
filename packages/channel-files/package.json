@@ -32,7 +32,6 @@
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-home-paths": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-llm": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
     "@wsz987/channel-core": "workspace:*",
     "@wsz987/channel-harness": "workspace:*",
     "mammoth": "1.12.1",
@@ -41,7 +40,16 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
     "rimraf": "^6.0.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    }
   },
   "license": "MIT"
 }
