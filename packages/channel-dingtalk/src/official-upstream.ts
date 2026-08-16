@@ -17,11 +17,12 @@
  * reason, per plan §34 (delete any protocol with no official basis).
  */
 import type { ChannelTarget } from '@wsz987/channel-core';
-import { ChannelError } from '@wsz987/channel-core';
+import { ChannelError, SecureRemoteMediaFetcher } from '@wsz987/channel-core';
 import { z } from 'zod';
 import type { CardCreateResult, DingTalkUpstream } from './upstream.js';
 import type { HttpTransport } from './transport.js';
 import { sniffImageMime } from './media-mime.js';
+import type { RemoteMediaFetchLike } from './image-hydrator.js';
 import type {
   DingTalkOpenApiPort,
   DingTalkOpenApiCredentials,
@@ -34,6 +35,7 @@ import type {
 } from './openapi-port.js';
 
 const DINGTALK_API = 'https://api.dingtalk.com';
+const DINGTALK_OAPI = 'https://oapi.dingtalk.com';
 const AI_CARD_TEMPLATE_ID = '02fcf2f4-5e02-4a85-b672-46d1f715543e.schema';
 
 const tokenSchema = z.object({
@@ -42,7 +44,7 @@ const tokenSchema = z.object({
 }).passthrough();
 
 const mediaUploadSchema = z.object({
-  mediaId: z.string().min(1),
+  mediaId: z.string().min(1).optional(),
   media_id: z.string().min(1).optional(),
   mediaIdV2: z.string().min(1).optional(),
 }).passthrough();
@@ -57,6 +59,8 @@ const replyTargetSchema = z.object({
 
 export interface DingTalkOfficialUpstreamOptions extends DingTalkOpenApiCredentials {
   transport: HttpTransport;
+  /** Shared host safety boundary for short-lived DingTalk download URLs. */
+  secureFetch?: RemoteMediaFetchLike;
 }
 
 interface CachedToken {
@@ -76,9 +80,11 @@ export class DingTalkOpenApiPortImpl implements DingTalkOpenApiPort, DingTalkUps
   private readonly now: () => number;
   private cachedToken?: CachedToken;
   private readonly inputingCards = new Set<string>();
+  private readonly secureFetch: RemoteMediaFetchLike;
 
   constructor(private readonly options: DingTalkOfficialUpstreamOptions) {
     this.now = options.now ?? Date.now;
+    this.secureFetch = options.secureFetch ?? new SecureRemoteMediaFetcher();
   }
 
   async receive(): Promise<void> {
@@ -150,43 +156,51 @@ export class DingTalkOpenApiPortImpl implements DingTalkOpenApiPort, DingTalkUps
 
   /**
    * Upload a media file (plan §86 media upload). Official behavior basis:
-   * DingTalk robot file upload `POST /v1.0/robot/messageFiles/uploadRobotFile`
-   * (multipart file + agentId/robotCode) as used by the official connector's
-   * media path. The exact multipart framing is platform-owned; here the raw
-   * bytes ride the shared transport so the call is fully injectable for offline
-   * tests and the response `mediaId` is returned. Payload contract basis:
-   * official connector media upload (host never re-invents upload protocol, plan §65).
+   * DingTalk media upload `POST /media/upload?access_token=...&type=image|file`
+   * as used by the connector. Standard `FormData` delegates multipart framing
+   * to fetch instead of reproducing a platform protocol in this package.
    */
   async uploadMedia(input: MediaUploadInput): Promise<MediaUploadResult> {
     const token = await this.getAccessToken();
-    const raw = await this.options.transport.request(`${DINGTALK_API}/v1.0/robot/messageFiles/uploadRobotFile`, {
-      method: 'POST',
-      headers: { 'x-acs-dingtalk-access-token': token },
-      raw: input.data,
-      contentType: input.mimeType ?? 'application/octet-stream',
-      body: { agentId: input.robotCode, robotCode: input.robotCode, filename: input.fileName },
-    });
+    const form = new FormData();
+    form.append(
+      'media',
+      new Blob([input.data], { type: input.mimeType ?? 'application/octet-stream' }),
+      input.fileName,
+    );
+    const raw = await this.options.transport.request(
+      `${DINGTALK_OAPI}/media/upload?access_token=${encodeURIComponent(token)}&type=${input.mediaType}`,
+      { method: 'POST', body: form },
+    );
     const parsed = mediaUploadSchema.safeParse(raw);
-    if (!parsed.success || !(parsed.data.mediaId || parsed.data.media_id || parsed.data.mediaIdV2)) {
+    if (!parsed.success) {
       throw new ChannelError('CHANNEL_ERROR', 'dingtalk media upload response is missing mediaId');
     }
-    return { mediaId: parsed.data.mediaId ?? parsed.data.media_id ?? parsed.data.mediaIdV2 };
+    const mediaId = parsed.data.mediaId ?? parsed.data.media_id ?? parsed.data.mediaIdV2;
+    if (!mediaId) {
+      throw new ChannelError('CHANNEL_ERROR', 'dingtalk media upload response is missing mediaId');
+    }
+    return { mediaId };
   }
 
   /**
    * Send an uploaded mediaId as a robot image/file message (plan §86 media send).
    * Official behavior basis: DingTalk robot message send with msgKey
-   * `sampleImage` (`{ "photoMediaId" }`) or `sampleFile` (`{ "fileName","fileMediaId" }`);
-   * mirrors the official connector media-send path. Payload contract from the
-   * official connector.
+   * `sampleImageMsg` with `{ photoURL: mediaId }` for images, and
+   * `sampleFile` with `{ mediaId, fileName, fileType }` for files, matching
+   * the connector's verified proactive paths.
    */
   async sendMedia(input: MediaSendInput): Promise<RobotMessageSendResult> {
     const key = input.conversationType === 'dm' ? 'oToMessages/batchSend' : 'groupMessages/send';
     const token = await this.getAccessToken();
     const msgParam = input.msgtype === 'image'
-      ? JSON.stringify({ photoMediaId: input.mediaId })
-      : JSON.stringify({ fileName: input.name ?? 'file', fileMediaId: input.mediaId, fileSize: 0 });
-    const msgKey = input.msgtype === 'image' ? 'sampleImage' : 'sampleFile';
+      ? JSON.stringify({ photoURL: input.mediaId })
+      : JSON.stringify({
+        mediaId: input.mediaId,
+        fileName: input.name ?? 'file',
+        fileType: extensionOf(input.name),
+      });
+    const msgKey = input.msgtype === 'image' ? 'sampleImageMsg' : 'sampleFile';
     const body: Record<string, unknown> = input.conversationType === 'dm'
       ? { robotCode: input.robotCode, userIds: [input.conversationId], msgKey, msgParam }
       : { openConversationId: input.conversationId, robotCode: input.robotCode, msgKey, msgParam };
@@ -299,13 +313,17 @@ export class DingTalkOpenApiPortImpl implements DingTalkOpenApiPort, DingTalkUps
         'dingtalk resolveMedia: opaque ref requires per-message downloadCode context (official messageFiles/download API)',
       );
     }
-    const raw = await this.options.transport.request(downloadUrl, {
-      method: 'GET',
-      responseType: 'arraybuffer',
+    const result = await this.secureFetch.fetchBounded(downloadUrl, {
+      maxBytes: 100 * 1024 * 1024,
+      idleTimeoutMs: 15_000,
       timeoutMs: 60_000,
-    }, options?.signal);
-    const data = raw instanceof Uint8Array ? raw : new Uint8Array(raw as ArrayBuffer);
-    return { data, mimeType: sniffImageMime(data), size: data.byteLength };
+      signal: options?.signal,
+    });
+    return {
+      data: result.data,
+      mimeType: result.mimeType ?? sniffImageMime(result.data),
+      size: result.data.byteLength,
+    };
   }
 
   /**
@@ -406,8 +424,8 @@ export class DingTalkOpenApiPortImpl implements DingTalkOpenApiPort, DingTalkUps
 export const OFFICIAL_BASIS: Record<string, string> = {
   getAccessToken: "oracle=@dingtalk-real-ai/dingtalk-connector@0.8.24 :: DingTalk OpenAPI POST /v1.0/oauth2/accessToken token acquisition (mirrors official connector token flow)",
   sendProactiveText: "oracle=@dingtalk-real-ai/dingtalk-connector@0.8.24 :: robot message proactive send (groupMessages/send | oToMessages/batchSend, msgKey=sampleText) — payload contract from official connector",
-  uploadMedia: "oracle=@dingtalk-real-ai/dingtalk-connector@0.8.24 :: robot file upload POST /v1.0/robot/messageFiles/uploadRobotFile (multipart, agentId/robotCode + file) — official connector media path",
-  sendMedia: "oracle=@dingtalk-real-ai/dingtalk-connector@0.8.24 :: robot media send msgKey=sampleImage|sampleFile (groupMessages/send | oToMessages/batchSend) — official connector media path",
+  uploadMedia: "oracle=@dingtalk-real-ai/dingtalk-connector@0.8.24 :: OAPI POST /media/upload?access_token=...&type=image|file multipart(media) — official connector media path",
+  sendMedia: "oracle=@dingtalk-real-ai/dingtalk-connector@0.8.24 :: image msgKey=sampleImageMsg msgParam={photoURL:mediaId}; file msgKey=sampleFile msgParam={mediaId,fileName,fileType}",
   createCard: "oracle=@dingtalk-real-ai/dingtalk-connector@0.8.24 :: AI Card POST /v1.0/card/instances + deliver (template 02fcf2f4-5e02-4a85-b672-46d1f715543e.schema)",
   updateCard: "oracle=@dingtalk-real-ai/dingtalk-connector@0.8.24 :: AI Card PUT /v1.0/card/streaming update (isFinalize=false)",
   finishCard: "oracle=@dingtalk-real-ai/dingtalk-connector@0.8.24 :: AI Card PUT /v1.0/card/streaming finalize (isFinalize=true)",
@@ -418,3 +436,9 @@ export const OFFICIAL_BASIS: Record<string, string> = {
 
 /** Legacy alias (plan §34 rename): `DingTalkOfficialUpstream` -> `DingTalkOpenApiPortImpl`. */
 export const DingTalkOfficialUpstream = DingTalkOpenApiPortImpl;
+
+function extensionOf(fileName: string | undefined): string {
+  const name = fileName?.trim() ?? '';
+  const index = name.lastIndexOf('.');
+  return index > -1 && index < name.length - 1 ? name.slice(index + 1).toLowerCase() : 'file';
+}

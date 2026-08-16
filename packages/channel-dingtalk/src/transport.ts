@@ -61,17 +61,19 @@ export class FetchTransport implements HttpTransport {
     try {
       const url = /^https?:\/\//i.test(path) ? path : `${this.baseUrl}${path}`;
       const headers: Record<string, string> = { ...init.headers };
-      // fetch accepts strings and Uint8Array as body ('BodyInit' isn't in the
-      // lib scope here, so type the wire body minimally).
-      const body: string | Uint8Array | undefined =
+      // `FormData` is passed through untouched so fetch creates the multipart
+      // boundary. JSON and legacy raw bytes retain their existing paths.
+      const body: string | Uint8Array | FormData | undefined =
         init.raw !== undefined
           ? (typeof init.raw === 'string' ? init.raw : new Uint8Array(init.raw.buffer, init.raw.byteOffset, init.raw.byteLength))
+          : init.body instanceof FormData
+            ? init.body
           : init.body !== undefined
             ? JSON.stringify(init.body)
             : undefined;
       if (init.raw !== undefined) {
         headers['content-type'] = init.contentType ?? 'application/octet-stream';
-      } else if (init.body !== undefined) {
+      } else if (init.body !== undefined && !(init.body instanceof FormData)) {
         headers['content-type'] = headers['content-type'] ?? 'application/json';
       }
       const response = await this.fetchImpl(url, {

@@ -35,4 +35,20 @@ describe('FetchTransport', () => {
 
     await transport.request('/v1.0/example', { method: 'POST', body: { ok: true } });
   });
+
+  it('passes FormData through without setting a multipart content-type', async () => {
+    const form = new FormData();
+    form.append('media', new Blob([new Uint8Array([1, 2, 3])]), 'report.pdf');
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(init?.body).toBe(form);
+      expect(new Headers(init?.headers).has('content-type')).toBe(false);
+      return new Response('{}', { status: 200 });
+    });
+    const transport = new FetchTransport('https://api.dingtalk.com', {
+      timeoutMs: 1_000,
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    await transport.request('/media/upload', { method: 'POST', body: form });
+  });
 });

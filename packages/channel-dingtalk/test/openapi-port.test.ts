@@ -14,6 +14,7 @@ import {
 import type { DingTalkOpenApiPort } from '../src/index.ts';
 
 const API = 'https://api.dingtalk.com';
+const OAPI = 'https://oapi.dingtalk.com';
 const tokenPath = `${API}/v1.0/oauth2/accessToken`;
 
 class FakeTransport implements HttpTransport {
@@ -40,6 +41,12 @@ function target(raw: Record<string, unknown> = {}): ChannelTarget {
     conversationId: 'cid_123' as never,
     conversationType: 'dm',
     raw,
+  };
+}
+
+function secureFetch(data: Uint8Array, mimeType?: string) {
+  return {
+    fetchBounded: async () => ({ data, mimeType, finalUrl: 'https://dl.example.com/resolved' }),
   };
 }
 
@@ -92,13 +99,13 @@ describe('DingTalkOpenApiPortImpl — method inventory (plan §33)', () => {
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
     const transport = new FakeTransport()
       .route(tokenPath, () => ({ accessToken: 'token-1', expireIn: 7200 }))
-      .route(`${API}/v1.0/robot/messageFiles/download`, () => ({ downloadUrl: 'https://dl.example.com/pic' }))
-      .route('https://dl.example.com/pic', () => png);
+      .route(`${API}/v1.0/robot/messageFiles/download`, () => ({ downloadUrl: 'https://dl.example.com/pic' }));
     const port = new DingTalkOpenApiPortImpl({
       transport,
       clientId: 'ding-app',
       clientSecret: 'secret',
       now: () => 1_000,
+      secureFetch: secureFetch(png),
     });
     const resolved = await port.resolveMedia('@lADP-media', {
       downloadCode: 'dl-code-1',
@@ -109,17 +116,19 @@ describe('DingTalkOpenApiPortImpl — method inventory (plan §33)', () => {
     expect(resolved.size).toBe(png.byteLength);
     const downloadCall = transport.calls.find((c) => c.path.endsWith('/messageFiles/download'));
     expect(downloadCall?.init?.body).toEqual({ downloadCode: 'dl-code-1', robotCode: 'ding-app' });
-    const bytesCall = transport.calls.find((c) => c.path === 'https://dl.example.com/pic');
-    expect(bytesCall?.init?.responseType).toBe('arraybuffer');
   });
 
   it('resolves an embedded richText downloadCode reference', async () => {
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
     const transport = new FakeTransport()
       .route(tokenPath, () => ({ accessToken: 'token-1', expireIn: 7200 }))
-      .route(`${API}/v1.0/robot/messageFiles/download`, () => ({ downloadUrl: 'https://dl.example.com/rich' }))
-      .route('https://dl.example.com/rich', () => png);
-    const port = new DingTalkOpenApiPortImpl({ transport, clientId: 'ding-app', clientSecret: 'secret' });
+      .route(`${API}/v1.0/robot/messageFiles/download`, () => ({ downloadUrl: 'https://dl.example.com/rich' }));
+    const port = new DingTalkOpenApiPortImpl({
+      transport,
+      clientId: 'ding-app',
+      clientSecret: 'secret',
+      secureFetch: secureFetch(png),
+    });
     await port.resolveMedia('downloadCode:dl-rich');
     const call = transport.calls.find((entry) => entry.path.endsWith('/messageFiles/download'));
     expect(call?.init?.body).toEqual({ downloadCode: 'dl-rich', robotCode: 'ding-app' });
@@ -132,9 +141,13 @@ describe('DingTalkOpenApiPortImpl — method inventory (plan §33)', () => {
 
   it('resolveMedia passes a genuine http(s) ref through directly', async () => {
     const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]);
-    const transport = new FakeTransport()
-      .route('https://cdn.example.com/a.jpg', () => jpeg);
-    const port = new DingTalkOpenApiPortImpl({ transport, clientId: 'a', clientSecret: 'b' });
+    const transport = new FakeTransport();
+    const port = new DingTalkOpenApiPortImpl({
+      transport,
+      clientId: 'a',
+      clientSecret: 'b',
+      secureFetch: secureFetch(jpeg),
+    });
     const resolved = await port.resolveMedia('https://cdn.example.com/a.jpg');
     expect(resolved.data).toEqual(jpeg);
     expect(resolved.mimeType).toBe('image/jpeg');
@@ -145,7 +158,7 @@ describe('DingTalkOpenApiPortImpl — media upload/send (plan §86)', () => {
   it('uploadMedia then sendMedia: upload called first, mediaId flows into send', async () => {
     const transport = new FakeTransport()
       .route(tokenPath, () => ({ accessToken: 'token-1', expireIn: 7200 }))
-      .route(`${API}/v1.0/robot/messageFiles/uploadRobotFile`, () => ({ mediaId: 'media_abc' }))
+      .route(`${OAPI}/media/upload?access_token=token-1&type=file`, () => ({ media_id: '@media_abc' }))
       .route(`${API}/v1.0/robot/groupMessages/send`, () => ({ messageId: 'msg_1' }));
     const port = new DingTalkOpenApiPortImpl({
       transport,
@@ -159,8 +172,9 @@ describe('DingTalkOpenApiPortImpl — media upload/send (plan §86)', () => {
       fileName: 'report.pdf',
       mimeType: 'application/pdf',
       data: new Uint8Array([10, 20, 30]),
+      mediaType: 'file',
     });
-    expect(uploaded.mediaId).toBe('media_abc');
+    expect(uploaded.mediaId).toBe('@media_abc');
 
     const sent = await port.sendMedia({
       conversationId: 'cid_1',
@@ -173,13 +187,14 @@ describe('DingTalkOpenApiPortImpl — media upload/send (plan §86)', () => {
 
     // Official method mapping: upload endpoint first, then robot groupMessages/send
     // carrying the SAME mediaId returned by the upload.
-    const uploadCall = transport.calls.find((c) => c.path.includes('/messageFiles/uploadRobotFile'));
+    const uploadCall = transport.calls.find((c) => c.path.includes('/media/upload?access_token=token-1&type=file'));
     const sendCall = transport.calls.find((c) => c.path.includes('/v1.0/robot/groupMessages/send'));
     expect(uploadCall).toBeDefined();
-    expect(uploadCall!.init!.body).toMatchObject({ agentId: 'ding-app', robotCode: 'ding-app', filename: 'report.pdf' });
+    expect(uploadCall!.init!.body).toBeInstanceOf(FormData);
+    expect((uploadCall!.init!.body as FormData).get('media')).toBeInstanceOf(File);
     expect(sendCall).toBeDefined();
     const msgParam = JSON.parse((sendCall!.init!.body as Record<string, string>).msgParam);
-    expect(msgParam).toEqual({ fileName: 'report.pdf', fileMediaId: 'media_abc', fileSize: 0 });
+    expect(msgParam).toEqual({ mediaId: '@media_abc', fileName: 'report.pdf', fileType: 'pdf' });
     expect((sendCall!.init!.body as Record<string, unknown>).msgKey).toBe('sampleFile');
     expect(sendCall!.init!.headers?.['x-acs-dingtalk-access-token']).toBe('token-1');
   });
@@ -187,9 +202,32 @@ describe('DingTalkOpenApiPortImpl — media upload/send (plan §86)', () => {
   it('rejects a media upload response missing mediaId', async () => {
     const transport = new FakeTransport()
       .route(tokenPath, () => ({ accessToken: 'token-1', expireIn: 7200 }))
-      .route(`${API}/v1.0/robot/messageFiles/uploadRobotFile`, () => ({ ok: true }));
+      .route(`${OAPI}/media/upload?access_token=token-1&type=file`, () => ({ ok: true }));
     const port = new DingTalkOpenApiPortImpl({ transport, clientId: 'a', clientSecret: 'b' });
-    await expect(port.uploadMedia({ robotCode: 'a', fileName: 'x.bin', data: new Uint8Array([1]) }))
+    await expect(port.uploadMedia({ robotCode: 'a', fileName: 'x.bin', data: new Uint8Array([1]), mediaType: 'file' }))
       .rejects.toThrow('missing mediaId');
+  });
+
+  it('uploads an image as type=image and sends the connector image payload', async () => {
+    const transport = new FakeTransport()
+      .route(tokenPath, () => ({ accessToken: 'token-1', expireIn: 7200 }))
+      .route(`${OAPI}/media/upload?access_token=token-1&type=image`, () => ({ media_id: '@image_abc' }))
+      .route(`${API}/v1.0/robot/groupMessages/send`, () => ({ messageId: 'image_msg_1' }));
+    const port = new DingTalkOpenApiPortImpl({ transport, clientId: 'ding-app', clientSecret: 'secret' });
+
+    const uploaded = await port.uploadMedia({
+      robotCode: 'ding-app',
+      fileName: 'chart.png',
+      mimeType: 'image/png',
+      data: new Uint8Array([1, 2, 3]),
+      mediaType: 'image',
+    });
+    await port.sendMedia({
+      conversationId: 'cid_1', robotCode: 'ding-app', mediaId: uploaded.mediaId, msgtype: 'image', name: 'chart.png',
+    });
+
+    const sendCall = transport.calls.find((c) => c.path.includes('/v1.0/robot/groupMessages/send'));
+    expect((sendCall!.init!.body as Record<string, unknown>).msgKey).toBe('sampleImageMsg');
+    expect(JSON.parse((sendCall!.init!.body as Record<string, string>).msgParam)).toEqual({ photoURL: '@image_abc' });
   });
 });

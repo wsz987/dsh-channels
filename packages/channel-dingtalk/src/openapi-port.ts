@@ -75,6 +75,8 @@ export interface MediaUploadInput {
   mimeType?: string;
   /** The raw bytes of the file to upload. */
   data: Uint8Array;
+  /** DingTalk OAPI upload category. */
+  mediaType: 'image' | 'file';
   /** Target conversation, when the platform requires an agentId/space for upload. */
   target?: ChannelTarget;
 }
@@ -92,9 +94,9 @@ export interface MediaSendInput {
   robotCode: string;
   /** The `mediaId` returned by `uploadMedia`. */
   mediaId: string;
-  /** `'image'` -> sampleImage robot message; `'file'` -> sampleFile. */
+  /** `image` -> `sampleImageMsg`; `file` -> `sampleFile`. */
   msgtype: 'image' | 'file';
-  /** Display file name for the `'file'` message type. */
+  /** Display file name for the file-message path. */
   name?: string;
   /** `'group'` -> robot groupMessages/send; `'dm'` -> oToMessages/batchSend. */
   conversationType?: 'dm' | 'group';

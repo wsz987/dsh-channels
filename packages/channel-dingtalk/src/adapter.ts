@@ -248,6 +248,7 @@ export class DingTalkAdapter implements ChannelAdapter {
       transport: this.transport,
       clientId: this.config.upstream.clientId,
       clientSecret: this.deps.clientSecret,
+      secureFetch: this.secureFetch,
       now: this.now,
     });
     this.capProactive = { proactiveText: true, proactiveMedia: true };

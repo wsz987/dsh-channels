@@ -108,6 +108,7 @@ export class OutboundSender {
           fileName: media.fileName,
           mimeType: media.mimeType,
           data: media.localData,
+          mediaType: media.msgtype,
           target,
         });
         const result = await this.proactive.sendMedia({
@@ -161,9 +162,8 @@ export class OutboundSender {
     const part = message.parts[0];
     if (!part || (part.type !== 'file' && part.type !== 'image')) return undefined;
     if (!part.localData) return undefined;
-    const msgtype = part.type === 'image' ? 'image' : 'file';
     return {
-      msgtype,
+      msgtype: part.type === 'image' ? 'image' : 'file',
       localData: part.localData,
       mimeType: part.mimeType,
       fileName: part.name ?? (part.type === 'file' ? 'file' : 'image'),
