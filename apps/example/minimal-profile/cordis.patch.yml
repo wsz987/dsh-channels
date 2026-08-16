@@ -2,15 +2,15 @@
 #
 # This is the *user* profile patch (cordis.patch.yml) that overrides the rows
 # inserted by the @wsz987/dsh-channels bundle. A Harness patch REPLACES the whole
-# target config — it is NOT a deep merge (v1.1 §41) — so each `config:` block
-# below must carry the complete config for that plugin, not just the key you
-# want to change.
+# target config — it is NOT a deep merge — so each `config:` block below must
+# carry the complete config for that plugin, not just the key you want to
+# change.
 #
 # This file shows:
 #   - disabling the unused channels (weixin / dingtalk / lark), and
-#   - overriding channels-qq with its full v1.1 config. The QQ config carries
+#   - overriding channels-qq with its full config. The QQ config carries
 #     only the credential *reference* (`appSecretRef`); the real secret lives
-#     in `ctx.credentials` and is never written here (v1.1 §52, QQ-R5).
+#     in `ctx.credentials` and is never written here.
 
 - id: channels-weixin
   name: '@wsz987/channel-weixin'
@@ -29,6 +29,7 @@
   inject:
     - channels
     - credentials
+    - channelControl
   config:
     accountId: main
     appId: "YOUR_QQ_APP_ID"

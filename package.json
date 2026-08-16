@@ -18,6 +18,7 @@
     "doctor": "pnpm --filter @wsz987/channel-compat run doctor",
     "verify": "pnpm --filter @wsz987/channel-verify run verify",
     "channels": "node scripts/dev-channels.mjs",
+    "channels:clean": "node scripts/dev-channels.mjs --clean",
     "web:debug": "node scripts/dev-web-debug.mjs",
     "web:kill": "kill-port 3080",
     "check:upstream": "node scripts/check-upstream.mjs",

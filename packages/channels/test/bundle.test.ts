@@ -210,3 +210,17 @@ describe('optional generic-file package boundary', () => {
     });
   });
 });
+
+describe('local development installer', () => {
+  it('passes only the real bundle through dsh plugin management', () => {
+    const installer = readFileSync(fileURLToPath(DEV_INSTALLER_URL), 'utf8');
+
+    expect(installer).toContain("'plugin', '--profile', profile, 'add', '-w', BUNDLE_DIR");
+    expect(installer).toContain("spawnSync('pnpm', ['add', '-w', ...[...selectedDirs].map((dir) => resolve(dir))]");
+    expect(installer).not.toContain("'plugin', '--profile', profile, 'add', '-w', ...toLink");
+    expect(installer).toContain('owned.has(name)');
+    expect(installer).not.toContain("name.startsWith('@wsz987/')");
+    expect(installer).toContain("'plugin', '--profile', profile, 'remove', bundleName");
+    expect(installer).toContain("spawnSync('pnpm', ['remove', '-w', ...implementations]");
+  });
+});

@@ -308,6 +308,9 @@ importers:
       '@wsz987/channel-core':
         specifier: workspace:*
         version: link:../channel-core
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@wsz987/channel-testkit':
         specifier: workspace:*

@@ -1,9 +1,8 @@
 /**
- * Upstream Manifest (M0 boundary-lock) tests (plan section 39).
+ * Upstream Manifest (boundary-lock) tests.
  *
  * Asserts each of the four channels' `UPSTREAM_MANIFESTS` entry matches the
- * fixed baseline in docs/dsh-channels-final-execution-plan-2026-08-16-FINAL.md
- * section 4 EXACTLY: channel ids, package names, tested versions and the
+ * fixed upstream baseline: channel ids, package names, tested versions and the
  * integration strategy literal. Also exercises `getUpstreamManifest`.
  */
 import { describe, expect, it } from 'vitest';

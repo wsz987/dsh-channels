@@ -1,13 +1,15 @@
 # DeepSeek Harness Channels — 架构设计
 
-> 版本：v1.1 Harness-Native  
-> 日期：2026-08-13  
-> 状态：**最终架构 / 可进入实施**  
+> 版本：v1.2 As-Built
+> 日期：2026-08-16
+> 状态：**已实现（as-built）** —— 与当前代码保持一致，随实现持续更新
 > 目标：为 DeepSeek Harness 建立原生、可扩展、可测试、可持续跟随上游更新的 Channel SDK 与首批多渠道实现。
 
 ---
 
 ## 0. 本版修订说明
+
+v1.2（as-built）把本文档从「设计 / 实施计划」改为「已实现架构」，并补齐随代码落地的通用控制面（channel-control）、Web 设置面板（channel-web）、通用文件扩展（channel-files）、工作区隔离、主动外发（outbox）与命令面（详见 §6.5 与 §40）。以下保留 v1.1 的修订历史。
 
 v1.1 在原有：
 
@@ -146,7 +148,7 @@ Harness breaking change
 最终用户：
 
 ```bash
-npx @deepseek-ai/dsh plugin --profile default add @wsz987/dsh-channels
+npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@beta
 ```
 
 一次安装首批官方渠道。
@@ -156,14 +158,18 @@ npx @deepseek-ai/dsh plugin --profile default add @wsz987/dsh-channels
 ```text
 @wsz987/channel-core
 @wsz987/channel-harness
+@wsz987/channel-control     # 通用控制面
 @wsz987/channel-files       # 可选通用文件扩展
+@wsz987/channel-web         # Web 设置面板
 @wsz987/channel-testkit
 @wsz987/channel-compat
+@wsz987/channel-verify
 
 @wsz987/channel-weixin
 @wsz987/channel-qq
 @wsz987/channel-dingtalk
 @wsz987/channel-lark
+@wsz987/channel-telegram    # 第三方扩展示例（未正式支持）
 
 @wsz987/dsh-channels
 ```
@@ -184,135 +190,33 @@ npx @deepseek-ai/dsh plugin --profile default add @wsz987/dsh-channels
 deepseek-harness-channels/
 │
 ├─ apps/
-│  ├─ playground/
-│  │  ├─ channel-debug/
-│  │  ├─ harness-debug/
-│  │  └─ fixtures-viewer/
-│  │
-│  └─ example/
-│     └─ minimal-profile/
+│  ├─ example/
+│  │  └─ minimal-profile/
+│  └─ fake-channel/
 │
 ├─ packages/
-│  │
-│  ├─ channel-core/
-│  │  └─ src/
-│  │     ├─ adapter.ts
-│  │     ├─ context.ts
-│  │     ├─ service.ts
-│  │     ├─ registry.ts
-│  │     ├─ events.ts
-│  │     ├─ messages.ts
-│  │     ├─ capabilities.ts
-│  │     ├─ reply.ts
-│  │     ├─ auth.ts
-│  │     ├─ account.ts
-│  │     ├─ storage.ts
-│  │     ├─ secrets.ts
-│  │     ├─ health.ts
-│  │     └─ errors.ts
-│  │
-│  ├─ channel-harness/
-│  │  └─ src/
-│  │     ├─ index.ts
-│  │     ├─ config.ts
-│  │     ├─ bridge.ts
-│  │     ├─ session-router.ts
-│  │     ├─ binding-store.ts
-│  │     ├─ agent-router.ts
-│  │     ├─ agent-manager.ts
-│  │     ├─ reply-router.ts
-│  │     ├─ message-converter.ts
-│  │     └─ lifecycle.ts
-│  │
-│  ├─ channel-testkit/
-│  │  └─ src/
-│  │     ├─ contract-tests.ts
-│  │     ├─ fake-adapter.ts
-│  │     ├─ fake-upstream.ts
-│  │     ├─ fake-harness.ts
-│  │     ├─ fixture-loader.ts
-│  │     ├─ harness-compat.ts
-│  │     └─ e2e.ts
-│  │
-│  ├─ channel-compat/
-│  │  └─ src/
-│  │     ├─ manifest.ts
-│  │     ├─ compatibility.ts
-│  │     ├─ version-policy.ts
-│  │     └─ doctor.ts
-│  │
-│  ├─ channel-control/
-│  │  └─ src/
-│  │     ├─ service.ts
-│  │     ├─ plugin.ts
-│  │     ├─ types.ts
-│  │     ├─ definitions/registry.ts
-│  │     ├─ credentials/manager.ts
-│  │     ├─ auth/session-manager.ts
-│  │     ├─ auth/sanitizer.ts
-│  │     └─ runtime/manager.ts
-│  │
-│  ├─ channel-weixin/
-│  │  └─ src/
-│  │     ├─ index.ts
-│  │     ├─ config.ts
-│  │     ├─ adapter.ts
-│  │     ├─ upstream.ts
-│  │     ├─ auth.ts
-│  │     ├─ inbound.ts
-│  │     ├─ outbound.ts
-│  │     ├─ media.ts
-│  │     ├─ mapper.ts
-│  │     └─ capabilities.ts
-│  │
-│  ├─ channel-qq/
-│  │  └─ src/
-│  │     ├─ index.ts
-│  │     ├─ config.ts
-│  │     ├─ adapter.ts
-│  │     ├─ upstream.ts
-│  │     ├─ auth.ts
-│  │     ├─ gateway.ts
-│  │     ├─ inbound.ts
-│  │     ├─ outbound.ts
-│  │     └─ mapper.ts
-│  │
-│  ├─ channel-dingtalk/
-│  │  └─ src/
-│  │     ├─ index.ts
-│  │     ├─ config.ts
-│  │     ├─ adapter.ts
-│  │     ├─ upstream.ts
-│  │     ├─ auth.ts
-│  │     ├─ connection.ts
-│  │     ├─ inbound.ts
-│  │     ├─ outbound.ts
-│  │     ├─ ai-card.ts
-│  │     └─ mapper.ts
-│  │
-│  ├─ channel-lark/
-│  │  └─ src/
-│  │     ├─ index.ts
-│  │     ├─ config.ts
-│  │     ├─ adapter.ts
-│  │     ├─ upstream.ts
-│  │     ├─ auth.ts
-│  │     ├─ connection.ts
-│  │     ├─ inbound.ts
-│  │     ├─ outbound.ts
-│  │     ├─ cards.ts
-│  │     └─ mapper.ts
-│  │
-│  └─ channels/
-│     ├─ package.json
-│     ├─ cordis.patch.yml
-│     └─ README.md
+│  ├─ channel-core/        # Channel Contract + ChannelService（ctx.channels）
+│  ├─ channel-harness/     # 渠道 ↔ Harness 桥（唯一允许 import Harness API）
+│  ├─ channel-control/     # 控制面：配置 / 凭据 / Auth Session / 运行时挂载
+│  ├─ channel-files/       # 可选通用文件扩展（存储 / 解析 / read_channel_attachment）
+│  ├─ channel-web/         # Web「设置 → 渠道」面板 + HTTP API（/api/v1 + /api/v2）
+│  ├─ channel-weixin/      # 微信适配器（source-port，官方 iLink 协议）
+│  ├─ channel-qq/          # QQ 适配器（official-sdk）
+│  ├─ channel-dingtalk/    # 钉钉适配器（dingtalk-stream + 官方 OpenAPI port）
+│  ├─ channel-lark/        # 飞书适配器（official-sdk + 官方 OpenAPI）
+│  ├─ channel-telegram/    # 第三方扩展示例（未正式支持）
+│  ├─ channel-testkit/     # 契约测试 / fakes / fixture loader
+│  ├─ channel-compat/      # 上游版本治理 / doctor / manifest
+│  ├─ channel-verify/      # 适配器契约验证（pnpm verify）
+│  └─ channels/            # 对外 DSH bundle @wsz987/dsh-channels
 │
 ├─ fixtures/
-│  ├─ weixin/
+│  ├─ weixin/              # 微信 iLink inbound/outbound/QR fixtures
 │  ├─ qq/
 │  ├─ dingtalk/
-│  └─ lark/
+│  ├─ lark/
+│  ├─ telegram/            # 第三方示例 fixtures
+│  └─ upstream/            # 各渠道上游版本基线（README 占位）
 │
 ├─ pnpm-workspace.yaml
 ├─ package.json
@@ -463,56 +367,56 @@ channel-web      HTTP API（/api/v1 兼容 + /api/v2 控制面）· Harness Sett
 channel-harness  ChannelEvent → Session Binding → Agent → ReplyRouter（不参与扫码）
 ```
 
-- `ChannelDefinition`（doc §14）：平台差异的密封点。每个渠道插件在 `apply()` 里向
+- `ChannelDefinition`：平台差异的密封点。每个渠道插件在 `apply()` 里向
   `ctx.channelControl.definitions` 注册自己的 Definition（QQ / DingTalk / Lark / Weixin），
-  控制面通过 `createAdapter()` 决定何时 mount，而不是插件一加载就必须连接（§25）。
+  控制面通过 `createAdapter()` 决定何时 mount，而不是插件一加载就必须连接。
 - 未配置的 channel 不会使 Harness Profile 启动失败：`autoStartAll()` 跳过
-  `configured=false` 的定义，失败只记日志（§27）。
+  `configured=false` 的定义，失败只记日志。
 - headless 能力保留：预先在 profile config + `ctx.credentials` 配好的渠道仍然开机自动挂载。
 
-## 6.5.2 Auth Session 模型（§15–§20）
+## 6.5.2 Auth Session 模型
 
 ```text
 AuthMethod = qr | device | portal-login | credentials | hybrid
 AuthPhase  = preparing | waiting-scan | scanned | waiting-confirm
            | verification-required | credentials-required | authorized
            | expired | failed | cancelled
-AuthState  = pending | authenticated | expired | failed   （M1 兼容）
+AuthState  = pending | authenticated | expired | failed
 ```
 
 - 浏览器只拿 `PublicAuthSession`（id / channelId / state / phase / qr / expiresAt / prompt），
-  Secret、token、internal challenge 永不出进程（§18）。
+  Secret、token、internal challenge 永不出进程。
 - `AuthSessionManager`：一个 channel/account/method 默认最多一个 active session；新 session
-  会 cancel 旧 pending session；session id 用 `crypto.randomUUID()`（§19）。
-- 轮询节流由 Host 控制：`nextPollAt` 之前不真正访问 Provider（§20）。
-- QR 是结构化对象 `{ kind: 'content' | 'data-url' | 'external-url', value, expiresAt }`（§17）。
+  会 cancel 旧 pending session；session id 用 `crypto.randomUUID()`。
+- 轮询节流由 Host 控制：`nextPollAt` 之前不真正访问 Provider。
+- QR 是结构化对象 `{ kind: 'content' | 'data-url' | 'external-url', value, expiresAt }`。
 - Auth Session 只用于平台确实提供、且 Host 能轮询验证的授权流程。当前内置渠道的
   Weixin、DingTalk、Lark 均有对应的 Host `beginAuth()` / `pollAuth()` 实现；QQ 使用
   AppID/AppSecret 凭证设置，不创建 Auth Session。各渠道的前置条件和完成语义不同，
   不能把扫码成功统一解释为 Channel 已连接。
   官方控制台 URL 仍通过 `setupUrl` 作为普通链接展示，不冒充 provider 授权二维码。
 
-## 6.5.3 Runtime 生命周期（§21–§24）
+## 6.5.3 Runtime 生命周期
 
 - `mountChannelAdapter`（channel-core）现在返回 `ChannelMountHandle`（Cordis effect disposer，
   幂等；父 fiber unload 仍自动清理）。
 - `ChannelRuntimeManager`：`Map<ChannelAccountKey, ChannelMountHandle>`，内部支持 start / stop / restart；
   restart = resolve config → resolve secrets → build candidate adapter → dispose old mount →
-  mount → start → getHealth（§23）。
+  mount → start → getHealth。
 - Web 通过一次 `PUT /channels/:id/setup` 提交普通配置与 Secret；Host 分流保存后自动重挂并读取 health。
 - start / stop / restart 不作为 Web 用户操作或公开控制面 API 暴露。
-- 授权完成 ≠ 已连接：最终必须 `adapter.getHealth()` 才算 runtime connected（§40，禁止 4）。
+- 授权完成 ≠ 已连接：最终必须 `adapter.getHealth()` 才算 runtime connected（见 §40）。
 
-## 6.5.4 凭据边界（§8–§11，§30–§31）
+## 6.5.4 凭据边界
 
 - 配置只携带对机密的**引用**，绝不携带机密本身：`ctx.credentials.resolve/describe/set/unset`。
 - QQ `appSecretRef`、钉钉 `clientSecretRef`（默认 `DSH_CHANNEL_DINGTALK_MAIN_CLIENT_SECRET`）、
   飞书 `appSecretRef`（默认 `DSH_CHANNEL_LARK_MAIN_APP_SECRET`）。
-- 旧明文 `clientSecret` / `appSecret` 配置一次性迁移到凭据存储并删除明文（§52）。
+- 旧明文 `clientSecret` / `appSecret` 配置一次性迁移到凭据存储并删除明文。
 - Web 永远读不到 Secret 原值或 credential ref；`GET setup` 只返回动态
-  `{ configured, writable }`，统一保存响应也不 echo Secret（§31）。
+  `{ configured, writable }`，统一保存响应也不 echo Secret。
 - Weixin 的 bot token 仍走 Channel SecretStore（平台运行期产生的账号凭据），不与部署级
-  AppSecret 混淆（§11）。
+  AppSecret 混淆。
 
 通过 `ctx.on()` 注册的 Cordis 事件监听器由框架自动清理。
 
@@ -559,6 +463,9 @@ export interface ChannelAdapter {
 
   readonly capabilities: ChannelCapabilities;
 
+  /** 流式模式可按 target 覆写（如 QQ：C2C native / group buffered）。 */
+  resolveStreamingMode?(target: ChannelTarget): StreamingMode;
+
   start(ctx: ChannelAdapterContext): Promise<void>;
 
   stop(): Promise<void>;
@@ -567,6 +474,12 @@ export interface ChannelAdapter {
     target: ChannelTarget,
     message: OutboundMessage,
   ): Promise<SendResult>;
+
+  /** 可选「正在输入」指示；失败不得中断回复投递。 */
+  startTyping?(conversationId: string): Promise<void>;
+  stopTyping?(conversationId: string): Promise<void>;
+  startTypingForTarget?(target: ChannelTarget): Promise<void>;
+  stopTypingForTarget?(target: ChannelTarget): Promise<void>;
 
   createReply?(
     target: ChannelTarget,
@@ -578,6 +491,8 @@ export interface ChannelAdapter {
   pollAuth?(
     challenge: AuthChallenge,
   ): Promise<AuthState>;
+
+  submitAuthInput?(challenge: AuthChallenge, input: AuthInput): Promise<void> | void;
 
   getHealth?(): Promise<ChannelHealth>;
 }
@@ -694,6 +609,13 @@ export type MessagePart =
   | CardPart
   | UnsupportedPart;
 ```
+
+二进制 part（Image / File / Audio / Video）共享 `BinaryPartBase`，字节载体四选一：
+
+- `url` —— 仅真实 `http(s)` URL（安全远程抓取器唯一接受的载体）
+- `resourceRef` —— 平台不透明句柄（Lark image_key / Telegram file_id / DingTalk mediaId），只由平台上游解析为字节
+- `dataUri` —— 内联 data URL
+- `localData` —— 适配器已下载/解密的受信字节（优先）；Core 不解码不落盘，由 Harness bridge 转成真实附件
 
 原因：
 
@@ -1299,56 +1221,61 @@ Harness latest-compatible
 }
 ```
 
-示意 patch：
+实际 patch（`packages/channels/cordis.patch.yml`，共 9 个插件，可逐项在 profile patch 中删除/禁用）：
 
 ```yaml
 - insert:
     - id: channels-service
       name: '@wsz987/channel-core/plugin'
 
+    # 可选通用文件扩展；删除此行则仅保留文本占位符
+    - id: channels-files
+      name: '@wsz987/channel-files'
+
     - id: channels-harness
       name: '@wsz987/channel-harness'
-      inject:
-        - channels
-        - agents
+      inject: [channels, agents, agentDefaultModel, commands]
+
+    - id: channels-control
+      name: '@wsz987/channel-control/plugin'
+      inject: [channels, credentials]
 
     - id: channels-weixin
       name: '@wsz987/channel-weixin'
-      inject:
-        - channels
+      inject: [channels, channelControl]
 
     - id: channels-qq
       name: '@wsz987/channel-qq'
-      inject:
-        - channels
+      inject: [channels, credentials, channelControl]
 
     - id: channels-dingtalk
       name: '@wsz987/channel-dingtalk'
-      inject:
-        - channels
+      inject: [channels, credentials, channelControl]
 
     - id: channels-lark
       name: '@wsz987/channel-lark'
-      inject:
-        - channels
+      inject: [channels, credentials, channelControl]
+
+    - id: channels-web
+      name: '@wsz987/channel-web'
 ```
 
-实际 inject 名称以实现时 Harness 当前 public service 为准。
+`inject` 名称以 Harness 当前 public service 面为准（已在 `channel-harness` 收敛）。
 
 ---
 
 # 29. 安装体验
 
-正式：
+正式（安装到 web profile，装完自动合并 cordis.patch.yml；profile 目录是 pnpm workspace 根，需带 `-w`）：
 
 ```bash
-npx @deepseek-ai/dsh plugin --profile default add @wsz987/dsh-channels
+npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@beta
 ```
 
 也允许第三方：
 
 ```bash
-npx @deepseek-ai/dsh plugin --profile default add @foo/dsh-channel-telegram
+npx @deepseek-ai/dsh plugin --profile web add -w @foo/dsh-channel-telegram@beta
 ```
 
 如果直接从 GitHub 安装 TypeScript package，需要遵守 Harness 官方 bundle/profile 和 prepare/build 安全模型。
@@ -1362,7 +1289,7 @@ npx @deepseek-ai/dsh plugin --profile default add @foo/dsh-channel-telegram
 高级用户可以：
 
 ```bash
-npx @deepseek-ai/dsh plugin --profile minimal add @wsz987/channel-weixin
+npx @deepseek-ai/dsh plugin --profile minimal add -w @wsz987/channel-weixin@beta
 ```
 
 前提：
@@ -1849,7 +1776,7 @@ DSH Bundle
 
 # 40. 已落地设计补遗（v1.1 之后）
 
-v1.1 正文成稿后，以下两项设计已随实现落地，补充记录于此（避免后续维护者误判为未设计）。
+v1.1 正文成稿后，以下设计已随实现落地，补充记录于此（避免后续维护者误判为未设计）。
 
 ## 40.1 工作区隔离（channel-account workspace）
 
@@ -1899,3 +1826,19 @@ provider，不修改适配器、Channel Contract 和会话路由。
 
 PDF 解析使用 `unpdf`（PDF.js），DOCX 使用 `mammoth`，XLSX 使用 `xlsx`；这些
 依赖全部归属 `channel-files`，禁止重新加入 `channel-harness`。
+
+## 40.4 媒体安全硬化 + 主动外发 + 命令面
+
+- **媒体安全硬化**（`channel-core/src/media/`）：`secure-fetcher` 只接受真实
+  `http(s)` URL 的远程媒体，`remote-policy` 做 host / 大小 / MIME 约束，
+  `bounded-response` 限制下载字节上限；适配器下载到 `ImagePart.localData`
+  后走 §40.2 原生图片链路。微信入站图片与通用文件统一限制 **100 MiB**。
+- **主动外发（outbox）**（`channel-harness/src/outbox/`）：`send_channel_message`
+  Harness 工具支持主动文本/媒体外发，能力由 `outbox/capabilities` 按渠道协商
+  （飞书 / QQ 全量，钉钉仅 SDK 模式，微信按上游能力暴露）。
+- **命令面**（`channel-harness/src/commands/`）：以官方 `@deepseek-ai/dsh-commands`
+  格式注册斜杠指令（当前 `/new`），`commandFactories` 是唯一注册点，随 Agent 自动
+  注册，未注册指令会被拦截。
+- **通用控制面 + Web 设置**（`channel-control` + `channel-web`，见 §6.5）：扫码 /
+  设备授权 / 凭证表单统一为 `AuthSession` 模型，浏览器只消费净化的
+  `PublicAuthSession`，Secret 永不离开进程。

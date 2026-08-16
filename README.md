@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](package.json)
 
-将 微信 / QQ / 钉钉 / 飞书 的 OpenClaw 接入插件移植到 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)，统一通过 `ctx.channels` API 收发消息（社区项目，非官方）。
+为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 提供 微信 / QQ / 钉钉 / 飞书 的即时通讯渠道，采用「官方 SDK / 上游优先」的 Adapter/Bridge 架构（不重写平台协议），统一通过 `ctx.channels` API 收发消息（社区项目，非官方）。
 
 **目录**
 
@@ -22,10 +22,10 @@
 
 ## ✨ 特性
 
-- **一个包接入多渠道**：内置微信 / QQ / 钉钉 / 飞书，装完即在 Harness Web「设置 → 渠道」统一配置与扫码授权
+- **多渠道接入**：内置微信 / QQ / 钉钉 / 飞书，装完即在 Harness Web「设置 → 渠道」统一配置与扫码授权
 - **扫码即登录**：微信扫码免配置，钉钉 / 飞书支持扫码授权或填写平台凭证，QQ 填写 AppID / AppSecret 即可
 - **流式回复**：QQ / 钉钉 / 飞书支持边生成边输出
-- **附件**：微信 / QQ / 飞书 / 钉钉已接入 Harness 官方原生图片附件；通用文件（PDF / DOCX / XLSX / 文本）工具内容提取理解；（见[渠道总览](#-渠道总览)）
+- **附件**：微信 / QQ / 飞书 / 钉钉已接入 Harness 官方原生图片附件；补齐 Harness 缺失的通用文件能力——PDF / DOCX / XLSX / 文本可直接喂给 AI 理解（见[渠道总览](#-渠道总览)）
 - **工作区隔离**：各渠道 / 账号会话空间相互独立，互不串扰
 - **渠道指令**：会话内支持 `/new` 等斜杠指令
 - **凭据安全**：基于 DeepSeek Harness 凭据服务（`ctx.credentials`）存储密钥，扫码凭据持久化、重启免登录
@@ -36,7 +36,7 @@
 
 ```bash
 # 1. 安装 bundle 到 web profile（首次自动初始化 profile，装完自动合并 cordis.patch.yml）
-npx @deepseek-ai/dsh plugin --profile web add @wsz987/dsh-channels
+npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@beta
 
 # 2. 确认合并：应看到 channels-service / channels-files / channels-harness /
 #    channels-control / channels-web 及四个渠道插件
@@ -45,6 +45,11 @@ npx @deepseek-ai/dsh --profile web --dump-config
 # 3. 启动 Harness（等价于 --profile web）
 npx @deepseek-ai/dsh web
 ```
+
+> **安装说明**：profile 目录本身是一个 pnpm workspace（含 `pnpm-workspace.yaml`），
+> 不加 `-w`（`--workspace-root`）时 pnpm 会以 `ERR_PNPM_ADDING_TO_ROOT` 拒绝安装，
+> 因此安装命令必须带 `-w`。`@beta` 显式选择 beta 发行标签——当前 bundle 仅发布了
+> `0.1.0-beta.0`（`beta` 与 `latest` 均指向它）。若后续发布了 stable 版本，可去掉 `@beta`。
 
 装一个包即集成微信 / QQ / 钉钉 / 飞书等，各渠道在 Harness Web「设置 → 渠道」面板完成登录：
 
@@ -98,6 +103,7 @@ pnpm web:debug             # 启动 dsh web
 - `pnpm channels` 不带参 = 全装；可指定渠道（`pnpm channels weixin`、`pnpm channels weixin qq`），渠道名自动识别（别名 `wx` → weixin、`feishu` → lark），未选渠道自动禁用
 - 改完代码 `pnpm build` + 重启即生效
 - `web:debug`：`dsh web` + 调试日志，落盘 `dsh-web.log`
+- 切回发布版（如测 `@beta`）：先 `pnpm channels:clean` 清掉源码直链，再 `npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@beta`
 
 ## 🔌 渠道配置与登录
 
@@ -159,22 +165,26 @@ pnpm web:debug             # 启动 dsh web
 
 | 渠道 | 现在能做什么 | 状态 |
 | --- | --- | --- |
-| 微信 | 文本对话 · 原生图片（收/发）· 通用文件预览 · 主动文本/媒体外发 | ✅ |
-| QQ | 文本对话 · 流式回复 · 原生图片（收/发）· 通用文件预览 · 主动文本/媒体外发 | ✅ |
-| 钉钉 | 文本对话 · 流式回复 · 原生图片（收/发）· 通用文件预览 · 主动文本（SDK 模式）| ✅ |
-| 飞书 | 文本对话 · 流式回复 · 原生图片（收/发）· 通用文件预览 · 主动文本/媒体外发 | ✅ |
+| 微信 | 文本对话 · 原生图片（收/发）· 通用文件预览（入站）· 主动文本/图片外发 | ⚠️ |
+| QQ | 文本对话 · 流式回复 · 原生图片（收/发）· 通用文件（收/发）· 主动文本/图片/文件外发 | ✅ |
+| 钉钉 | 文本对话 · 流式回复 · 原生图片（收/发）· 通用文件（收/发）· 主动文本/图片/文件外发（SDK 模式） | ✅ |
+| 飞书 | 文本对话 · 流式回复 · 原生图片（收/发）· 通用文件（收/发）· 主动文本/图片/文件外发 | ✅ |
 
-> **附件接入（final 基线）**：DeepSeek Harness 官方 v1 已支持真实栅格图片附件；`dsh-channels` 的公共 Harness 图片附件链路已经完成。钉钉图片下载链路已接入，但在 offline contract 与 live proof 均通过前保持验证中；已验证渠道统一走 Harness `saveImage()` / `ImageBlock` 原生链路。
->
-> **图片 + 通用文件**：图片走 Harness 官方 `ctx.attachments` 原生链路；PDF / DOCX / XLSX / 文本由可选包 `@wsz987/channel-files` 提供 Private Channel Asset Store、Extractors 和 `read_channel_attachment`。PDF 使用 `unpdf`（PDF.js），不是项目自写解析器。音频 / 视频因 Harness v1 没有对应原生 Attachment/ContentBlock，暂继续降级或等待专门处理能力（ASR / 转录，见接入计划 P1）。
->
-> **微信入站文件大小**：微信下载的图片和通用文件统一限制为 **100 MiB**；超过该大小会在下载阶段被拒绝，不会写入附件存储。
->
-> `channels-files` 在 bundle 中默认启用，但不是 `channel-harness` 的必需依赖。要等待 Harness 官方通用文件能力或只保留文件占位符，可从 profile patch 删除 `id: channels-files`；文本、会话和官方图片链路不受影响。
->
-> **主动外发（outbox）**：`send_channel_message` Harness 工具支持主动文本/媒体外发；各渠道 proactive 能力：飞书 ✅、QQ ✅、钉钉 仅 SDK 模式 ✅（gateway 模式 fail-closed）、微信按上游能力对外暴露。
+> **说明**
+> - **状态**：微信 `experimental`（真实平台实测通过前不升 `tested`）；QQ / 钉钉 / 飞书 `tested`（离线契约验证通过）
+> - **图片**：四渠道收/发统一走 Harness `saveImage()` / `ImageBlock` 原生链路，真实平台实测待做
+> - **文件**：PDF / DOCX / XLSX / 文本由 `@wsz987/channel-files` 提取后供模型阅读；出站文件微信暂不支持；音频 / 视频暂降级
+> - **大小**：入站文件统一 **100 MiB** 上限
+> - **外发**：`send_channel_message` 支持四渠道主动文本/图片外发；文件外发支持 QQ / 钉钉 SDK / 飞书，微信不支持
+> - **可选**：删掉 profile 的 `id: channels-files` 即关闭文件扩展（图片 / 文本 / 会话不受影响）
 
-**第三方渠道**：如 Telegram 等，待接入。
+**主动外发示例**：从微信 / QQ 给机器人发一句话，让它调 `send_channel_message` 主动发消息：
+
+> 请调用 send_channel_message 工具，给我发一条消息，内容是：主动外发成功
+
+Agent 会在正常回复之外，再主动给你发一条「主动外发成功」。只能在**渠道会话**里触发——Harness Web 直接新开的会话没有渠道绑定，发不了。
+
+**第三方渠道**：`packages/channel-telegram` 是完整扩展示例（未正式支持），按下方 [二次开发规范](#-二次开发规范) 即可新增渠道。
 
 ## 🧭 工作区隔离
 
@@ -203,6 +213,7 @@ pnpm install && pnpm build && pnpm typecheck && pnpm test
 - [发布流程](docs/release.md)
 - [微信 live 验证手册](docs/weixin-live-verification-runbook.md)
 - [第三方版权声明](THIRD_PARTY_NOTICES.md)
+- 各子包 README：`packages/*/README.md`（每个包的安装、配置、开发说明）
 
 ---
 
@@ -220,6 +231,7 @@ pnpm install && pnpm build && pnpm typecheck && pnpm test
 | `packages/channel-files` | 可选通用文件扩展：私有存储、成熟文档解析库、读取工具 |
 | `packages/channel-control` | 控制面：配置 / 凭据 / 扫码授权 / 运行时生命周期 |
 | `packages/channel-{weixin,qq,dingtalk,lark}` | 内置渠道适配器 |
+| `packages/channel-telegram` | 第三方渠道扩展示例（未正式支持） |
 | `packages/channel-{compat,testkit,verify,web}` | 契约验证 / 测试工具 / Web 可视化 |
 | `templates/channel-adapter` | 新渠道脚手架 |
 

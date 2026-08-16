@@ -2,6 +2,12 @@
 
 Telegram Bot API channel adapter for DeepSeek Harness — the **M5 extensibility proof**.
 
+## Install
+
+```bash
+pnpm add @wsz987/channel-telegram
+```
+
 ## Extensibility proof
 
 This package was built against the **public Channel Contract** (`@wsz987/channel-core` +
@@ -61,8 +67,28 @@ files.
 ## Known limits (V1 proof)
 
 - `streaming: 'buffered'` — chunks accumulate and are delivered once per turn.
-- Media outbound sends the part `url` as the Bot API file reference
-  (`sendPhoto`/… `photo: <url>`); real file uploads (`multipart/form-data`) and
-  `getFile`-based downloads are future work.
+- Media outbound sends a public `url` or a platform `file_id` (`resourceRef`)
+  as the Bot API file reference (`sendPhoto`/… `photo: <ref>`); real file
+  uploads (`multipart/form-data`) and `getFile`-based downloads are future work.
+- Inbound media maps Telegram `file_id` to the contract's `resourceRef` carrier
+  (an opaque platform handle), never to `url` — `url` is reserved for real
+  `http(s)` URLs.
 - `beginAuth`/`pollAuth` are omitted: auth is token-driven (getMe() check at start).
 - `chat.type === 'channel'` currently maps to a `dm` conversation.
+
+## Development
+
+```bash
+pnpm --filter @wsz987/channel-telegram build
+pnpm --filter @wsz987/channel-telegram typecheck
+pnpm --filter @wsz987/channel-telegram test
+```
+
+## Related
+
+- [Repository root](../../README.md)
+- [Adapter authoring guide](../../docs/adapter-authoring.md)
+
+## License
+
+[MIT](../../LICENSE)

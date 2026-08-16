@@ -1,8 +1,8 @@
 # Example DSH profile — minimal
 
-Example DSH profile using the official v1.1 **bundle / profile / patch** model
-(v1.1 §40–§41, §52). It shows a user profile that consumes the
-**@wsz987/dsh-channels** bundle and then overrides it to run a QQ-only channel setup.
+Example DSH profile using the official **bundle / profile / patch** model. It
+shows a user profile that consumes the **@wsz987/dsh-channels** bundle and then
+overrides it to run a QQ-only channel setup.
 
 ## Files
 
@@ -17,7 +17,7 @@ Example DSH profile using the official v1.1 **bundle / profile / patch** model
 ```bash
 # 1. add the bundle to the profile (DSH installs the bundle into
 #    dsh.profile.bundles and applies the bundle's cordis.patch.yml)
-npx @deepseek-ai/dsh plugin --profile minimal add @wsz987/dsh-channels
+npx @deepseek-ai/dsh plugin --profile minimal add -w @wsz987/dsh-channels@beta
 
 # 2. inspect the merged config
 npx @deepseek-ai/dsh --profile minimal --dump-config
@@ -26,13 +26,13 @@ npx @deepseek-ai/dsh --profile minimal --dump-config
 npx @deepseek-ai/dsh --profile minimal
 ```
 
-## Profile override semantics (v1.1 §41)
+## Profile override semantics
 
 A Harness patch **replaces the whole `config` of the target row** — it is *not*
 a deep merge. Every `config:` block in `cordis.patch.yml` must therefore carry
 the complete config for that plugin, not just the key you want to change.
 
-## Credentials (QQ-R5)
+## Credentials
 
 The QQ AppSecret is **never** written into the profile, the bundle config, or
 git. Config carries only the credential **reference** (`appSecretRef`, e.g.
@@ -43,8 +43,9 @@ resolved at startup:
 appSecretRef: QQBOT_APP_SECRET   # reference only — the value lives in ctx.credentials
 ```
 
-The `channels-qq` plugin injects `[channels, credentials]`; the
-`channel-harness` bridge injects `[channels, agents, sessionPersistence]`.
+The `channels-qq` plugin injects `[channels, credentials, channelControl]`; the
+`channel-harness` bridge injects `[channels, agents, agentDefaultModel,
+commands]`.
 
 > **Note:** a real clean-profile install requires the dsh CLI (this repo ships
 > the bundle, not the CLI) and is a **manual release-validation step** —

@@ -1,17 +1,15 @@
 /**
- * Upstream Compatibility Manifest (execution plan §39).
+ * Upstream Compatibility Manifest.
  *
  * A fixed, declarative record of the official platform upstream each channel
- * adapter is verified against. This is the M0 "Upstream Boundary Lock": it pins
- * package names, tested versions, integration strategy, source repository and
- * the contract-fixture directories for the four official channels.
+ * adapter is verified against — the "Upstream Boundary Lock" from ADR 0001
+ * (docs/architecture/adr/0001-upstream-first-channel-platform-boundary.md).
+ * It pins package names, tested versions, integration strategy, source
+ * repository and the contract-fixture directories for the four official
+ * channels.
  *
- * The values here mirror docs/dsh-channels-final-execution-plan-2026-08-16-FINAL.md
- * section 4 (version baseline) and section 39 (manifest shape + channels doctor output)
- * EXACTLY. The plan is the authority: if a value appears to differ, the plan doc wins.
- *
- * This module is self-contained and has NO dependency on doctor.ts. It only describes
- * upstream facts; it never changes doctor behavior.
+ * This module is self-contained and has NO dependency on doctor.ts. It only
+ * describes upstream facts; it never changes doctor behavior.
  */
 
 /** The three integration strategies allowed by plan section 39. */

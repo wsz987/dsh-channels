@@ -55,7 +55,7 @@
       "content": [
         {
           "type": "image",
-          "url": "ANON_FILE_LARGE",
+          "resourceRef": "ANON_FILE_LARGE",
           "alt": "a photo"
         }
       ]

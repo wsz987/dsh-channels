@@ -14,13 +14,16 @@ configured with no `fixed` / `linked` groups
 | ---------------------- | ------- |
 | @wsz987/channel-core      | 0.3.0   |
 | @wsz987/channel-harness   | 0.4.2   |
+| @wsz987/channel-control   | 0.1.0   |
+| @wsz987/channel-files     | 0.1.0   |
+| @wsz987/channel-web       | 0.1.0   |
 | @wsz987/channel-testkit   | 0.2.0   |
 | @wsz987/channel-compat    | 0.2.0   |
 | @wsz987/channel-weixin    | 0.8.1   |
 | @wsz987/channel-qq        | 0.5.4   |
 | @wsz987/channel-dingtalk  | 0.7.0   |
 | @wsz987/channel-lark      | 0.6.3   |
-| @wsz987/dsh-channels          | 0.9.0   |
+| @wsz987/dsh-channels      | 0.9.0   |
 | @wsz987/channel-verify    | 0.1.0   |
 | @wsz987/channel-telegram  | 0.1.0   |
 
@@ -70,11 +73,13 @@ the consumer side requires TypeScript compilation**:
 (`packages/channels/test/bundle.test.ts`, vitest). It:
 
 1. parses `packages/channels/cordis.patch.yml` (hand-rolled parser, no YAML
-   dependency) and asserts the patch inserts exactly the six plugin ids —
-   `channels-service`, `channels-harness`, `channels-weixin`,
-   `channels-qq`, `channels-dingtalk`, `channels-lark` — with the v1.1
-   `inject` lists (`channels-harness` → `[channels, agents, sessionPersistence]`,
-   `channels-qq` → `[channels, credentials]`, the rest → `[channels]`);
+   dependency) and asserts the patch inserts exactly the nine plugin ids —
+   `channels-service`, `channels-files`, `channels-harness`,
+   `channels-control`, `channels-weixin`, `channels-qq`,
+   `channels-dingtalk`, `channels-lark`, `channels-web` — with their
+   `inject` lists (`channels-harness` → `[channels, agents, agentDefaultModel,
+   commands]`, `channels-control` → `[channels, credentials]`, the channel
+   adapters → `[channels, (credentials,) channelControl]`);
 2. dynamically `import()`s every plugin specifier — this enforces Node ESM
    **exports-map resolution** (`@wsz987/channel-core/plugin` fails the test if
    the subpath export is missing) — and asserts the Cordis plugin shape
@@ -102,13 +107,14 @@ validation installs the bundle into a **clean profile** with the real dsh CLI
 # 1. add the bundle to a clean profile — `plugin` auto-initializes the
 #    profile on first use (never reuse a dirty profile for release validation;
 #    there is no `dsh profile create` step)
-npx @deepseek-ai/dsh plugin --profile release-validation add @wsz987/dsh-channels
+npx @deepseek-ai/dsh plugin --profile release-validation add -w @wsz987/dsh-channels@beta
 
-# 2. dump the merged config — verify the six plugins were inserted
+# 2. dump the merged config — verify the nine plugins were inserted
 npx @deepseek-ai/dsh --profile release-validation --dump-config
 
-# 3. start the profile — all plugins load (channels-service, channels-harness,
-#    channels-weixin, channels-qq, channels-dingtalk, channels-lark)
+# 3. start the profile — all plugins load (channels-service, channels-files,
+#    channels-harness, channels-control, channels-weixin, channels-qq,
+#    channels-dingtalk, channels-lark, channels-web)
 npx @deepseek-ai/dsh --profile release-validation
 
 # 4. override channels via a profile patch (apps/example/minimal-profile/
@@ -152,12 +158,11 @@ without an org token; the repository field links npm back to the source.
 | architecture docs            | ✅     | `docs/deepseek-harness-channels-architecture.md` |
 | adapter authoring docs       | ✅     | `docs/adapter-authoring.md` |
 
-## Weixin release gate (plan R6)
+## Weixin release gate
 
 Before a Weixin channel release is declared, every item below must be green.
 The gate is split into an **Offline CI** leg (runs on every PR / push to `main`)
-and a **Live Platform Gate** (manual only — separation per the R6 "Live 测试不要放
-普通 PR" rule).
+and a **Live Platform Gate** (manual only — live 测试不放在普通 PR)。
 
 ### Offline CI ✓
 
@@ -197,27 +202,18 @@ and a **Live Platform Gate** (manual only — separation per the R6 "Live 测试
   `upstream.testedVersion` / `upstream.testedCommit` stay pending (filled only
   after live verification).
 - `versionRange` must be pinned to the verified commit/range — do NOT keep
-  `versionRange: '*'` long-term (doc R6 "不要保留 versionRange: '*' 长期").
+  `versionRange: '*'` long-term.
 
 ### README ✓
 
-- `packages/channel-weixin/README.md` reflects the actual (verified) support
-  matrix and does not over-advertise unverified capabilities.
+- 根 `README.md` 的「渠道总览」反映实际（已验证）能力矩阵：微信保持
+  `experimental` 且不夸大未验证能力（live gate 通过前不得标 `tested`）。
 
-### Text-only release caveat (until WX5 lands)
+### Media caveat
 
-Until WX5 (image/audio/file/video media paths) completes, a **Text-only** Weixin
-release is allowed, but it must be explicit:
-
-```ts
-image: false
-audio: false
-file: false
-video: false
-```
-
-Such a release must NOT be advertised as a full Weixin media channel — it is a
-Text-only channel until the live media smoke passes.
+微信图片 / 通用文件路径已随实现落地（见 README 渠道总览），但在 live 验收通过前，
+`status` 仍保持 `experimental`，不得在 manifest 或文档中把未通过 live 验证的能力
+写成 `tested` / 已官方验证。
 
 ## `.github/workflows/release.yml`
 

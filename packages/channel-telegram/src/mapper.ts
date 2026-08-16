@@ -161,17 +161,18 @@ function partsFor(message: TelegramMessage): MessagePart[] {
     return textParts(message.text);
   }
   if (Array.isArray(message.photo) && message.photo.length > 0) {
-    // Telegram sends several sizes; the last entry is the largest. The
-    // file_id is an opaque handle the Bot API accepts for re-sending —
-    // downloading real bytes would need getFile (documented as a V1 limit).
+    // Telegram sends several sizes; the last entry is the largest. file_id is
+    // a platform-opaque handle, so it maps to `resourceRef` — never `url`,
+    // which is reserved for real http(s) URLs. Downloading real bytes would
+    // need getFile (documented as a V1 limit).
     const last = message.photo[message.photo.length - 1];
-    const url = last?.file_id;
-    return [{ type: 'image', url, alt: message.caption }];
+    const resourceRef = last?.file_id;
+    return [{ type: 'image', resourceRef, alt: message.caption }];
   }
   if (message.document) {
     return [{
       type: 'file',
-      url: message.document.file_id,
+      resourceRef: message.document.file_id,
       name: message.document.file_name,
       mimeType: message.document.mime_type,
     }];
@@ -179,7 +180,7 @@ function partsFor(message: TelegramMessage): MessagePart[] {
   if (message.audio) {
     return [{
       type: 'audio',
-      url: message.audio.file_id,
+      resourceRef: message.audio.file_id,
       durationMs: message.audio.duration !== undefined ? message.audio.duration * 1000 : undefined,
       mimeType: message.audio.mime_type,
     }];
@@ -187,7 +188,7 @@ function partsFor(message: TelegramMessage): MessagePart[] {
   if (message.voice) {
     return [{
       type: 'audio',
-      url: message.voice.file_id,
+      resourceRef: message.voice.file_id,
       durationMs: message.voice.duration !== undefined ? message.voice.duration * 1000 : undefined,
       mimeType: message.voice.mime_type,
     }];
@@ -195,7 +196,7 @@ function partsFor(message: TelegramMessage): MessagePart[] {
   if (message.video) {
     return [{
       type: 'video',
-      url: message.video.file_id,
+      resourceRef: message.video.file_id,
       durationMs: message.video.duration !== undefined ? message.video.duration * 1000 : undefined,
       mimeType: message.video.mime_type,
     }];

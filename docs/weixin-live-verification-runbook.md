@@ -14,15 +14,15 @@
 
 ## 1. 一键验收（本地 CLI）
 
-\`\`\`bash
+```bash
 DSH_WEIXIN_LIVE=1 pnpm --filter @wsz987/channel-weixin test:live
-\`\`\`
+```
 
 可选：指定 endpoint（默认 prod）：
 
-\`\`\`bash
+```bash
 DSH_WEIXIN_LIVE=1 DSH_WEIXIN_BASE_URL=https://ilinkai.weixin.qq.com pnpm --filter @wsz987/channel-weixin test:live
-\`\`\`
+```
 
 或用 GitHub Actions（推荐，自带 preflight）：
 
@@ -32,29 +32,29 @@ DSH_WEIXIN_LIVE=1 DSH_WEIXIN_BASE_URL=https://ilinkai.weixin.qq.com pnpm --filte
 
 ## 2. 通过后的离线复核
 
-\`\`\`bash
+```bash
 pnpm check:manifests
 pnpm doctor
 pnpm check:bundle
 pnpm test
-\`\`\`
+```
 
 `pnpm doctor` 里 Weixin 的 Release verification 应显示：
 
-\`\`\`text
+```text
 Release verification:
   implementation: PASS
   offline contract: PASS
   live verification: PASS
   tested commit: <40-hex-sha>
   release status: VERIFIED
-\`\`\`
+```
 
 ## 3. 写入真实值（`packages/channel-weixin/src/manifest.ts`）
 
 把 manifest 从 pending 改成真实值：
 
-\`\`\`ts
+```ts
 export const manifest: WeixinManifest = {
   id: 'weixin',
   adapterVersion: pkg.version,
@@ -69,9 +69,9 @@ export const manifest: WeixinManifest = {
   sdk: undefined,
   status: 'tested',
 };
-\`\`\`
+```
 
-\`status: 'tested'` 会触发 `validateManifest` 强校验：`testedVersion` 非 placeholder、
+`status: 'tested'` 会触发 `validateManifest` 强校验：`testedVersion` 非 placeholder、
 `testedCommit` 为合法 SHA、`versionRange` 非 `*`，任一不满足都会在 `check:manifests` 失败。
 写完后再次跑 `pnpm check:manifests && pnpm doctor` 确认 VERIFIED。
 
@@ -84,5 +84,5 @@ live gate 通过后，本次版本可标记 `Release Verified`，但表述应精
 > 尚待真实平台 live gate；Lark multimodal attachment 属于后续 hardening。
 
 （当前 QQ=官方 SDK；Weixin=官方协议 source-port（等 live）；Lark=官方 SDK inbound + 官方
-OpenAPI outbound（R7B 已官方化）；DingTalk=官方 SDK inbound + 官方 OpenAPI outbound（等 live）。所以不要写成
+OpenAPI outbound（已官方化）；DingTalk=官方 SDK inbound + 官方 OpenAPI outbound（等 live）。所以不要写成
 "四渠道全部 official-direct verified"。）

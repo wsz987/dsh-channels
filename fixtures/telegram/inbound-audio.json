@@ -44,7 +44,7 @@
       "content": [
         {
           "type": "audio",
-          "url": "ANON_VOICE_FILE",
+          "resourceRef": "ANON_VOICE_FILE",
           "durationMs": 12000,
           "mimeType": "audio/ogg"
         }

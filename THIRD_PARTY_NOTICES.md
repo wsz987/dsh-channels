@@ -16,9 +16,9 @@ the Tencent **openclaw-weixin** iLink implementation.
 
 We do not depend on the openclaw runtime or its plugin SDK. Only the iLink
 wire protocol field names and endpoint conventions were used to build a clean,
-self-contained client for DeepSeek Harness. Where the CDN media / AES-128-ECB
-specification is not fully pinned by that reference, the implementation ships
-typed stubs (WX5) that throw a clear `WX5 not implemented` error rather than
-guessing.
+self-contained client for DeepSeek Harness. The CDN media and AES-128-ECB
+behavior follows the upstream's own implementation (see
+`packages/channel-weixin/src/media/` and the upstream facade), not a
+re-derived spec.
 
 This project is not affiliated with Tencent and is not an official Weixin SDK.

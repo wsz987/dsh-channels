@@ -28,7 +28,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 
 const BUNDLE_DIR = './packages/channels';
 const BUNDLE_PATCH = 'packages/channels/cordis.patch.yml';
@@ -130,6 +130,72 @@ function checkBuilt(packages) {
   }
 }
 
+/** Dependencies present in the profile that are owned by this bundle. */
+function managedDependencies(profileDir, rows) {
+  const manifestPath = join(profileDir, 'package.json');
+  if (!existsSync(manifestPath)) return null;
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  const owned = new Set(rows
+    .map((row) => row.name?.replace(/\/plugin$/, ''))
+    .filter(Boolean));
+  owned.add('@wsz987/dsh-channels');
+  return Object.keys(manifest.dependencies ?? {}).filter((name) => owned.has(name));
+}
+
+/** Strip the GENERATED marker section from cordis.patch.yml, keeping any user rows. */
+function resetPatch(profileDir) {
+  const patchPath = join(profileDir, 'cordis.patch.yml');
+  if (!existsSync(patchPath)) return false;
+  const existing = readFileSync(patchPath, 'utf8');
+  const before = existing.split(GENERATED_MARKER)[0];
+  const templateOnly = !/^\s*-\s+/m.test(before);
+  const user = normalizeUserSection(existing);
+  const next = templateOnly ? TEMPLATE : user ? `${user}\n` : TEMPLATE;
+  if (next !== existing) writeFileSync(patchPath, next);
+  return next !== existing;
+}
+
+/**
+ * Reverse `pnpm channels`: remove the bundle through Harness plugin management,
+ * remove its implementation packages through pnpm, then reset cordis.patch.yml
+ * to the user layer. Afterwards the profile is clean for a registry install.
+ */
+function clean(profile, rows) {
+  const profileDir = resolveProfileDir(profile);
+  const linked = managedDependencies(profileDir, rows);
+  const dsh = (process.env.DSH_CMD || 'npx @deepseek-ai/dsh').split(/\s+/).filter(Boolean);
+  if (linked === null) {
+    console.log(`dev-channels: profile ${profile} has no package.json — nothing to clean`);
+  } else if (linked.length === 0) {
+    console.log(`dev-channels: profile ${profile} has no dependencies managed by this bundle — nothing to remove`);
+  } else {
+    console.log(`dev-channels: removing from profile ${profile}: ${linked.join(', ')}`);
+    const bundleName = '@wsz987/dsh-channels';
+    const hasBundle = linked.includes(bundleName);
+    if (hasBundle) {
+      const result = spawnSync(dsh[0], [...dsh.slice(1), 'plugin', '--profile', profile, 'remove', bundleName], {
+        stdio: 'inherit',
+        shell: process.platform === 'win32',
+      });
+      if (result.error) fail(`failed to run ${dsh.join(' ')}: ${result.error.message} (is npx/pnpm on PATH?)`);
+      if (result.status !== 0) fail(`dsh plugin exited with code ${result.status}`);
+    }
+    const implementations = linked.filter((name) => name !== bundleName);
+    if (implementations.length > 0) {
+      const result = spawnSync('pnpm', ['remove', '-w', ...implementations], {
+        cwd: profileDir,
+        stdio: 'inherit',
+        shell: process.platform === 'win32',
+      });
+      if (result.error) fail(`failed to run pnpm: ${result.error.message} (is pnpm on PATH?)`);
+      if (result.status !== 0) fail(`pnpm remove exited with code ${result.status}`);
+    }
+  }
+  const patched = resetPatch(profileDir);
+  if (patched) console.log(`dev-channels: reset ${join(profileDir, 'cordis.patch.yml')} to the user layer`);
+  console.log(`dev-channels: cleaned ${profile} — reinstall with \`${dsh.join(' ')} plugin --profile ${profile} add -w @wsz987/dsh-channels@beta\``);
+}
+
 function run(args) {
   const help = () => {
     const channels = discoverChannels(parseBundleRows());
@@ -140,6 +206,7 @@ usage: pnpm channels [options] [channel...]
 
   --profile <name>   target profile (default: web)
   --all              install every channel (default when no channel is given)
+  --clean            remove this bundle's managed packages from the profile
   -h, --help         this help
 
 channels (from ${BUNDLE_PATCH}):
@@ -151,15 +218,19 @@ aliases: ${Object.entries(ALIASES).map(([k, v]) => `${k} -> ${v}`).join(', ')}
 
   let profile = 'web';
   let all = false;
+  let cleanMode = false;
   const positionals = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === '-h' || a === '--help') return help(), process.exit(0);
     if (a === '--profile') profile = args[++i] ?? fail('--profile needs a name');
     else if (a === '--all') all = true;
+    else if (a === '--clean') cleanMode = true;
     else if (a.startsWith('-')) fail(`unknown option ${a}`);
     else positionals.push(a);
   }
+
+  if (cleanMode) return clean(profile, parseBundleRows());
 
   const bundle = parseBundleRows();
   const channels = discoverChannels(bundle);
@@ -193,14 +264,28 @@ aliases: ${Object.entries(ALIASES).map(([k, v]) => `${k} -> ${v}`).join(', ')}
 
   console.log(`dev-channels: profile=${profile} channels=${selection.map((c) => c.id).join(',') || '(none)'}`);
   const dsh = (process.env.DSH_CMD || 'npx @deepseek-ai/dsh').split(/\s+/).filter(Boolean);
-  const result = spawnSync(dsh[0], [...dsh.slice(1), 'plugin', '--profile', profile, 'add', '-w', ...toLink], {
+  // Only the bundle is a profile layer. Adding implementation packages through
+  // `dsh plugin` works, but newer Harness versions warn for every package that
+  // intentionally has no `dsh.bundle`. Install the bundle first (which also
+  // initializes the profile), then add the implementation packages as plain
+  // pnpm dependencies so all entries remain direct source links without noise.
+  const bundleResult = spawnSync(dsh[0], [...dsh.slice(1), 'plugin', '--profile', profile, 'add', '-w', BUNDLE_DIR], {
     stdio: 'inherit',
     shell: process.platform === 'win32',
   });
-  if (result.error) fail(`failed to run ${dsh.join(' ')}: ${result.error.message} (is npx/pnpm on PATH?)`);
-  if (result.status !== 0) fail(`dsh plugin exited with code ${result.status}`);
+  if (bundleResult.error) fail(`failed to run ${dsh.join(' ')}: ${bundleResult.error.message} (is npx/pnpm on PATH?)`);
+  if (bundleResult.status !== 0) fail(`dsh plugin exited with code ${bundleResult.status}`);
 
-  const unselected = writeSelectionPatch(resolveProfileDir(profile), selection, channels);
+  const profileDir = resolveProfileDir(profile);
+  const dependencyResult = spawnSync('pnpm', ['add', '-w', ...[...selectedDirs].map((dir) => resolve(dir))], {
+    cwd: profileDir,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  });
+  if (dependencyResult.error) fail(`failed to run pnpm: ${dependencyResult.error.message} (is pnpm on PATH?)`);
+  if (dependencyResult.status !== 0) fail(`pnpm add exited with code ${dependencyResult.status}`);
+
+  const unselected = writeSelectionPatch(profileDir, selection, channels);
   if (unselected.length) {
     console.log(`dev-channels: disabled ${unselected.length} row(s) in ${join(resolveProfileDir(profile), 'cordis.patch.yml')}: ${unselected.map((c) => c.id).join(', ')}`);
     console.log('dev-channels: re-run with the missing channels (or no args = all) to re-enable them');

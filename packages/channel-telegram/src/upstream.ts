@@ -12,6 +12,7 @@
  * adapter-level second layer for webhook-style redelivery inside one cycle.
  */
 import { ChannelAuthError, ChannelError } from '@wsz987/channel-core';
+import { z } from 'zod';
 import type { HttpTransport } from './transport.js';
 
 /** Bot user returned by getMe. */
@@ -60,12 +61,28 @@ export interface HttpTelegramUpstreamOptions {
   longPollTimeoutMs: number;
 }
 
-interface TelegramApiResponse {
-  ok?: boolean;
-  result?: unknown;
-  error_code?: number;
-  description?: string;
-}
+/**
+ * Bot API envelope shared by every method: `{ ok, result?, error_code?,
+ * description? }`. Validated with zod (not hand-rolled casts) at the upstream
+ * boundary, matching the official adapters' response-validation pattern.
+ */
+const apiResponseSchema = z.object({
+  ok: z.boolean(),
+  result: z.unknown().optional(),
+  error_code: z.number().optional(),
+  description: z.string().optional(),
+}).passthrough();
+
+/** `getMe` result: the bot user. */
+const botUserSchema = z.object({
+  id: z.number(),
+  is_bot: z.boolean(),
+  first_name: z.string().optional(),
+  username: z.string().optional(),
+}).passthrough();
+
+/** `getUpdates` result: a list of raw updates (shape owned by the mapper). */
+const getUpdatesResultSchema = z.array(z.unknown());
 
 /** HTTP implementation over the Telegram Bot API. */
 export class HttpTelegramUpstream implements TelegramUpstream {
@@ -76,21 +93,21 @@ export class HttpTelegramUpstream implements TelegramUpstream {
   }
 
   async getMe(): Promise<TelegramBotUser> {
-    const payload = (await this.options.transport.request(this.path('getMe'))) as
-      | Partial<TelegramApiResponse>
-      | undefined;
-    const raw = payload ?? {};
-    if (!raw.ok) {
-      if (raw.error_code === 401) {
+    const envelope = apiResponseSchema.safeParse(await this.options.transport.request(this.path('getMe')));
+    if (!envelope.success) {
+      throw new ChannelError('CHANNEL_ERROR', 'telegram getMe returned an invalid response');
+    }
+    if (!envelope.data.ok) {
+      if (envelope.data.error_code === 401) {
         throw new ChannelAuthError('telegram getMe rejected: invalid bot token');
       }
-      throw new ChannelError('CHANNEL_ERROR', `telegram getMe failed: ${raw.description ?? 'unknown error'}`);
+      throw new ChannelError('CHANNEL_ERROR', `telegram getMe failed: ${envelope.data.description ?? 'unknown error'}`);
     }
-    const user = raw.result as TelegramBotUser | undefined;
-    if (!user || typeof user.id !== 'number') {
+    const user = botUserSchema.safeParse(envelope.data.result);
+    if (!user.success) {
       throw new ChannelError('CHANNEL_ERROR', 'telegram getMe returned no bot user');
     }
-    return user;
+    return user.data;
   }
 
   async getUpdates(
@@ -123,8 +140,14 @@ export class HttpTelegramUpstream implements TelegramUpstream {
         if (signal.aborted) return;
         throw error;
       }
-      const result = ((raw as Partial<TelegramApiResponse> | undefined)?.result ?? []) as unknown[];
-      for (const update of result) {
+      const envelope = apiResponseSchema.safeParse(raw);
+      const result = envelope.success && envelope.data.ok
+        ? getUpdatesResultSchema.safeParse(envelope.data.result ?? [])
+        : null;
+      if (!result?.success) {
+        throw new ChannelError('CHANNEL_ERROR', 'telegram getUpdates returned an invalid response');
+      }
+      for (const update of result.data) {
         if (signal.aborted) return;
         onUpdate(update);
         const updateId = (update as { update_id?: number })?.update_id;

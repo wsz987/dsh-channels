@@ -46,14 +46,23 @@ export class OutboundSender {
   }
 }
 
-/** First media part with a resolvable url, if any. */
+/**
+ * First media part with a sendable reference, if any. Telegram accepts both a
+ * public http(s) `url` and a platform `file_id` (`resourceRef`) in the same
+ * field, so either carrier resolves to a `TelegramMedia.url` reference.
+ */
 function firstMedia(parts: MessagePart[] | undefined): TelegramMedia | undefined {
-  if (!parts) return undefined;
-  for (const part of parts) {
-    if (part.type === 'image' && part.url) return { type: 'image', url: part.url };
-    if (part.type === 'file' && part.url) return { type: 'file', url: part.url };
-    if (part.type === 'audio' && part.url) return { type: 'audio', url: part.url };
-    if (part.type === 'video' && part.url) return { type: 'video', url: part.url };
+  for (const part of parts ?? []) {
+    switch (part.type) {
+      case 'image':
+      case 'file':
+      case 'audio':
+      case 'video': {
+        const ref = part.url ?? part.resourceRef;
+        if (ref) return { type: part.type, url: ref };
+        break;
+      }
+    }
   }
   return undefined;
 }

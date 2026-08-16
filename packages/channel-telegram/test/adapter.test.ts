@@ -432,6 +432,27 @@ describe('TelegramAdapter lifecycle', () => {
     await a.stop();
   });
 
+  it('send with a resourceRef media part resolves the file_id to sendPhoto', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    routeAuth();
+    transport.route(tgPath('sendPhoto'), () => ({ ok: true, result: { message_id: 11 } }));
+    const a = adapter({ token: TOKEN });
+    await a.start(ctx);
+    const result = await a.send(makeChannelTarget(), {
+      text: 'look at this',
+      parts: [{ type: 'image', resourceRef: 'ANON_FILE_ID', alt: 'photo' }],
+    });
+    expect(result.delivered).toBe(true);
+    const call = transport.calls.find((c) => c.path === tgPath('sendPhoto'));
+    expect(call?.init?.body).toEqual({
+      chat_id: 'conv-1',
+      photo: 'ANON_FILE_ID',
+      caption: 'look at this',
+    });
+    await a.stop();
+  });
+
   it('maps a failing send to a ChannelError without leaking the token', async () => {
     const service = new ChannelService(new Context());
     const ctx = createTestContext(service);
