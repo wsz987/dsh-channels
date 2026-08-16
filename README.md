@@ -1,82 +1,27 @@
-# DeepSeek Harness Channels（dsh-channels）
+<div align="center">
+
+# dsh-channels
+
+将微信、QQ、钉钉和飞书接入 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
+
+多渠道集成，统一配置，并在各平台与 Agent 对话
 
 [![CI](https://github.com/wsz987/dsh-channels/actions/workflows/ci.yml/badge.svg)](https://github.com/wsz987/dsh-channels/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/%40wsz987%2Fdsh-channels)](https://www.npmjs.com/package/@wsz987/dsh-channels)
+[![npm downloads](https://img.shields.io/npm/dm/%40wsz987%2Fdsh-channels)](https://www.npmjs.com/package/@wsz987/dsh-channels)
+[![GitHub stars](https://img.shields.io/github/stars/wsz987/dsh-channels?style=flat)](https://github.com/wsz987/dsh-channels/stargazers)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](package.json)
 
-为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 提供 微信 / QQ / 钉钉 / 飞书 的即时通讯渠道，采用「官方 SDK / 上游优先」的 Adapter/Bridge 架构（不重写平台协议），统一通过 `ctx.channels` API 收发消息（社区项目，非官方）。
+</div>
 
-**目录**
+> 本项目参考各平台面向 OpenClaw 提供的渠道接入方案，结合官方 SDK / API 适配到 DeepSeek Harness。运行时不依赖 OpenClaw。
+>
+> 社区项目，非 DeepSeek 官方组件。
 
-- [✨ 特性](#-特性)
-- [🚀 快速开始](#-快速开始)
-  - [📸 效果预览](#-效果预览)
-  - [⌨️ 渠道指令](#-渠道指令)
-- [🔌 渠道配置与登录](#-渠道配置与登录)
-- [🧭 渠道总览](#-渠道总览)
-- [🧭 工作区隔离](#-工作区隔离)
-- [🛠 开发](#-开发)
-- [📚 文档](#-文档)
-- [🤝 二次开发规范](#-二次开发规范)
-- [🙏 致谢](#-致谢)
+## 效果预览
 
-## ✨ 特性
-
-- **多渠道接入**：内置微信 / QQ / 钉钉 / 飞书，装完即在 Harness Web「设置 → 渠道」统一配置与扫码授权
-- **扫码即登录**：微信扫码免配置，钉钉 / 飞书支持扫码授权或填写平台凭证，QQ 填写 AppID / AppSecret 即可
-- **流式回复**：QQ / 钉钉 / 飞书支持边生成边输出
-- **附件**：微信 / QQ / 飞书 / 钉钉已接入 Harness 官方原生图片附件；补齐 Harness 缺失的通用文件能力——PDF / DOCX / XLSX / 文本可直接喂给 AI 理解（见[渠道总览](#-渠道总览)）
-- **工作区隔离**：各渠道 / 账号会话空间相互独立，互不串扰
-- **渠道指令**：会话内支持 `/new` 等斜杠指令
-- **凭据安全**：基于 DeepSeek Harness 凭据服务（`ctx.credentials`）存储密钥，扫码凭据持久化、重启免登录
-
-## 🚀 快速开始
-
-前提：能运行 DeepSeek Harness CLI（`npx @deepseek-ai/dsh`，官方推荐用法，详见 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)）。
-
-> **迭代期提示**：项目仍在快速迭代，版本升级可能调整配置或本地数据格式。
-> 升级前请备份相关数据；现阶段不要把重要数据的唯一副本存放在项目工作区或插件数据目录中。
-
-```bash
-# 1. 安装 bundle 到 web profile（首次自动初始化 profile，装完自动合并 cordis.patch.yml）
-npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels
-
-# 2. 确认合并：应看到 channels-service / channels-files / channels-harness /
-#    channels-control / channels-web 及四个渠道插件
-npx @deepseek-ai/dsh --profile web --dump-config
-
-# 3. 启动 Harness（等价于 --profile web）
-npx @deepseek-ai/dsh web
-```
-
-> **安装说明**：安装、更新或卸载插件时，请保留命令中的 `-w` 参数。
-> 安装命令默认使用 npm 的 `latest` 发行标签；可通过 `npm view @wsz987/dsh-channels dist-tags` 查看当前指向。
-
-**更新与卸载：**
-
-```bash
-# 安装或切换到最新稳定版（同时更新 package.json 中的版本范围）
-npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels
-
-# 在当前 package.json semver 范围内更新
-npx @deepseek-ai/dsh plugin --profile web update -w @wsz987/dsh-channels
-
-# 卸载 bundle；如有自定义 profile patch，请一并删除其中的 channels-* 覆盖行
-npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
-```
-
-装一个包即集成微信 / QQ / 钉钉 / 飞书等，各渠道在 Harness Web「设置 → 渠道」面板完成登录：
-
-- **微信**：扫码即登录
-- **钉钉 / 飞书**：扫码授权，或填写平台凭证
-- **QQ**：填写 AppID / AppSecret 即可收发
-
-安装 `@wsz987/dsh-channels` 即可使用微信、QQ、钉钉和飞书。只需部分渠道时，
-可在 Harness Web「设置 → 渠道」中启用需要的渠道，其余保持关闭。
-
-### 📸 效果预览
-
-接入后，在 Harness Web「设置 → 渠道」面板统一配置与扫码授权，并在各平台对话框中直接与 Agent 对话（图片来源：[docs/ScreenShot](docs/ScreenShot)）：
+接入后，在 Harness Web“设置 → 渠道”面板统一配置与扫码授权，并在各平台对话框中直接与 Agent 对话（图片来源：[docs/ScreenShot](docs/ScreenShot)）：
 
 **Harness Web · 渠道设置面板**
 
@@ -93,8 +38,76 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
   <img src="docs/ScreenShot/feishu.jpg" alt="飞书对话" width="24%"/>
 </p>
 
+## 使用前须知
 
-### ⌨️ 渠道指令
+> **迭代期提示**：项目仍在快速迭代，版本升级可能调整配置或本地数据格式。
+> 升级前请备份相关数据；现阶段不要把重要数据的唯一副本存放在渠道工作区会话中。
+
+| 检查项 | 要求 |
+| --- | --- |
+| Harness CLI | 已能运行 `npx @deepseek-ai/dsh` |
+| LLM 模型 | 先在 Harness Web 的“设置 → 模型”中配置模型提供方、凭据和默认模型，并确认普通 Web 会话可以正常对话。参见 [Harness 官方配置参考](https://deepseek-harness.github.io/deepseek-harness/reference/config-catalog) |
+| 会话权限 | 渠道会话遵循 Harness 权限预设。新会话默认通常为 `Workspace Write`，可修改当前 Workspace 内的文件，访问更大范围时需要审批 |
+
+任务确实需要访问 Workspace 外的文件时，可为对应会话选择 `Full access`。详见 [Harness 权限预设参考](https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/permission-presets)。
+
+> **安全警告**：`Full access` 会解除 DSH 文件沙箱限制并关闭审批提示。Agent 将能够修改运行进程有权访问的任意路径。请仅在信任当前任务、工作目录和模型时启用，并提前备份重要数据。
+
+## 安装
+
+```bash
+# 安装稳定版 bundle
+npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@latest
+
+# 检查 bundle 是否合并到 profile
+npx @deepseek-ai/dsh --profile web --dump-config
+
+# 启动 Harness Web
+npx @deepseek-ai/dsh web
+```
+
+安装完成后，在 Harness Web 的“设置 → 渠道”中配置或登录需要使用的渠道。
+
+### 更新与卸载
+
+安装、更新和卸载时请保留 `-w` 参数。
+
+```bash
+# 在当前 package.json 版本范围内更新
+npx @deepseek-ai/dsh plugin --profile web update -w @wsz987/dsh-channels
+
+# 卸载 bundle
+npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
+```
+
+## 能力总览
+
+| 渠道 | 文本 | 图片 | 文件 | 流式回复 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| 微信 | 支持 | 收发 | 入站读取 | - | Experimental |
+| QQ | 支持 | 收发 | 收发 | 支持 | Tested |
+| 钉钉 | 支持 | 收发 | 收发 | 支持 | Tested |
+| 飞书 | 支持 | 收发 | 收发 | 支持 | Tested |
+
+- 通用文件支持 PDF、DOCX、XLSX 和文本，入站文件上限为 100 MiB。
+- `send_channel_message` 支持主动发送文本和图片；文件外发支持 QQ、钉钉 SDK 和飞书。
+- 微信在完成真实平台验证前保持 `Experimental` 状态。
+- 音频和视频目前会降级处理。
+
+## 配置与登录
+
+| 渠道 | 必要信息 | 登录方式 |
+| --- | --- | --- |
+| 微信 | 无 | 扫码登录，凭据自动持久化 |
+| QQ | AppID、AppSecret | [QQ 开放平台](https://q.qq.com/qqbot/openclaw/)创建机器人 |
+| 钉钉 | clientId、clientSecret（可选） | 扫码或在[钉钉开放平台](https://open-dev.dingtalk.com/)创建应用 |
+| 飞书 | AppId、AppSecret | 在[飞书开放平台](https://open.feishu.cn/app)创建应用，或扫码创建智能体 |
+
+密钥不要写入 `cordis.patch.yml`。配置中只填写凭据引用，例如 `appSecretRef`；真实值由 Harness `ctx.credentials` 管理。完整配置示例见 [apps/example/minimal-profile](apps/example/minimal-profile/)。配置 patch 会整体替换目标插件的 `config`，不是深度合并。
+
+## 常用操作
+
+### 渠道指令
 
 任意渠道会话内可直接发斜杠指令，由 Harness 官方命令系统解析执行：
 
@@ -102,133 +115,69 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 | --- | --- |
 | `/new` | 开启全新会话（遇到 bug 可以尝试使用） |
 
-未注册的指令会被拦截（"未知指令"），不会发给模型。
+未注册的指令会被拦截（“未知指令”），不会发给模型。后续版本会继续完善更多渠道指令。
 
-### 从源码运行（Run from source）
+### 主动外发
+
+在渠道会话中让 Agent 调用 `send_channel_message`，可以主动向当前渠道发送文本、图片或支持的文件。Harness Web 直接创建的普通会话没有渠道绑定，不能执行渠道外发。
+
+### Workspace 隔离
+
+默认按“渠道 / 账号”创建独立 Workspace，路径为 `<dsh-home>/workspaces/channels/<channel>/<account>`，无需额外配置。
+
+如需复用 Harness 启动目录或关闭隔离，可在 profile patch 中覆盖 `channels-harness`：
+
+```yaml
+- id: channels-harness
+  name: '@wsz987/dsh-channels/harness'
+  inject: [channels, agents, agentDefaultModel, llm, commands]
+  config:
+    workspace:
+      mode: channel-account # channel-account（默认）| host-cwd | disabled
+      autoCreate: true
+```
+
+> Harness patch 会整体替换目标插件配置，并非局部合并；覆盖时请保留该插件需要的完整字段。
+
+### 关闭不需要的渠道
+
+在 profile patch 中将对应渠道插件的 `enabled` 设为 `false`，或删除可选的 `channels-files` 行以关闭通用文件扩展。
+
+## 已知限制
+
+| 当前限制 | 临时处理方式 | 后续方向 |
+| --- | --- | --- |
+| 无法从渠道终止正在运行的会话 | 模型长时间推理或工具调用未结束时，暂时需要等待本轮执行完成 | Harness 已提供 `Agent.cancel()`，后续增加 `/stop` 指令 |
+| 无法在当前渠道会话中直接切换模型 | 先在 Harness Web 中选择模型，再发送 `/new` 创建使用新默认模型的会话 | 增加模型选择指令 |
+| 渠道内没有权限切换指令 | 在 Harness Web 中调整未来新会话的默认权限，或修改对应会话的 Access 设置 | 完善渠道内的会话管理能力 |
+
+上述限制是当前渠道交互层尚未接入对应能力，不代表 Harness 完全不支持取消或模型选择。相关上游能力可查阅 [Harness Reference](https://deepseek-harness.github.io/deepseek-harness/reference/)。
+
+## Roadmap
+
+- 增加 `/stop`、模型选择等渠道指令。
+- 完善渠道内的会话管理和异常恢复体验。
+- 接入更多即时通讯渠道（画饼中）。
+
+## 从源码运行
 
 ```bash
 git clone https://github.com/wsz987/dsh-channels.git
 cd dsh-channels
 pnpm install
 pnpm build
-pnpm channels              # 构建产物直链到 dsh profile（symlink 指源码）
-pnpm web:debug             # 启动 dsh web
+pnpm channels
+pnpm web:debug
 ```
 
-- `pnpm channels` 不带参 = 全装；可指定渠道（`pnpm channels weixin`、`pnpm channels weixin qq`），渠道名自动识别（别名 `wx` → weixin、`feishu` → lark），未选渠道自动禁用
-- 改完代码 `pnpm build` + 重启即生效
-- `web:debug`：`dsh web` + 调试日志，落盘 `dsh-web.log`
-- 切回发布版：先 `pnpm channels:clean` 清掉源码直链，再 `npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels`
+- `pnpm channels` 可指定渠道，例如 `pnpm channels weixin qq`。
+- 修改代码后重新构建并重启 Harness；切回 npm 版本前运行 `pnpm channels:clean`。
 
-## 🔌 渠道配置与登录
-
-| 渠道 | 配置 | 配置方式 |
-| --- | --- | --- |
-| **微信** | 无 | **扫一扫**：扫码即登录，凭据持久化免登录，无其他配置 |
-| **QQ** | **AppID** + **AppSecret** | [QQ 开放平台](https://q.qq.com/qqbot/openclaw/) 创建机器人 → 填写 **AppID** / **AppSecret** |
-| **钉钉** | `clientId` + `clientSecret`（可选） | **扫一扫**，或手动到 [钉钉开放平台](https://open-dev.dingtalk.com/) 创建应用，配置 `clientId` / `clientSecret` |
-| **飞书** | **AppId** + **AppSecret** | 到 [飞书开放平台](https://open.feishu.cn/) 创建应用，配置 **AppId** / **AppSecret**，然后扫一扫创建智能体 |
-
-
-配置通过 profile patch（`cordis.patch.yml`）下发，patch 会**整体替换**目标插件配置，需写全字段；完整示例见 [apps/example/minimal-profile/](apps/example/minimal-profile/)。
-
-**QQ：**
-
-```yaml
-- id: channels-qq
-  name: '@wsz987/dsh-channels/qq'
-  inject: [channels, credentials]
-  config:
-    accountId: main
-    appId: "102345678"               # QQ 开放平台 AppId
-    appSecretRef: QQBOT_APP_SECRET   # 真实 AppSecret 只存 ctx.credentials
-    markdownSupport: false
-    streaming: { enabled: true, throttleMs: 500 }
-    dedup: { enabled: true, windowMs: 5000 }
-```
-
-**钉钉（SDK 模式）：**
-
-```yaml
-- id: channels-dingtalk
-  name: '@wsz987/dsh-channels/dingtalk'
-  config:
-    upstream:
-      mode: sdk
-      clientId: "ding-xxx"        # AppKey（非机密，可写 config）
-      # clientSecretRef 默认 DSH_CHANNEL_DINGTALK_MAIN_CLIENT_SECRET
-      # 真实 AppSecret 只存 ctx.credentials
-```
-
-**飞书（SDK 模式）：**
-
-```yaml
-- id: channels-lark
-  name: '@wsz987/dsh-channels/lark'
-  config:
-    upstream:
-      mode: sdk
-      appId: "cli_xxx"            # AppId（非机密，可写 config）
-      domain: feishu              # feishu（国内）| lark（海外）
-      # appSecretRef 默认 DSH_CHANNEL_LARK_MAIN_APP_SECRET
-      # 真实 AppSecret 只存 ctx.credentials
-```
-
-钉钉 / 飞书的 AppSecret 无需写进配置文件：在 Harness Web「设置 → 渠道」直接填写，或用环境变量 `DSH_CHANNEL_DINGTALK_MAIN_CLIENT_SECRET` / `DSH_CHANNEL_LARK_MAIN_APP_SECRET` 提供即可。
-
-## 🧭 渠道总览
-
-| 渠道 | 现在能做什么 | 状态 |
-| --- | --- | --- |
-| 微信 | 文本对话 · 原生图片（收/发）· 通用文件预览（入站）· 主动文本/图片外发 | ⚠️ |
-| QQ | 文本对话 · 流式回复 · 原生图片（收/发）· 通用文件（收/发）· 主动文本/图片/文件外发 | ✅ |
-| 钉钉 | 文本对话 · 流式回复 · 原生图片（收/发）· 通用文件（收/发）· 主动文本/图片/文件外发（SDK 模式） | ✅ |
-| 飞书 | 文本对话 · 流式回复 · 原生图片（收/发）· 通用文件（收/发）· 主动文本/图片/文件外发 | ✅ |
-
-> **说明**
-> - **状态**：微信 `experimental`（真实平台实测通过前不升 `tested`）；QQ / 钉钉 / 飞书 `tested`（离线契约验证通过）
-> - **图片**：四渠道收/发统一走 Harness `saveImage()` / `ImageBlock` 原生链路；图片和配套文字会按原顺序完整写入同一个 Session。当前模型明确不支持图片时，仅在模型请求边界把图片原位替换为 `[图片：当前模型不支持查看]`，后续消息无需 `/new`
-> - **文件**：PDF / DOCX / XLSX / 文本由 `@wsz987/channel-files` 提取后供模型阅读；出站文件微信暂不支持；音频 / 视频暂降级
-> - **大小**：入站文件统一 **100 MiB** 上限
-> - **外发**：`send_channel_message` 支持四渠道主动文本/图片外发；文件外发支持 QQ / 钉钉 SDK / 飞书，微信不支持
-> - **可选**：删掉 profile 的 `id: channels-files` 即关闭文件扩展（图片 / 文本 / 会话不受影响）
-
-**主动外发示例**：从微信 / QQ 给机器人发一句话，让它调 `send_channel_message` 主动发消息：
-
-> 请调用 send_channel_message 工具，给我发一条消息，内容是：主动外发成功
-
-Agent 会在正常回复之外，再主动给你发一条「主动外发成功」。只能在**渠道会话**里触发——Harness Web 直接新开的会话没有渠道绑定，发不了。
-
-**第三方渠道**：`packages/channel-telegram` 是完整扩展示例（未正式支持），按下方 [二次开发规范](#-二次开发规范) 即可新增渠道。
-
-## 🧭 工作区隔离
-
-按渠道开辟独立会话空间：默认每个**渠道 / 账号**对应一个独立 Harness Workspace（`<dsh-home>/workspaces/channels/<渠道>/<账号>`，自动创建），各渠道的会话、文件互不串扰。默认配置即可用，无需手动设置；如需自定义，配置在 `channels-harness` 插件上：
-
-```yaml
-- id: channels-harness
-  name: '@wsz987/dsh-channels/harness'
-  config:
-    workspace:
-      mode: channel-account   # channel-account（默认）| host-cwd | disabled
-```
-
-## 🛠 开发
-
-```bash
-pnpm install && pnpm build && pnpm typecheck && pnpm test
-```
-
-提交或推送前运行与 GitHub Actions 对齐的完整本地门禁：
+提交前运行完整门禁：
 
 ```bash
 pnpm ci:check
 ```
-
-它会额外构建 bundle / verify 目标并运行 `verify`、fixtures、manifests、doctor
-和 bundle 检查。依赖或 lockfile 变化后，先运行 `pnpm install --frozen-lockfile`。
-
-常用校验：`pnpm doctor`（渠道诊断 + 发布门禁）、`pnpm verify <dir> [--test]`（适配器契约验证）、`pnpm check:fixtures` / `check:manifests` / `check:upstream`。
 
 ## 📚 文档
 

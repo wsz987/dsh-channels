@@ -10,12 +10,12 @@ DeepSeek Harness **DSH Bundle** — built-in messaging channels:
 ## Install
 
 ```bash
-npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@beta
+npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@latest
 ```
 
 > The profile directory is itself a pnpm workspace, so `-w` (`--workspace-root`)
 > is required to add the bundle to the workspace root (otherwise pnpm fails with
-> `ERR_PNPM_ADDING_TO_ROOT`). `@beta` selects the beta dist-tag. Run
+> `ERR_PNPM_ADDING_TO_ROOT`). `@latest` selects the stable release. Run
 > `npm view @wsz987/dsh-channels dist-tags` to inspect the current `beta` and
 > `latest` targets.
 
@@ -29,7 +29,7 @@ channel can be disabled through its plugin config.
 
 ```bash
 # 1. add the bundle to a profile
-npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@beta
+npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@latest
 
 # 2. confirm the merged config inserted the channel plugins
 npx @deepseek-ai/dsh --profile web --dump-config
@@ -41,8 +41,8 @@ npx @deepseek-ai/dsh web
 ## Update and uninstall
 
 ```bash
-# Install or switch package.json to the latest beta
-npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@beta
+# Install or switch package.json to the latest stable release
+npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@latest
 
 # Update within the package.json semver range
 npx @deepseek-ai/dsh plugin --profile web update -w @wsz987/dsh-channels
@@ -62,7 +62,7 @@ profile for release validation):
 
 ```bash
 # 1. add the bundle to a clean profile (auto-initializes it on first use)
-npx @deepseek-ai/dsh plugin --profile release-validation add -w @wsz987/dsh-channels@beta
+npx @deepseek-ai/dsh plugin --profile release-validation add -w @wsz987/dsh-channels@latest
 
 # 2. dump the merged config — verify the channel plugins were inserted
 npx @deepseek-ai/dsh --profile release-validation --dump-config
