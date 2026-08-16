@@ -225,6 +225,27 @@ describe('every channel adapter can be disabled through its config', () => {
 });
 
 describe('optional generic-file package boundary', () => {
+  it('uses the host Harness runtime for Agent scope and command registration', () => {
+    const manifest = JSON.parse(readFileSync(packageJsonPath('channel-harness'), 'utf8')) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
+    };
+    const runtimePeers = [
+      '@deepseek-ai/cordis',
+      '@deepseek-ai/dsh-agent',
+      '@deepseek-ai/dsh-commands',
+      '@deepseek-ai/dsh-scope',
+      '@deepseek-ai/dsh-session',
+    ];
+
+    for (const dependency of runtimePeers) {
+      expect(manifest.dependencies).not.toHaveProperty(dependency);
+      expect(manifest.peerDependencies).toHaveProperty(dependency);
+      expect(manifest.devDependencies).toHaveProperty(dependency);
+    }
+  });
+
   it('uses the Harness-owned tool runtime for every registered channel tool', () => {
     for (const dir of ['channel-files', 'channel-harness']) {
       const manifest = JSON.parse(readFileSync(packageJsonPath(dir), 'utf8')) as {

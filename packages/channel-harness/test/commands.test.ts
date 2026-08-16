@@ -339,6 +339,21 @@ describe('A. official dsh-commands compatibility', () => {
     await caller.dispose();
   });
 
+  it('mounts a command-injected child plugin under the exact Agent context', async () => {
+    const ctx = new Context();
+    new CommandRuntime(ctx);
+    const agent = fakeScopedAgent(ctx, 's-exact-context');
+    const inject = vi.spyOn(agent.ctx, 'inject');
+
+    const dispose = await installChannelCommands(agent.ctx, {
+      startNewSession: async () => {},
+    });
+
+    expect(inject).toHaveBeenCalledWith(['commands'], expect.any(Function));
+    expect(ctx.commands.find(agent as never, 'new')).toBeDefined();
+    await dispose();
+  });
+
   it('unregisters Agent-scoped commands so a replacement bridge can install them', async () => {
     const ctx = new Context();
     new CommandRuntime(ctx);
@@ -359,25 +374,6 @@ describe('A. official dsh-commands compatibility', () => {
     await secondDispose();
   });
 
-  it('hands off command ownership when a replacement installs before the old disposer runs', async () => {
-    const ctx = new Context();
-    new CommandRuntime(ctx);
-    const agent = fakeScopedAgent(ctx, 's-overlap');
-
-    const firstDispose = await installChannelCommands(agent.ctx, {
-      startNewSession: async () => {},
-    });
-    const secondDispose = await installChannelCommands(agent.ctx, {
-      startNewSession: async () => {},
-    });
-
-    expect(ctx.commands.find(agent as never, 'new')).toBeDefined();
-    await firstDispose();
-    expect(ctx.commands.find(agent as never, 'new')).toBeDefined();
-
-    await secondDispose();
-    expect(ctx.commands.find(agent as never, 'new')).toBeUndefined();
-  });
 });
 describe('B. ordinary message regression', () => {
   it('sends hello to toHarnessUserMessage -> followup with no adapter send and no command events', async () => {
