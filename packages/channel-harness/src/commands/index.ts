@@ -21,6 +21,8 @@ export interface ChannelCommandDependencies {
   startNewSession(agent: Agent): Promise<void>;
 }
 
+export type ChannelCommandDisposer = () => Promise<void>;
+
 const commandFactories = [
   createNewCommand,
 ];
@@ -33,11 +35,19 @@ const commandFactories = [
 export function installChannelCommands(
   agentCtx: Context,
   deps: ChannelCommandDependencies,
-): Promise<void> {
+): Promise<ChannelCommandDisposer> {
   const fiber = agentCtx.inject(['commands'], function* channelCommands(ctx) {
     for (const factory of commandFactories) {
       yield ctx.commands.register(factory(deps));
     }
   });
-  return fiber.await().then(() => undefined);
+  return fiber.await().then(() => {
+    let disposing: Promise<void> | undefined;
+    return () => disposing ??= quiesceFiber(fiber);
+  });
+}
+
+async function quiesceFiber(fiber: ReturnType<Context['plugin']>): Promise<void> {
+  await Promise.resolve(fiber.dispose());
+  while (fiber.inertia !== undefined) await fiber.inertia;
 }

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Context } from '@deepseek-ai/cordis';
 import { AgentRegistry, type Agent } from '@deepseek-ai/dsh-agent';
+import { AttachmentId } from '@deepseek-ai/dsh-attachment';
 import { ChannelService, type ChannelEvent, type MessageReceived } from '@wsz987/channel-core';
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
 import {
@@ -92,7 +93,6 @@ class FakeGateway implements AgentGateway {
   failResumeWith?: Error;
   createGate?: () => Promise<void>;
   resumeGate?: () => Promise<void>;
-
   get(sessionId: string) {
     const agent = this.live.get(sessionId);
     if (!agent) return undefined;
@@ -626,6 +626,71 @@ describe('ReplyRouter', () => {
   });
 });
 describe('ChannelHarnessBridge end-to-end', () => {
+  it.each(['weixin', 'qq', 'lark'] as const)(
+    'keeps %s image and following text in the same session',
+    async (channel) => {
+      const gateway = new FakeGateway();
+      const manager = new AgentManager(gateway, silentLogger, 4);
+      const bindingStore = new MemoryBindingStore();
+      const replyContexts = new ReplyContextStore();
+      const adapter = new FakeAdapter(channel);
+      const ctx = new Context();
+      const saveImage = vi.fn(async () => ({
+        attachmentId: AttachmentId('att-rejected'),
+        mediaType: 'image/jpeg' as const,
+        bytes: 3,
+        width: 1,
+        height: 1,
+      }));
+      const bridge = new ChannelHarnessBridge({
+        config: baseConfig(),
+        bindingStore,
+        agentManager: manager,
+        agentRouter: new AgentRouter(baseConfig()),
+        getAdapter: () => adapter as never,
+        replyContexts,
+        logger: silentLogger,
+        saveImage,
+        ctx,
+        commandDeps: { startNewSession: async () => {} },
+        workspaceResolver: noopResolver,
+      });
+
+      const imageDelivery = bridge.handleChannelEvent(makeMessageEvent({
+        channel,
+        message: {
+          id: 'image-message',
+          content: [
+            { type: 'text', text: '帮我看图' },
+            { type: 'image', mimeType: 'image/jpeg', localData: new Uint8Array([1, 2, 3]) },
+          ],
+        },
+      }));
+      const textDelivery = bridge.handleChannelEvent(makeMessageEvent({
+        channel,
+        message: { id: 'text-message', content: [{ type: 'text', text: '继续文本' }] },
+      }));
+      await Promise.all([imageDelivery, textDelivery]);
+
+      expect(saveImage).toHaveBeenCalledTimes(1);
+      expect(gateway.createCalls).toHaveLength(1);
+      expect(gateway.followups).toHaveLength(2);
+      const sessionId = gateway.createCalls[0]!;
+      expect(gateway.followups[0]!.sessionId).toBe(sessionId);
+      expect(gateway.followups[1]!.sessionId).toBe(sessionId);
+      const imageContent = (gateway.followups[0]!.message as {
+        content: Array<{ type: string; text?: string }>;
+      }).content;
+      expect(imageContent).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'image' }),
+        expect.objectContaining({ type: 'text', text: expect.stringContaining('帮我看图') }),
+      ]));
+      expect(adapter.sent).toHaveLength(0);
+      const binding = await bindingStore.get(`${channel}:main:user_123`);
+      expect(binding?.sessionId).toBe(sessionId);
+    },
+  );
+
   it('routes message.received to followup and registers a binding', async () => {
     const gateway = new FakeGateway();
     const manager = new AgentManager(gateway, silentLogger, 4);

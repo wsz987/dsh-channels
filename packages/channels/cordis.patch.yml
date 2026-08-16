@@ -24,6 +24,7 @@
         - channels
         - agents
         - agentDefaultModel
+        - llm
         - commands
 
     - id: channels-control

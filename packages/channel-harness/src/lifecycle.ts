@@ -39,6 +39,7 @@ import type { ChannelCommandDependencies } from './commands/index.js';
 import type { SaveImageHook } from './message-converter.js';
 import { installDebugConsoleExporter } from './debug-logger.js';
 import type { ChannelFileProvider } from './file-provider.js';
+import { installImageModelFallback } from './image-model-fallback.js';
 
 export interface BridgeLifecycle {
   dispose(): Promise<void>;
@@ -56,6 +57,7 @@ export function startBridge(
   const bindingStore = createBindingStore(config.bindingStore);
   const agentGateway = new HarnessAgentGateway(ctx, persistence);
   const agentManager = new AgentManager(agentGateway, logger, config.maxConcurrency);
+  const stopImageFallback = installImageModelFallback(ctx, agentManager, logger);
   const agentRouter = new AgentRouter(config);
   const workspaceResolver = new HarnessChannelWorkspaceResolver(ctx, config.workspace, logger);
   const getAdapter = (channelId: string): ChannelAdapter | undefined =>
@@ -176,6 +178,9 @@ export function startBridge(
     disposed = true;
     // 1. Stop new inbound (adapter events no longer reach the bridge).
     stopInbound();
+    // Release this bridge's Agent-scoped commands before a replacement bridge
+    // can borrow the same live agents and install fresh handlers.
+    await bridge.disposeCommandSetups();
     // 2. Drain active turns with a bounded wait (the session/event listener is
     //    still attached here, but we do NOT depend on it for final-reply
     //    correctness).
@@ -187,6 +192,9 @@ export function startBridge(
     await replyRouter.flushAll();
     // 5. Stop listening to session/event.
     stopListening();
+    // Active turns may make additional model calls while draining, so keep the
+    // provider-boundary image fallback installed until reply processing ends.
+    stopImageFallback();
     // 6. Dispose owned agent handles (each exactly once).
     await agentManager.disposeAll();
     // 7. Dispose the reply router (clear timers).

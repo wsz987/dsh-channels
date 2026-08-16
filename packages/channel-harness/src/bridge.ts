@@ -44,13 +44,19 @@ import {
   type SessionKeyInput,
 } from './session-router.js';
 import type { ChannelWorkspaceResolver } from './workspace-resolver.js';
-import { toHarnessUserMessage, type SaveImageHook, type FileStoreHook, type StoredBinaryPart } from './message-converter.js';
+import {
+  toHarnessUserMessage,
+  type SaveImageHook,
+  type FileStoreHook,
+  type StoredBinaryPart,
+} from './message-converter.js';
 import type { ChannelFileProvider } from './file-provider.js';
 import { ReplyContextStore } from './reply-context-store.js';
 import type { ChannelOutboxService } from './outbox/service.js';
 import { installSendChannelMessageTool } from './outbox/tool-send.js';
 import {
   installChannelCommands,
+  type ChannelCommandDisposer,
   type ChannelCommandDependencies,
 } from './commands/index.js';
 import { toLoggableError } from './loggable-error.js';
@@ -122,6 +128,8 @@ export class ChannelWorkspaceAttachError extends Error {
 
 export class ChannelHarnessBridge {
   private readonly sessionFactory: ChannelSessionFactory;
+  private readonly commandDisposers = new Set<ChannelCommandDisposer>();
+  private commandSetupsDisposed = false;
 
   constructor(private readonly options: ChannelHarnessBridgeOptions) {
     this.sessionFactory = new ChannelSessionFactory({
@@ -184,7 +192,12 @@ export class ChannelHarnessBridge {
   // AgentSetup (invoked as a bare setup(agentCtx)), so this must stay the
   // bridge instance.
   private commandSetup = async (agentCtx: Context): Promise<void> => {
-    await installChannelCommands(agentCtx, this.options.commandDeps);
+    const disposeCommands = await installChannelCommands(agentCtx, this.options.commandDeps);
+    if (this.commandSetupsDisposed) {
+      await disposeCommands();
+      throw new Error('channel-harness command setup continued after bridge disposal');
+    }
+    this.commandDisposers.add(disposeCommands);
     // M4: Agent-scoped read_channel_attachment tool (plan §81). Registered on
     // the agent's own scope so it is disposed with the agent. Best-effort: a
     // tool-install failure must never roll back the agent setup.
@@ -206,6 +219,14 @@ export class ChannelHarnessBridge {
       }
     }
   };
+
+  /** Release this bridge's Agent-scoped command registrations. */
+  async disposeCommandSetups(): Promise<void> {
+    this.commandSetupsDisposed = true;
+    const disposers = [...this.commandDisposers];
+    this.commandDisposers.clear();
+    await Promise.all(disposers.map((dispose) => dispose()));
+  }
 
   private conversationKey(event: MessageReceived): string {
     return sessionKey({
@@ -336,7 +357,7 @@ export class ChannelHarnessBridge {
       return;
     }
 
-    // --- Ordinary message path (unchanged) ---------------------------------------
+    // --- Ordinary message followup -----------------------------------------------
     const runId = randomUUID();
     this.logInboundBinaryAvailability(event, binding.sessionId);
     const userMessage = await toHarnessUserMessage(event, {

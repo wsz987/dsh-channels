@@ -23,8 +23,15 @@ As a Cordis plugin:
     - channels
     - agents
     - agentDefaultModel
+    - llm
     - commands
 ```
+
+Inbound channel images remain real `ImageBlock`s in the original Session. If
+the selected model explicitly declares that it does not accept image input,
+the bridge keeps the same Session and replaces each image with
+`[图片：当前模型不支持查看]` only in the provider-visible request. Text and
+image order is preserved, and unknown model capabilities fail open.
 
 ## What it does
 
@@ -43,7 +50,7 @@ As a Cordis plugin:
 ```yaml
 - id: channels-harness
   name: '@wsz987/channel-harness'
-  inject: [channels, agents, agentDefaultModel, commands]
+  inject: [channels, agents, agentDefaultModel, llm, commands]
   config:
     agent:
       default:

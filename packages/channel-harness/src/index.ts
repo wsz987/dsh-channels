@@ -20,6 +20,7 @@ export * from './binding-store.js';
 export * from './agent-router.js';
 export * from './agent-manager.js';
 export * from './message-converter.js';
+export * from './image-model-fallback.js';
 export * from './reply-router.js';
 export * from './reply-context-store.js';
 export * from './bridge.js';

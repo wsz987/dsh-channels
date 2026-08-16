@@ -72,14 +72,7 @@ export async function toHarnessUserMessage(
     if (prefix) blocks.push({ type: 'text', text: prefix });
   }
 
-  const parts = event.message.content;
-  const bodyText = await partsToText(parts, {
-    saveImage: options.saveImage,
-    fileStore: options.fileStore,
-    onImage: (block) => blocks.push(block),
-  });
-  // Image blocks are emitted in place; the remaining (non-image) text is one block.
-  if (bodyText) blocks.push({ type: 'text', text: bodyText });
+  blocks.push(...await partsToBlocks(event.message.content, options));
   if (blocks.length === 0) blocks.push({ type: 'text', text: '' });
 
   return createUserMessage({
@@ -89,6 +82,26 @@ export async function toHarnessUserMessage(
     // deterministic and LLM-backed session title generation.
     source: { kind: 'user' },
   });
+}
+
+/** Convert platform parts to Harness blocks without changing their order. */
+async function partsToBlocks(
+  parts: readonly MessagePart[],
+  options: Pick<MessageConvertOptions, 'saveImage' | 'fileStore'>,
+): Promise<ContentBlock[]> {
+  const blocks: ContentBlock[] = [];
+  for (const part of parts) {
+    if (part.type === 'image') {
+      const block = await imageBlock(part, options.saveImage);
+      if (block) {
+        blocks.push(block);
+        continue;
+      }
+    }
+    const text = await partsToText([part], { fileStore: options.fileStore });
+    if (text) blocks.push({ type: 'text', text });
+  }
+  return blocks;
 }
 
 function metadataPrefix(event: MessageReceived): string {

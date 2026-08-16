@@ -91,7 +91,7 @@ const EXPECTED_ITEMS: PatchItem[] = [
   { id: 'channels-files', name: '@wsz987/channel-files' },
   // channel-harness injects the command-plane capabilities: the Harness
   // `commands` registry plus the default-model selection it resolves routes against.
-  { id: 'channels-harness', name: '@wsz987/channel-harness', inject: ['channels', 'agents', 'agentDefaultModel', 'commands'] },
+  { id: 'channels-harness', name: '@wsz987/channel-harness', inject: ['channels', 'agents', 'agentDefaultModel', 'llm', 'commands'] },
   // channel-control is the universal control plane: it must load before the
   // channel plugins so ctx.channelControl exists when they register definitions.
   { id: 'channels-control', name: '@wsz987/channel-control/plugin', inject: ['channels', 'credentials'] },
@@ -139,6 +139,7 @@ describe('DSH bundle patch (cordis.patch.yml)', () => {
       const shortName = splitSpecifier(specifier).packageName.replace('@wsz987/', '');
       expect(mod.name).toBe(shortName);
     },
+    15_000,
   );
 
   it('covers every referenced plugin subpath in the package exports map', () => {

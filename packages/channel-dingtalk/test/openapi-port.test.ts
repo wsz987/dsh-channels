@@ -44,9 +44,12 @@ function target(raw: Record<string, unknown> = {}): ChannelTarget {
   };
 }
 
-function secureFetch(data: Uint8Array, mimeType?: string) {
+function secureFetch(data: Uint8Array, mimeType?: string, calls?: Array<{ url: string; options: Record<string, unknown> }>) {
   return {
-    fetchBounded: async () => ({ data, mimeType, finalUrl: 'https://dl.example.com/resolved' }),
+    fetchBounded: async (url: string, options: Record<string, unknown>) => {
+      calls?.push({ url, options });
+      return { data, mimeType, finalUrl: 'https://dl.example.com/resolved' };
+    },
   };
 }
 
@@ -118,6 +121,27 @@ describe('DingTalkOpenApiPortImpl — method inventory (plan §33)', () => {
     expect(downloadCall?.init?.body).toEqual({ downloadCode: 'dl-code-1', robotCode: 'ding-app' });
   });
 
+  it('allows an HTTP download URL only when returned for an opaque DingTalk handle', async () => {
+    const fetchCalls: Array<{ url: string; options: Record<string, unknown> }> = [];
+    const transport = new FakeTransport()
+      .route(tokenPath, () => ({ accessToken: 'token-1', expireIn: 7200 }))
+      .route(`${API}/v1.0/robot/messageFiles/download`, () => ({ downloadUrl: 'http://download.dingtalk.example/pic' }));
+    const port = new DingTalkOpenApiPortImpl({
+      transport,
+      clientId: 'ding-app',
+      clientSecret: 'secret',
+      secureFetch: secureFetch(new Uint8Array([1, 2, 3]), 'image/png', fetchCalls),
+    });
+
+    await port.resolveMedia('@opaque-picture', { downloadCode: 'dl-http' });
+
+    expect(fetchCalls).toHaveLength(1);
+    expect(fetchCalls[0]).toMatchObject({
+      url: 'http://download.dingtalk.example/pic',
+      options: { allowHttp: true },
+    });
+  });
+
   it('resolves an embedded richText downloadCode reference', async () => {
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
     const transport = new FakeTransport()
@@ -139,18 +163,21 @@ describe('DingTalkOpenApiPortImpl — method inventory (plan §33)', () => {
     await expect(port.resolveMedia('mediaId_1')).rejects.toThrow('downloadCode');
   });
 
-  it('resolveMedia passes a genuine http(s) ref through directly', async () => {
+  it('does not allow HTTP for a direct media ref', async () => {
     const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]);
+    const fetchCalls: Array<{ url: string; options: Record<string, unknown> }> = [];
     const transport = new FakeTransport();
     const port = new DingTalkOpenApiPortImpl({
       transport,
       clientId: 'a',
       clientSecret: 'b',
-      secureFetch: secureFetch(jpeg),
+      secureFetch: secureFetch(jpeg, undefined, fetchCalls),
     });
-    const resolved = await port.resolveMedia('https://cdn.example.com/a.jpg');
+    const resolved = await port.resolveMedia('http://cdn.example.com/a.jpg');
     expect(resolved.data).toEqual(jpeg);
     expect(resolved.mimeType).toBe('image/jpeg');
+    expect(fetchCalls[0]?.url).toBe('http://cdn.example.com/a.jpg');
+    expect(fetchCalls[0]?.options.allowHttp).toBe(false);
   });
 });
 

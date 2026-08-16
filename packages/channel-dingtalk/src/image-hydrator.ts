@@ -88,6 +88,7 @@ export interface RemoteMediaFetchLike {
     maxBytes: number;
     idleTimeoutMs?: number;
     timeoutMs?: number;
+    allowHttp?: boolean;
     signal?: AbortSignal;
   }): Promise<FetchBoundedResult>;
 }

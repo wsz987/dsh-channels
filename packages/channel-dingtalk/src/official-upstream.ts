@@ -306,6 +306,7 @@ export class DingTalkOpenApiPortImpl implements DingTalkOpenApiPort, DingTalkUps
     ref: string,
     options?: { signal?: AbortSignal; name?: string; downloadCode?: string; robotCode?: string },
   ): Promise<ResolvedMedia> {
+    const isOpaqueRef = !/^https?:\/\//i.test(ref);
     const downloadUrl = await this.getMediaDownloadUrl(ref, options);
     if (!downloadUrl) {
       throw new ChannelError(
@@ -317,6 +318,10 @@ export class DingTalkOpenApiPortImpl implements DingTalkOpenApiPort, DingTalkUps
       maxBytes: 100 * 1024 * 1024,
       idleTimeoutMs: 15_000,
       timeoutMs: 60_000,
+      // DingTalk's authenticated messageFiles/download endpoint can return a
+      // short-lived http:// CDN URL. Permit that scheme only for an opaque
+      // handle resolved by this trusted API; direct HTTP refs remain blocked.
+      allowHttp: isOpaqueRef,
       signal: options?.signal,
     });
     return {

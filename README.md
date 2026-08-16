@@ -187,7 +187,7 @@ pnpm web:debug             # 启动 dsh web
 
 > **说明**
 > - **状态**：微信 `experimental`（真实平台实测通过前不升 `tested`）；QQ / 钉钉 / 飞书 `tested`（离线契约验证通过）
-> - **图片**：四渠道收/发统一走 Harness `saveImage()` / `ImageBlock` 原生链路，真实平台实测待做
+> - **图片**：四渠道收/发统一走 Harness `saveImage()` / `ImageBlock` 原生链路；图片和配套文字会按原顺序完整写入同一个 Session。当前模型明确不支持图片时，仅在模型请求边界把图片原位替换为 `[图片：当前模型不支持查看]`，后续消息无需 `/new`
 > - **文件**：PDF / DOCX / XLSX / 文本由 `@wsz987/channel-files` 提取后供模型阅读；出站文件微信暂不支持；音频 / 视频暂降级
 > - **大小**：入站文件统一 **100 MiB** 上限
 > - **外发**：`send_channel_message` 支持四渠道主动文本/图片外发；文件外发支持 QQ / 钉钉 SDK / 飞书，微信不支持

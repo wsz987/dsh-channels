@@ -338,6 +338,26 @@ describe('A. official dsh-commands compatibility', () => {
     expect(ctx.commands.find(agent as never, 'new')).toBeDefined();
     await caller.dispose();
   });
+
+  it('unregisters Agent-scoped commands so a replacement bridge can install them', async () => {
+    const ctx = new Context();
+    new CommandRuntime(ctx);
+    const agent = fakeScopedAgent(ctx, 's-reload');
+
+    const firstDispose = await installChannelCommands(agent.ctx, {
+      startNewSession: async () => {},
+    });
+    expect(ctx.commands.find(agent as never, 'new')).toBeDefined();
+
+    await firstDispose();
+    expect(ctx.commands.find(agent as never, 'new')).toBeUndefined();
+
+    const secondDispose = await installChannelCommands(agent.ctx, {
+      startNewSession: async () => {},
+    });
+    expect(ctx.commands.find(agent as never, 'new')).toBeDefined();
+    await secondDispose();
+  });
 });
 describe('B. ordinary message regression', () => {
   it('sends hello to toHarnessUserMessage -> followup with no adapter send and no command events', async () => {

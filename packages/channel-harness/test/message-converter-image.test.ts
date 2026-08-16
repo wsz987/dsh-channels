@@ -40,6 +40,22 @@ describe('toHarnessUserMessage image path', () => {
     expect(saved[0].mediaType).toBe('image/jpeg');
   });
 
+  it('preserves text-image-text block order', async () => {
+    const event = imageEvent(new Uint8Array([1, 2, 3, 4]));
+    event.message.content = [
+      { type: 'text', text: 'before' },
+      ...event.message.content,
+      { type: 'text', text: 'after' },
+    ];
+    const message = await toHarnessUserMessage(event, {
+      saveImage: async () => makeRef('att-order'),
+    });
+
+    expect(message.content.map((block) => block.type)).toEqual(['text', 'image', 'text']);
+    expect(message.content[0]).toMatchObject({ text: 'before' });
+    expect(message.content[2]).toMatchObject({ text: 'after' });
+  });
+
   it('falls back to the [image] placeholder without localData', async () => {
     const message = await toHarnessUserMessage(imageEvent(undefined));
     const text = message.content.filter((b) => b.type === 'text').map((b: any) => b.text).join('');
