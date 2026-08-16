@@ -219,6 +219,15 @@ Agent 会在正常回复之外，再主动给你发一条「主动外发成功�
 pnpm install && pnpm build && pnpm typecheck && pnpm test
 ```
 
+提交或推送前运行与 GitHub Actions 对齐的完整本地门禁：
+
+```bash
+pnpm ci:check
+```
+
+它会额外构建 bundle / verify 目标并运行 `verify`、fixtures、manifests、doctor
+和 bundle 检查。依赖或 lockfile 变化后，先运行 `pnpm install --frozen-lockfile`。
+
 常用校验：`pnpm doctor`（渠道诊断 + 发布门禁）、`pnpm verify <dir> [--test]`（适配器契约验证）、`pnpm check:fixtures` / `check:manifests` / `check:upstream`。
 
 ## 📚 文档

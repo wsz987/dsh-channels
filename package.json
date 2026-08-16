@@ -12,6 +12,7 @@
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "ci:check": "node scripts/ci-local.mjs",
     "test:run": "vitest run",
     "check:fixtures": "pnpm --filter @wsz987/channel-compat run check:fixtures",
     "check:manifests": "pnpm --filter @wsz987/channel-compat run check:manifests",
