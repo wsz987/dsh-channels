@@ -1,3 +1,12 @@
+---
+title: 微信 live 验证手册
+summary: Weixin 从 experimental 升到 tested 的真实平台 live gate 操作手册。
+when_to_use: 微信 | live gate | 验证 | tested
+authoritative: Weixin live gate 前置条件、执行步骤、manifest 写值与状态口径。
+see_also: [release.md]
+status: runbook
+---
+
 # Weixin Live Verification Runbook
 
 发布前把 Weixin 从 `experimental` 升到 `tested` 的唯一合法路径是跑通真实平台 live gate。
@@ -80,9 +89,8 @@ export const manifest: WeixinManifest = {
 live gate 通过后，本次版本可标记 `Release Verified`，但表述应精确：
 
 > dsh-channels v0.x Release Verified：核心架构、Harness bridge、adapter contract、CI/governance
-> 与目标 live gate 已验证。DingTalk official-direct outbound 已完成离线契约验证、
+> 与目标 live gate 已验证。DingTalk minimal-official-api-port outbound 已完成离线契约验证、
 > 尚待真实平台 live gate；Lark multimodal attachment 属于后续 hardening。
 
-（当前 QQ=官方 SDK；Weixin=官方协议 source-port（等 live）；Lark=官方 SDK inbound + 官方
-OpenAPI outbound（已官方化）；DingTalk=官方 SDK inbound + 官方 OpenAPI outbound（等 live）。所以不要写成
-"四渠道全部 official-direct verified"。）
+（当前上游策略：QQ / Lark = `official-sdk`；Weixin = `source-port`（等 live）；DingTalk =
+`minimal-official-api-port`（等 live）。所以不要写成"四渠道全部 official-direct verified"。）

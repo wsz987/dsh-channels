@@ -9,8 +9,19 @@
 处理任何「本项目」的问题前，先读：
 
 - `README.md` —— 安装、渠道配置与登录、渠道总览、开发命令、文档索引（最全入口）。
-- `docs/` —— 架构 `deepseek-harness-channels-architecture.md`、第三方接入 `adapter-authoring.md`、发布 `release.md`。
 - `apps/example/minimal-profile/` —— 各渠道 patch 的完整示例；回答配置字段问题以它和 `README.md` 为准，**不要凭空编造字段**。
+
+文档目录（按需加载，顶部 front-matter 标注了 `when_to_use` / `authoritative`）：
+
+| 文档 | 何时读 |
+| --- | --- |
+| `docs/architecture.md` | 理解整体架构、判断依赖方向、核对架构红线（红线权威） |
+| `docs/architecture/common-design.md` | 改 `channel-core` / `channel-harness` / `channel-control` / `channel-web` / `channel-files` 代码前（Contract/Bridge/控制面/Bundle 权威） |
+| `docs/architecture/channel-roadmap.md` | 评估新渠道 / 扩展方向 / Channel-vs-Tool 边界 |
+| `docs/adapter-authoring.md` | 新增第三方适配器、写 manifest、跑 `pnpm verify` |
+| `docs/release.md` | 发版 / changeset / release gate（版本与发布权威） |
+| `docs/weixin-live-verification-runbook.md` | 执行 Weixin live gate、填 manifest 真实值 |
+| `docs/architecture/adr/` | 架构决策记录（上游边界、图片模型降级） |
 
 包结构（`packages/`）：
 
@@ -20,8 +31,8 @@
 | `channel-core` | Channel Contract / `defineChannelAdapter` |
 | `channel-harness` | 渠道 ↔ Harness 桥 |
 | `channel-files` | 可选通用文件扩展（存储 / 解析 / `read_channel_attachment`） |
-| `channel-weixin` / `-qq` / `-dingtalk` / `-lark` | 四个内置渠道适配器 |
-| `channel-telegram` | 扩展性示例（未正式支持） |
+| `channel-weixin` / `-qq` / `-dingtalk` / `-lark` / `-telegram` | 五个内置渠道适配器 |
+| `channel-telegram` | 内置渠道适配器（Bot API 长轮询 + edit streaming + getFile 下载） |
 | `channel-compat` / `-testkit` / `-verify` / `-web` | 校验 / 测试 / 契约验证 / Web 可视化 |
 
 常用命令：`pnpm build`、`pnpm typecheck`、`pnpm test`、`pnpm channels`、`pnpm channels:clean`、`pnpm verify <dir>`、`pnpm doctor`、`pnpm check:fixtures`、`pnpm check:manifests`、`pnpm check:upstream`。
@@ -79,3 +90,34 @@ DeepSeek Harness 官方文档站点（**优先查这里**）：
 - `node --version`、`pnpm --version`、`dsh --version`
 - `npx @deepseek-ai/dsh --profile web --dump-config` 的相关段落（**密钥脱敏**）
 - 完整报错原文 + 复现步骤（做了什么 / 期望 / 实际）
+
+
+## 5. 项目代码规范（硬约束）
+
+### 5.1 架构红线（违反即架构退化，详见 `docs/architecture.md`）
+
+1. **依赖方向只允许**：`adapter → channel-core`；`upstream driver → SDK/package/protocol`；`channel-harness → channel-core + Harness public API`；`bundle → 仅插件配置`。禁止反向。
+2. **Agent/Session API 只允许在 `channel-harness`**：`channel-core`、`channel-control`、`channel-files`、各适配器、`channel-web`、`channel-testkit` 禁止 `import`/访问 `ctx.agents`、`dsh-agent`、`dsh-session`。
+3. **Core 禁止渠道特判**：不允许 `if (channel === 'weixin')`，用 `adapter.capabilities` 协商。
+4. **结构化内容**：平台 raw payload 必须映射为 `MessagePart` 再进模型；禁止 raw 直塞或压成 `text: string`。`event.raw` 只作调试。
+5. **禁止 OpenClaw Runtime 兼容层**：上游 OpenClaw 渠道仓库仅作 SDK/协议/行为参考，运行时不依赖。
+6. **上游版本治理**：禁止 `latest` + 未测试自动部署；manifest 固定 `testedVersion`/`versionRange`，升级走 Renovate → typecheck → contract → fixtures → 更新 `testedVersion`。
+7. **依赖归属**：root 不安装各渠道 SDK；平台 SDK 归属对应 adapter；`unpdf`/`mammoth`/`xlsx` 只允许在 `channel-files`。
+8. **AgentHandle ownership**：`ctx.agents.create()/resume()` 返回的 `AgentHandle` 必须由 `channel-harness` 持有（`Map<SessionId, AgentHandle>`），禁止丢弃。
+9. **会话绑定**：按 `channel:account:conversation[:thread]` 绑定；禁止「一个渠道账号 = 一个 Harness Session」。
+10. **凭据与 DTO**：浏览器只允许 `PublicAuthSession` 等净化 DTO；Secret/token/deviceCode 永不出进程。
+11. **持久化边界**：适配器禁止读写 Harness persistence；SessionBinding 持久化只由 `channel-harness` 的 store 接口负责。
+12. **只用 Harness public package API**：禁止 private/internal source；Harness breaking change 优先只改 `channel-harness`。
+
+### 5.2 官方 Harness 约束
+
+完整清单见 `docs/architecture/common-design.md`「Harness 集成约束（速查）」——覆盖：DSH Bundle / patch 整体替换 / Cordis 插件形态 / inject 名称 / 命令 / Agent 输入语义 / session-event 回复 / 配置与凭据。写共享代码前按需加载。
+
+### 5.3 验证与提交
+
+- 适配器必须过 `runChannelAdapterContract` + `pnpm verify <adapter> --test`。
+- 提交前跑 `pnpm ci:check`（build / typecheck / test / verify Telegram+Weixin / check:fixtures / check:manifests / doctor / check:bundle）。
+- Commit：Conventional Commits（`feat(scope):` / `fix(scope):` / `docs:`），scope 用包名（如 `channel-qq`）。
+- 新增渠道四步：复制 `templates/channel-adapter` → `packages/channels/cordis.patch.yml` 加行 → `pnpm build && pnpm typecheck && pnpm test` → `pnpm verify packages/channel-<name> --test`。
+- 契约表达不了的需求上报 contract gap，禁止改 `channel-core` / `channel-harness`。
+- 运行环境：Node ≥ 22、pnpm 9.15.3、ESM（`"type": "module"`）。

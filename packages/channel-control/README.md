@@ -60,7 +60,7 @@ pnpm --filter @wsz987/channel-control test
 ## Related
 
 - [Repository root](../../README.md)
-- [Architecture design](../../docs/deepseek-harness-channels-architecture.md)
+- [Architecture design](../../docs/architecture.md)
 
 ## License
 

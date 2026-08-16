@@ -84,10 +84,11 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 
 | 渠道 | 文本 | 图片 | 文件 | 流式回复 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| 微信 | 支持 | 收发 | 入站读取 | - | Experimental |
-| QQ | 支持 | 收发 | 收发 | 支持 | Tested |
-| 钉钉 | 支持 | 收发 | 收发 | 支持 | Tested |
-| 飞书 | 支持 | 收发 | 收发 | 支持 | Tested |
+| 微信 | 支持 | 收发 | 入站读取 | - | ⚠️ |
+| QQ | 支持 | 收发 | 收发 | 支持 | ✅ |
+| 钉钉 | 支持 | 收发 | 收发 | 支持 | ✅ |
+| 飞书 | 支持 | 收发 | 收发 | 支持 | ✅ |
+| Telegram | 支持 | 收发 | 收发 | 支持 | 🚧 |
 
 - 通用文件支持 PDF、DOCX、XLSX 和文本，入站文件上限为 100 MiB。
 - `send_channel_message` 支持主动发送文本和图片；文件外发支持 QQ、钉钉 SDK 和飞书。
@@ -102,6 +103,7 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 | QQ | AppID、AppSecret | [QQ 开放平台](https://q.qq.com/qqbot/openclaw/)创建机器人 |
 | 钉钉 | clientId、clientSecret（可选） | 扫码或在[钉钉开放平台](https://open-dev.dingtalk.com/)创建应用 |
 | 飞书 | AppId、AppSecret | 在[飞书开放平台](https://open.feishu.cn/app)创建应用，或扫码创建智能体 |
+| ~~Telegram~~（待支持） | ~~Bot Token~~ | ~~在 [@BotFather](https://t.me/BotFather) 创建机器人并填写 Token~~ |
 
 密钥不要写入 `cordis.patch.yml`。配置中只填写凭据引用，例如 `appSecretRef`；真实值由 Harness `ctx.credentials` 管理。完整配置示例见 [apps/example/minimal-profile](apps/example/minimal-profile/)。配置 patch 会整体替换目标插件的 `config`，不是深度合并。
 
@@ -181,7 +183,10 @@ pnpm ci:check
 
 ## 📚 文档
 
-- [架构设计](docs/deepseek-harness-channels-architecture.md)
+- [架构总览](docs/architecture.md)
+- [公共/统一代码设计](docs/architecture/common-design.md)
+- [多渠道规划](docs/architecture/channel-roadmap.md)
+- [架构决策记录（ADR）](docs/architecture/adr/)
 - [第三方渠道接入指南](docs/adapter-authoring.md)
 - [发布流程](docs/release.md)
 - [微信 live 验证手册](docs/weixin-live-verification-runbook.md)

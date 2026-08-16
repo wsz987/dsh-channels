@@ -1,3 +1,12 @@
+---
+title: 发布流程
+summary: Changesets 独立发版、预构建产物、上游更新策略与 release gate。
+when_to_use: 发版 | changeset | release gate | 版本 | 发布
+authoritative: 版本策略、Changesets 流程、上游更新策略、DSH Bundle 校验、Weixin release gate、release.yml 流程。
+see_also: [architecture.md, weixin-live-verification-runbook.md]
+status: as-built
+---
+
 # Release Pipeline
 
 The channel release pipeline: Changesets-based
@@ -69,7 +78,40 @@ the consumer side requires TypeScript compilation**:
 
 `lib/` is gitignored; the release workflow builds before publishing.
 
-## DSH Bundle Validation (v1.1 profile/patch model)
+## Upstream update strategy
+
+Keep each adapter in sync with its official upstream SDK / package / protocol
+source without silently drifting onto untested code:
+
+```text
+Upstream new version
+       ↓
+Renovate PR
+       ↓
+typecheck
+       ↓
+adapter contract
+       ↓
+payload fixtures
+       ↓
+adapter-specific tests
+       ↓
+Harness compatibility
+       ↓
+E2E
+       ↓
+update testedVersion
+```
+
+禁止：
+
+```text
+依赖 latest
++
+未经测试自动部署
+```
+
+## DSH Bundle Validation
 
 ### Automated (offline) gate — `pnpm check:bundle`
 
@@ -160,7 +202,7 @@ without an org token; the repository field links npm back to the source.
 | clean-profile DSH install    | ⏳     | manual step above — requires the dsh CLI |
 | all-in-one bundle            | ✅     | `@wsz987/dsh-channels` + `cordis.patch.yml` |
 | example profile              | ✅     | `apps/example/minimal-profile/` |
-| architecture docs            | ✅     | `docs/deepseek-harness-channels-architecture.md` |
+| architecture docs            | ✅     | `docs/architecture.md` + `docs/architecture/*.md` |
 | adapter authoring docs       | ✅     | `docs/adapter-authoring.md` |
 
 ## Weixin release gate

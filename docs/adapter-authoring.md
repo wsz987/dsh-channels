@@ -1,3 +1,12 @@
+---
+title: 第三方渠道接入指南
+summary: 用 defineChannelAdapter 编写第三方适配器（config / mapper / upstream / contract / fixtures / manifest / verify）。
+when_to_use: 新增渠道 | 第三方适配器 | defineChannelAdapter | manifest | pnpm verify
+authoritative: 第三方适配器编写流程、契约测试、fixtures、manifest 字段与状态语义、pnpm verify 校验项。
+see_also: [architecture.md, architecture/common-design.md, architecture/channel-roadmap.md]
+status: as-built
+---
+
 # Adapter Authoring Guide
 
 This guide explains how to build a third-party channel adapter for DeepSeek
@@ -22,7 +31,7 @@ the official adapters
 If your channel needs something the contract cannot express, that is a
 contract gap — report it instead of patching core. The whole point of the SDK
 is that the fifth, tenth and thirtieth channel join without touching core
-(architecture §39).
+(see [architecture.md](architecture.md)).
 
 The adapter itself is a thin layer between the platform and the Channel
 Contract:
@@ -46,7 +55,7 @@ Harness Bridge       ← Harness public API (owned by the monorepo)
 DeepSeek Harness Agent / Session
 ```
 
-Three red lines (architecture §37) apply to every adapter:
+Three red lines (see [architecture.md](architecture.md) — 架构红线) apply to every adapter:
 
 1. Never branch on other channel ids in core — that is core's business.
 2. Never call Harness Agent APIs from an adapter (`ctx.agents...`).
@@ -101,7 +110,7 @@ export default defineChannelAdapter({
 ```
 
 Because the helper keeps the concrete type of the input, you can also carry a
-compatibility `manifest` field on the object (see §6) — it will still satisfy
+compatibility `manifest` field on the object (see §7) — it will still satisfy
 `runChannelAdapterContract`, `ChannelService.register` and
 `getAdapterManifest`.
 
@@ -242,9 +251,13 @@ const manifest = {
     reference: 'telegram bot api (official)',
     testedVersion: '7.10',
     versionRange: '>=7.0 <8.0',
-    strategy: 'sdk',
+    // official-sdk | official-host-neutral-subpath | minimal-official-api-port | source-port
+    strategy: 'official-sdk',
+    // optional: exact upstream commit SHA, required only for source-port channels
+    // after the live gate passes (see the Weixin manifest).
+    testedCommit: undefined,
   },
-  status: 'untested', // tested | compatible | untested | unsupported
+  status: 'untested', // tested | compatible | untested | unsupported | experimental
 };
 ```
 
@@ -256,6 +269,7 @@ governs the state:
 | `tested` | verified against `testedVersion` (contract + fixtures) | ok |
 | `compatible` | believed compatible with `versionRange` | ok |
 | `untested` | default when there is no evidence | warning |
+| `experimental` | declared but not yet live-verified | warning |
 | `unsupported` | declared unsupported | fail (warning with `--allow-unsupported`) |
 
 Start new adapters at `untested`; promote to `tested` once the contract
@@ -300,7 +314,7 @@ Exit code: 0 when there are no fail items, 1 otherwise (warnings do not fail).
 
 ## 9. Maturity levels
 
-The suggested lifecycle (architecture §36):
+The suggested lifecycle (see [channel-roadmap.md](architecture/channel-roadmap.md) — 第三方成熟度):
 
 ```text
 Experimental → Beta → Stable → Verified
