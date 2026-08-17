@@ -6,6 +6,8 @@
 
 多渠道集成，统一配置，并在各平台与 Agent 对话
 
+支持图片与文件收发，Agent 可直接读取 PDF、DOCX、XLSX 和文本内容
+
 [![CI](https://github.com/wsz987/dsh-channels/actions/workflows/ci.yml/badge.svg)](https://github.com/wsz987/dsh-channels/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/%40wsz987%2Fdsh-channels)](https://www.npmjs.com/package/@wsz987/dsh-channels)
 [![npm downloads](https://img.shields.io/npm/dm/%40wsz987%2Fdsh-channels)](https://www.npmjs.com/package/@wsz987/dsh-channels)
@@ -23,10 +25,11 @@
 
 接入后，在 Harness Web“设置 → 渠道”面板统一配置与扫码授权，并在各平台对话框中直接与 Agent 对话（图片来源：[docs/ScreenShot](./docs/ScreenShot)）：
 
-**Harness Web · 渠道设置面板**
+**Harness Web · 渠道设置面板与 Telegram 对话**
 
 <p align="center">
-  <img src="./docs/ScreenShot/dsh-channels-setting.png" alt="Harness Web 渠道设置面板" width="560"/>
+  <img src="./docs/ScreenShot/dsh-channels-setting.png" alt="Harness Web 渠道设置面板" width="43%"/>
+  <img src="./docs/ScreenShot/telegram.png" alt="Telegram 图片与附件对话" width="54%"/>
 </p>
 
 **各平台对话框**
@@ -37,6 +40,21 @@
   <img src="./docs/ScreenShot/dingding.jpg" alt="钉钉对话" width="24%"/>
   <img src="./docs/ScreenShot/feishu.jpg" alt="飞书对话" width="24%"/>
 </p>
+
+## 能力总览
+
+| 渠道 | 文本 | 图片 | 文件 | 流式回复 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| 微信 | 支持 | 收发 | 入站读取 | - | ✅ |
+| QQ | 支持 | 收发 | 收发 | 支持 | ✅ |
+| 钉钉 | 支持 | 收发 | 收发 | 支持 | ✅ |
+| 飞书 | 支持 | 收发 | 收发 | 支持 | ✅ |
+| Telegram | 支持 | 收发 | 收发 | 支持 | ✅ |
+
+- 收到的图片通过 Harness 原生图片链路传递给支持视觉的模型。
+- 通用文件支持 PDF、DOCX、XLSX 和文本；入站附件会被保存并提取内容，Agent 可通过 `read_channel_attachment` 读取和识别，单文件上限为 100 MiB。
+- `send_channel_message` 支持主动发送文本和图片；文件外发支持 QQ、钉钉 SDK、飞书和 Telegram（Bot API multipart）。
+- 音频和视频目前会降级处理。
 
 ## 使用前须知
 
@@ -79,20 +97,6 @@ npx @deepseek-ai/dsh plugin --profile web update -w @wsz987/dsh-channels
 # 卸载 bundle
 npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 ```
-
-## 能力总览
-
-| 渠道 | 文本 | 图片 | 文件 | 流式回复 | 状态 |
-| --- | --- | --- | --- | --- | --- |
-| 微信 | 支持 | 收发 | 入站读取 | - | ✅ |
-| QQ | 支持 | 收发 | 收发 | 支持 | ✅ |
-| 钉钉 | 支持 | 收发 | 收发 | 支持 | ✅ |
-| 飞书 | 支持 | 收发 | 收发 | 支持 | ✅ |
-| Telegram | 支持 | 收发 | 收发 | 支持 | ✅ |
-
-- 通用文件支持 PDF、DOCX、XLSX 和文本，入站文件上限为 100 MiB。
-- `send_channel_message` 支持主动发送文本和图片；文件外发支持 QQ、钉钉 SDK、飞书和 Telegram（Bot API multipart）。
-- 音频和视频目前会降级处理。
 
 ## 配置与登录
 

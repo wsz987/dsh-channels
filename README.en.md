@@ -6,6 +6,8 @@ Connect WeChat, QQ, DingTalk, Lark and Telegram to [DeepSeek Harness](https://gi
 
 Multi-channel integration with unified configuration — chat with your Agent on every platform
 
+Send and receive images and files, with PDF, DOCX, XLSX and text content readable by the Agent
+
 [![CI](https://github.com/wsz987/dsh-channels/actions/workflows/ci.yml/badge.svg)](https://github.com/wsz987/dsh-channels/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/%40wsz987%2Fdsh-channels)](https://www.npmjs.com/package/@wsz987/dsh-channels)
 [![npm downloads](https://img.shields.io/npm/dm/%40wsz987%2Fdsh-channels)](https://www.npmjs.com/package/@wsz987/dsh-channels)
@@ -25,10 +27,11 @@ English | [简体中文](README.md)
 
 Once installed, configure and authorize channels via QR code in the Harness Web "Settings → Channels" panel, then chat with your Agent directly in each platform's conversation (screenshots from [docs/ScreenShot](./docs/ScreenShot)):
 
-**Harness Web · Channels settings panel**
+**Harness Web · Channels settings and Telegram conversation**
 
 <p align="center">
-  <img src="./docs/ScreenShot/dsh-channels-setting.png" alt="Harness Web channel settings panel" width="560"/>
+  <img src="./docs/ScreenShot/dsh-channels-setting.png" alt="Harness Web channel settings panel" width="43%"/>
+  <img src="./docs/ScreenShot/telegram.png" alt="Telegram image and attachment conversation" width="54%"/>
 </p>
 
 **Platform conversations**
@@ -39,6 +42,23 @@ Once installed, configure and authorize channels via QR code in the Harness Web 
   <img src="./docs/ScreenShot/dingding.jpg" alt="DingTalk conversation" width="24%"/>
   <img src="./docs/ScreenShot/feishu.jpg" alt="Lark conversation" width="24%"/>
 </p>
+
+## Capability matrix
+
+| Channel | Text | Images | Files | Streaming | Status |
+| --- | --- | --- | --- | --- | --- |
+| WeChat | Yes | send/receive | inbound read | - | ✅ |
+| QQ | Yes | send/receive | send/receive | Yes | ✅ |
+| DingTalk | Yes | send/receive | send/receive | Yes | ✅ |
+| Lark | Yes | send/receive | send/receive | Yes | ✅ |
+| Telegram | Yes | send/receive | send/receive | Yes | ✅ |
+
+Status: ✅ tested · ⚠️ experimental · 🚧 in development (coming soon)
+
+- Inbound images use the native Harness image path and are passed to vision-capable models.
+- Generic files support PDF, DOCX, XLSX and text. Inbound attachments are stored and their content is extracted for the Agent to inspect through `read_channel_attachment`, with a 100 MiB limit per file.
+- `send_channel_message` can proactively send text and images; file outbound is supported for QQ, the DingTalk SDK, Lark and Telegram (Bot API multipart).
+- Audio and video are currently degraded.
 
 ## Before you start
 
@@ -81,22 +101,6 @@ npx @deepseek-ai/dsh plugin --profile web update -w @wsz987/dsh-channels
 # Uninstall the bundle
 npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 ```
-
-## Capability matrix
-
-| Channel | Text | Images | Files | Streaming | Status |
-| --- | --- | --- | --- | --- | --- |
-| WeChat | Yes | send/receive | inbound read | - | ✅ |
-| QQ | Yes | send/receive | send/receive | Yes | ✅ |
-| DingTalk | Yes | send/receive | send/receive | Yes | ✅ |
-| Lark | Yes | send/receive | send/receive | Yes | ✅ |
-| Telegram | Yes | send/receive | send/receive | Yes | ✅ |
-
-Status: ✅ tested · ⚠️ experimental · 🚧 in development (coming soon)
-
-- Generic files support PDF, DOCX, XLSX and text; inbound files are capped at 100 MiB.
-- `send_channel_message` can proactively send text and images; file outbound is supported for QQ, the DingTalk SDK, Lark and Telegram (Bot API multipart).
-- Audio and video are currently degraded.
 
 ## Configuration and login
 
