@@ -14,6 +14,7 @@ export const RELEASE_PACKAGE_NAMES = [
   '@wsz987/channel-qq',
   '@wsz987/channel-dingtalk',
   '@wsz987/channel-lark',
+  '@wsz987/channel-telegram',
   RELEASE_BUNDLE,
 ];
 

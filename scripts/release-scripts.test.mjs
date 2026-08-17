@@ -39,23 +39,36 @@ test('release packages are public and dependency ordered', () => {
     '@wsz987/channel-qq',
     '@wsz987/channel-dingtalk',
     '@wsz987/channel-lark',
+    '@wsz987/channel-telegram',
     '@wsz987/dsh-channels',
   ]);
   const entries = [
     ...RELEASE_PACKAGE_NAMES.map((name) => {
       if (name === RELEASE_BUNDLE) {
-        return entry(name, '0.9.0', { '@wsz987/channel-weixin': 'workspace:*' });
+        return entry(name, '0.9.0', {
+          '@wsz987/channel-telegram': 'workspace:*',
+          '@wsz987/channel-weixin': 'workspace:*',
+        });
       }
       if (name === '@wsz987/channel-weixin') {
         return entry(name, '0.8.1', { '@wsz987/channel-core': 'workspace:*' });
       }
+      if (name === '@wsz987/channel-telegram') {
+        return entry(name, '0.1.0', {
+          '@wsz987/channel-control': 'workspace:*',
+          '@wsz987/channel-core': 'workspace:*',
+        });
+      }
       return entry(name, '0.1.0');
     }),
-    entry('@wsz987/channel-telegram', '0.1.0'),
   ];
   const packages = releasePackages(entries);
   assert.equal(packages.length, RELEASE_PACKAGE_NAMES.length);
-  assert.equal(packages.some(({ name }) => name === '@wsz987/channel-telegram'), false);
+  assert.equal(packages.some(({ name }) => name === '@wsz987/channel-telegram'), true);
+  assert.ok(
+    packages.findIndex(({ name }) => name === '@wsz987/channel-telegram')
+      < packages.findIndex(({ name }) => name === RELEASE_BUNDLE),
+  );
   assert.ok(
     packages.findIndex(({ name }) => name === '@wsz987/channel-weixin')
       < packages.findIndex(({ name }) => name === RELEASE_BUNDLE),
@@ -69,15 +82,15 @@ test('release tag matches the independently versioned bundle', () => {
   assert.throws(() => assertReleaseTag('tag', 'v0.8.0', '0.9.0'), /expected v0\.9\.0/);
 });
 
-test('release allowlist rejects an omitted workspace runtime dependency', () => {
+test('release allowlist rejects an omitted workspace dependency', () => {
   const entries = RELEASE_PACKAGE_NAMES.map((name) =>
     entry(
       name,
       name === RELEASE_BUNDLE ? '0.9.0' : '0.1.0',
-      name === RELEASE_BUNDLE ? { '@wsz987/channel-telegram': 'workspace:*' } : {},
+      name === RELEASE_BUNDLE ? { '@wsz987/channel-testkit': 'workspace:*' } : {},
     ),
   );
-  entries.push(entry('@wsz987/channel-telegram', '0.1.0'));
+  entries.push(entry('@wsz987/channel-testkit', '0.1.0'));
   assert.throws(() => releasePackages(entries), /depends on non-release workspace package/);
 });
 
