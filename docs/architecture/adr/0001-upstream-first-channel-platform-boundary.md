@@ -1,8 +1,10 @@
 # ADR 0001 — Upstream-First Channel Platform Boundary
 
-> Records the upstream-boundary decision that the four built-in channel
-> adapters follow. Pinned upstream versions live programmatically in
-> `packages/channel-compat/src/upstream-manifest.ts`.
+> Records the upstream-boundary decision that the five built-in channel
+> adapters follow. Platform-SDK upstream baselines live programmatically in
+> `packages/channel-compat/src/upstream-manifest.ts`; the Telegram Bot API
+> baseline (direct protocol, no SDK) lives in
+> `packages/channel-telegram/src/manifest.ts`.
 
 ## Status
 
@@ -11,7 +13,8 @@ Accepted
 ## Context
 
 `dsh-channels` is a community channel plugin for DeepSeek Harness covering
-WeChat / QQ / DingTalk / Lark. It is not the official platform implementation:
+WeChat / QQ / DingTalk / Lark / Telegram. It is not the official platform
+implementation:
 the platform protocol semantics for each channel are owned by official
 platform SDKs and official channel implementations, not by this repository.
 

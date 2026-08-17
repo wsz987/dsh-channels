@@ -21,7 +21,8 @@ configured with no `fixed` / `linked` groups
 
 The automated release family is an explicit allowlist: the bundle plus its ten
 runtime dependencies (`channel-core`, `channel-harness`, `channel-control`,
-`channel-files`, `channel-web`, the five built-in adapters, and Telegram). The
+`channel-files`, `channel-web`, and the five built-in adapters `channel-weixin`,
+`channel-qq`, `channel-dingtalk`, `channel-lark`, `channel-telegram`). The
 ignored development/governance packages (`channel-compat`, `channel-testkit`,
 `channel-verify`) are not packed or published by this workflow.
 
@@ -29,13 +30,14 @@ ignored development/governance packages (`channel-compat`, `channel-testkit`,
 | ---------------------- | ------- |
 | @wsz987/channel-core      | 0.3.0   |
 | @wsz987/channel-harness   | 0.4.2   |
-| @wsz987/channel-control   | 0.1.0   |
-| @wsz987/channel-files     | 0.1.0   |
-| @wsz987/channel-web       | 0.1.0   |
+| @wsz987/channel-control   | 0.3.0   |
+| @wsz987/channel-files     | 0.3.0   |
+| @wsz987/channel-web       | 0.3.0   |
 | @wsz987/channel-weixin    | 0.8.1   |
 | @wsz987/channel-qq        | 0.5.4   |
 | @wsz987/channel-dingtalk  | 0.7.0   |
 | @wsz987/channel-lark      | 0.6.3   |
+| @wsz987/channel-telegram  | 0.3.0   |
 | @wsz987/dsh-channels      | 0.9.0   |
 
 `apps/*` are private (`"private": true`) and never published.

@@ -21,8 +21,9 @@ status: planning
 - QQ Bot
 - DingTalk / 钉钉
 - Lark / Feishu / 飞书
+- Telegram（Bot API）
 
-目标不是复制或重写四个平台全部实现，也不是兼容 OpenClaw Runtime，而是：
+目标不是复制或重写五个平台全部实现，也不是兼容 OpenClaw Runtime，而是：
 
 > **把官方 SDK、独立上游 package、协议实现隔离在 Upstream Driver 后面，由 Channel Adapter 统一成稳定 Channel Contract，再通过极薄的 Harness Bridge 接入 DeepSeek Harness。**
 
@@ -58,8 +59,9 @@ DeepSeek Harness Agent / Session
 - QQ、钉钉、飞书：`tested`（通过 offline contract + fixtures）。
 - 微信：`experimental`，在真实平台 live gate 通过前不得标 `tested`（见
   [weixin-live-verification-runbook.md](../weixin-live-verification-runbook.md)）。
-- Telegram：`experimental`；当前默认采用 Bot API `getUpdates` 长轮询，真实平台
-  入站、流式编辑与媒体路径完成 live gate 后才能标记 `tested`。
+- Telegram：`experimental`（已随官方 bundle 提供）；当前默认采用 Bot API `getUpdates`
+  长轮询，媒体入站 / 出站与 edit streaming 均已落地，真实平台 live gate
+  通过后才能标记 `tested`。
 - 音频 / 视频当前降级处理；通用文件支持 PDF、DOCX、XLSX 和文本。
 
 ## 独立 Adapter 安装（未来能力）
@@ -87,7 +89,6 @@ adapter package 自己提供 dsh.bundle
 ### Tier 1 — Messaging / Team Chat
 
 ```text
-Telegram
 Discord
 Slack
 Microsoft Teams

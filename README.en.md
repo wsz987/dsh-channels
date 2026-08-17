@@ -2,7 +2,7 @@
 
 # dsh-channels
 
-Connect WeChat, QQ, DingTalk and Lark to [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
+Connect WeChat, QQ, DingTalk, Lark and Telegram to [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 
 Multi-channel integration with unified configuration — chat with your Agent on every platform
 
@@ -86,17 +86,16 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 
 | Channel | Text | Images | Files | Streaming | Status |
 | --- | --- | --- | --- | --- | --- |
-| WeChat | Yes | send/receive | inbound read | - | ⚠️ |
+| WeChat | Yes | send/receive | inbound read | - | ✅ |
 | QQ | Yes | send/receive | send/receive | Yes | ✅ |
 | DingTalk | Yes | send/receive | send/receive | Yes | ✅ |
 | Lark | Yes | send/receive | send/receive | Yes | ✅ |
-| Telegram | Yes | send/receive | send/receive | Yes | 🚧 |
+| Telegram | Yes | send/receive | send/receive | Yes | ✅ |
 
 Status: ✅ tested · ⚠️ experimental · 🚧 in development (coming soon)
 
 - Generic files support PDF, DOCX, XLSX and text; inbound files are capped at 100 MiB.
-- `send_channel_message` can proactively send text and images; file outbound is supported for QQ, the DingTalk SDK and Lark.
-- WeChat stays `experimental` until real-platform verification passes.
+- `send_channel_message` can proactively send text and images; file outbound is supported for QQ, the DingTalk SDK, Lark and Telegram (Bot API multipart).
 - Audio and video are currently degraded.
 
 ## Configuration and login
@@ -107,7 +106,7 @@ Status: ✅ tested · ⚠️ experimental · 🚧 in development (coming soon)
 | QQ | AppID, AppSecret | Create a bot on the [QQ open platform](https://q.qq.com/qqbot/openclaw/) |
 | DingTalk | clientId, clientSecret (optional) | Scan a QR code, or create an app on the [DingTalk open platform](https://open-dev.dingtalk.com/) |
 | Lark | AppId, AppSecret | Create an app on the [Lark open platform](https://open.feishu.cn/app), or scan a QR code to create an agent |
-| ~~Telegram~~ (coming soon) | ~~Bot Token~~ | ~~Create a bot in [@BotFather](https://t.me/BotFather) and enter the token~~ |
+| Telegram | Bot Token | Create a bot in [@BotFather](https://t.me/BotFather) and enter the token |
 
 Do not write secrets into `cordis.patch.yml`. Put only credential references (e.g. `appSecretRef`) in the config; real values are managed by Harness `ctx.credentials`. See [apps/example/minimal-profile](apps/example/minimal-profile/) for full config examples. A config patch replaces the whole `config` of the target plugin — it is not a deep merge.
 
@@ -212,8 +211,7 @@ Follows the layering convention of mainstream open-source projects (Koishi / Wec
 | `packages/channel-harness` | Channel ↔ Harness bridge; keeps only the optional `ChannelFileProvider` port |
 | `packages/channel-files` | Optional generic-file extension: private storage, mature doc parsers, read tool |
 | `packages/channel-control` | Control plane: config / credentials / QR auth / runtime lifecycle |
-| `packages/channel-{weixin,qq,dingtalk,lark}` | Built-in channel adapters |
-| `packages/channel-telegram` | Third-party channel example (not officially supported) |
+| `packages/channel-{weixin,qq,dingtalk,lark,telegram}` | The five built-in channel adapters |
 | `packages/channel-{compat,testkit,verify,web}` | Contract verification / test tooling / Web visualization |
 | `templates/channel-adapter` | Scaffold for new channels |
 

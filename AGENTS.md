@@ -4,7 +4,7 @@
 
 ## 1. 项目定位
 
-这是 DeepSeek Harness 的即时通讯渠道插件（**社区项目，非官方**）：微信 / QQ / 钉钉 / 飞书，通过统一的 `ctx.channels` API 收发消息。仓库即 `dsh-channels`。
+这是 DeepSeek Harness 的即时通讯渠道插件（**社区项目，非官方**）：微信 / QQ / 钉钉 / 飞书 / Telegram，通过统一的 `ctx.channels` API 收发消息。仓库即 `dsh-channels`。
 
 处理任何「本项目」的问题前，先读：
 
@@ -31,8 +31,7 @@
 | `channel-core` | Channel Contract / `defineChannelAdapter` |
 | `channel-harness` | 渠道 ↔ Harness 桥 |
 | `channel-files` | 可选通用文件扩展（存储 / 解析 / `read_channel_attachment`） |
-| `channel-weixin` / `-qq` / `-dingtalk` / `-lark` / `-telegram` | 五个内置渠道适配器 |
-| `channel-telegram` | 内置渠道适配器（Bot API 长轮询 + edit streaming + getFile 下载） |
+| `channel-weixin` / `-qq` / `-dingtalk` / `-lark` / `-telegram` | 五个内置渠道适配器（Telegram：Bot API 长轮询 + edit streaming + getFile 下载） |
 | `channel-compat` / `-testkit` / `-verify` / `-web` | 校验 / 测试 / 契约验证 / Web 可视化 |
 
 常用命令：`pnpm build`、`pnpm typecheck`、`pnpm test`、`pnpm channels`、`pnpm channels:clean`、`pnpm verify <dir>`、`pnpm doctor`、`pnpm check:fixtures`、`pnpm check:manifests`、`pnpm check:upstream`。
@@ -81,7 +80,7 @@ DeepSeek Harness 官方文档站点（**优先查这里**）：
 
 > 小技巧：任意 `@deepseek-ai/<pkg>/package.json` 的 `repository.url` + `repository.directory` + 包内 README 引用的相对路径（如 `reference/README.md`、`src/args.ts`）三者合起来，即可定位到官方源码/文档的确切位置。
 
-各渠道上游 SDK：微信 [Tencent/openclaw-weixin](https://github.com/Tencent/openclaw-weixin)、QQ [tencent-connect/bot-node-sdk](https://github.com/tencent-connect/bot-node-sdk)、钉钉 [open-dingtalk/dingtalk-stream-sdk-nodejs](https://github.com/open-dingtalk/dingtalk-stream-sdk-nodejs)、飞书 [larksuite/node-sdk](https://github.com/larksuite/node-sdk)。
+各渠道上游 SDK：微信 [Tencent/openclaw-weixin](https://github.com/Tencent/openclaw-weixin)、QQ [tencent-connect/bot-node-sdk](https://github.com/tencent-connect/bot-node-sdk)、钉钉 [open-dingtalk/dingtalk-stream-sdk-nodejs](https://github.com/open-dingtalk/dingtalk-stream-sdk-nodejs)、飞书 [larksuite/node-sdk](https://github.com/larksuite/node-sdk)；Telegram 直连 [Bot API](https://core.telegram.org/bots/api) 协议（无 SDK）。
 
 ## 4. 报告 / 提问时的最小信息
 

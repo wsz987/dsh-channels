@@ -9,8 +9,8 @@ overrides it to run a QQ-only channel setup.
 - `package.json` — the profile manifest: declares the bundles to install via
   the `dsh.profile.bundles` list (`@deepseek-ai/dsh-base`, `@wsz987/dsh-channels`).
 - `cordis.patch.yml` — the **user profile patch** that overrides rows inserted
-  by the bundle: disables weixin / dingtalk / lark and overrides `channels-qq`
-  with its full QQ config.
+  by the bundle: disables weixin / dingtalk / lark / telegram and overrides
+  `channels-qq` with its full QQ config.
 
 ## Install flow
 

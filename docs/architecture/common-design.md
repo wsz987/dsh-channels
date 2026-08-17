@@ -1046,7 +1046,7 @@ Harness `0.1.0-rc.6` 的 `ctx.attachments` 只提供栅格图片的验证、保�
   → channel-files 私有存储 + 成熟解析库 + read_channel_attachment
 ```
 
-`channel-core` 与四个适配器不知道解析格式；`channel-harness` 也不依赖扩展包，
+`channel-core` 与五个适配器不知道解析格式；`channel-harness` 也不依赖扩展包，
 只通过 `ctx.get('channelFiles')` 尝试获取 provider。bundle 默认加载该扩展，但可
 删除 `channels-files` 配置行。未来 Harness 提供官方通用文件能力时，只替换或移除
 provider，不修改适配器、Channel Contract 和会话路由。

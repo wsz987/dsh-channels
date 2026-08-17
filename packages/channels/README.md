@@ -6,6 +6,7 @@ DeepSeek Harness **DSH Bundle** — built-in messaging channels:
 - QQ Bot
 - DingTalk / 钉钉
 - Lark / Feishu / 飞书
+- Telegram / 电报（Bot API）
 
 ## Install
 
@@ -22,7 +23,7 @@ npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@latest
 The bundle patch (`cordis.patch.yml`) references only entrypoints exported by
 `@wsz987/dsh-channels` itself. Those entrypoints delegate to the ChannelService,
 generic-file extension, Harness bridge, control plane, Web settings panel and
-the four channel adapters through the bundle's own dependency tree. Every
+the five channel adapters through the bundle's own dependency tree. Every
 channel can be disabled through its plugin config.
 
 ## Quick start
@@ -34,7 +35,7 @@ npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@latest
 # 2. confirm the merged config inserted the channel plugins
 npx @deepseek-ai/dsh --profile web --dump-config
 
-# 3. start the profile — all four channels load
+# 3. start the profile — all five channels load
 npx @deepseek-ai/dsh web
 ```
 
@@ -67,7 +68,7 @@ npx @deepseek-ai/dsh plugin --profile release-validation add -w @wsz987/dsh-chan
 # 2. dump the merged config — verify the channel plugins were inserted
 npx @deepseek-ai/dsh --profile release-validation --dump-config
 
-# 3. start the profile — channels-service / -harness / -control and the four
+# 3. start the profile — channels-service / -harness / -control and the five
 #    adapters (plus channels-web) should all load without error
 npx @deepseek-ai/dsh --profile release-validation
 ```
@@ -85,7 +86,7 @@ ever install `@wsz987/dsh-channels`**:
 | `@wsz987/channel-control`| Config / credentials / auth-session control plane |
 | `@wsz987/channel-files`  | Optional generic-file extension (store / extract / `read_channel_attachment`) |
 | `@wsz987/channel-web`    | Web dashboard (`Settings > Channels`) for GUI setup |
-| `@wsz987/channel-weixin/qq/dingtalk/lark` | The four channel adapters |
+| `@wsz987/channel-weixin/qq/dingtalk/lark/telegram` | The five channel adapters |
 
 The Web dashboard (`@wsz987/channel-web`) injects the Harness web client
 surfaces (`@deepseek-ai/dsh-client-runtime`, `-locale`, `-ui-settings`,
@@ -109,7 +110,7 @@ Messaging Platform
 Upstream Driver
       │
       ▼
-Channel Adapter (channel-weixin/qq/dingtalk/lark)
+Channel Adapter (channel-weixin/qq/dingtalk/lark/telegram)
       │
       ▼
 ChannelService (Cordis Service, ctx.channels)

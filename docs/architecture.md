@@ -97,7 +97,7 @@ Harness breaking change
 优先只修改 channel-harness
 ```
 
-而不引发四个渠道同时跟着重构。
+而不引发其他渠道同时跟着重构。
 
 ### 产品一体化，代码模块化
 
@@ -125,7 +125,7 @@ npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@latest
 @wsz987/channel-qq
 @wsz987/channel-dingtalk
 @wsz987/channel-lark
-@wsz987/channel-telegram    # 第三方扩展示例（未正式支持）
+@wsz987/channel-telegram    # 内置渠道适配器（Bot API 长轮询 + edit streaming + getFile 下载）
 
 @wsz987/dsh-channels
 ```
@@ -160,7 +160,7 @@ deepseek-harness-channels/
 │  ├─ channel-qq/          # QQ 适配器（official-sdk）
 │  ├─ channel-dingtalk/    # 钉钉适配器（dingtalk-stream + 官方 OpenAPI port）
 │  ├─ channel-lark/        # 飞书适配器（official-sdk + 官方 OpenAPI）
-│  ├─ channel-telegram/    # 第三方扩展示例（未正式支持）
+│  ├─ channel-telegram/    # 内置渠道适配器（Bot API 长轮询 + edit streaming + getFile 下载）
 │  ├─ channel-testkit/     # 契约测试 / fakes / fixture loader
 │  ├─ channel-compat/      # 上游版本治理 / doctor / manifest
 │  ├─ channel-verify/      # 适配器契约验证（pnpm verify）
@@ -171,8 +171,8 @@ deepseek-harness-channels/
 │  ├─ qq/
 │  ├─ dingtalk/
 │  ├─ lark/
-│  ├─ telegram/            # 第三方示例 fixtures
-│  └─ upstream/            # 各渠道上游版本基线（README 占位）
+│  ├─ telegram/            # 内置渠道 fixtures
+│  └─ upstream/            # 各渠道上游版本基线（SDK 渠道；Telegram 协议直连，基线在 channel-telegram/src/manifest.ts）
 │
 ├─ pnpm-workspace.yaml
 ├─ package.json
@@ -198,13 +198,13 @@ deepseek-harness-channels/
               │                        ChannelService
               │                               │
               │                      Adapter Registry
-              │                   ┌──────┼──────┬──────┐
-              │                   │      │      │      │
-              │                   ▼      ▼      ▼      ▼
-              │                 WX      QQ     DD     Lark
-              │                   │      │      │      │
-              │                   ▼      ▼      ▼      ▼
-              │                Driver Driver Driver Driver
+              │                   ┌──────┼──────┬──────┬──────┐
+              │                   │      │      │      │      │
+              │                   ▼      ▼      ▼      ▼      ▼
+              │                 WX      QQ     DD     Lark    TG
+              │                   │      │      │      │      │
+              │                   ▼      ▼      ▼      ▼      ▼
+              │                Driver  Driver  Driver  Driver  Driver
               │
               └──────────── channel-harness ────────────┘
 ```
@@ -371,7 +371,7 @@ DSH Bundle
 = 用户安装与组合体验
 ```
 
-最重要的目标不是完成四个渠道。
+最重要的目标不是完成某几个渠道。
 
 而是：
 

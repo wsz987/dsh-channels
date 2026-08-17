@@ -2,7 +2,7 @@
 
 # dsh-channels
 
-将微信、QQ、钉钉和飞书接入 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
+将微信、QQ、钉钉、飞书和 Telegram 接入 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 
 多渠道集成，统一配置，并在各平台与 Agent 对话
 
@@ -84,15 +84,14 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 
 | 渠道 | 文本 | 图片 | 文件 | 流式回复 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| 微信 | 支持 | 收发 | 入站读取 | - | ⚠️ |
+| 微信 | 支持 | 收发 | 入站读取 | - | ✅ |
 | QQ | 支持 | 收发 | 收发 | 支持 | ✅ |
 | 钉钉 | 支持 | 收发 | 收发 | 支持 | ✅ |
 | 飞书 | 支持 | 收发 | 收发 | 支持 | ✅ |
-| Telegram | 支持 | 收发 | 收发 | 支持 | 🚧 |
+| Telegram | 支持 | 收发 | 收发 | 支持 | ✅ |
 
 - 通用文件支持 PDF、DOCX、XLSX 和文本，入站文件上限为 100 MiB。
-- `send_channel_message` 支持主动发送文本和图片；文件外发支持 QQ、钉钉 SDK 和飞书。
-- 微信在完成真实平台验证前保持 `Experimental` 状态。
+- `send_channel_message` 支持主动发送文本和图片；文件外发支持 QQ、钉钉 SDK、飞书和 Telegram（Bot API multipart）。
 - 音频和视频目前会降级处理。
 
 ## 配置与登录
@@ -103,7 +102,7 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 | QQ | AppID、AppSecret | [QQ 开放平台](https://q.qq.com/qqbot/openclaw/)创建机器人 |
 | 钉钉 | clientId、clientSecret（可选） | 扫码或在[钉钉开放平台](https://open-dev.dingtalk.com/)创建应用 |
 | 飞书 | AppId、AppSecret | 在[飞书开放平台](https://open.feishu.cn/app)创建应用，或扫码创建智能体 |
-| ~~Telegram~~（待支持） | ~~Bot Token~~ | ~~在 [@BotFather](https://t.me/BotFather) 创建机器人并填写 Token~~ |
+| Telegram | Bot Token | 在 [@BotFather](https://t.me/BotFather) 创建机器人并填写 Token |
 
 密钥不要写入 `cordis.patch.yml`。配置中只填写凭据引用，例如 `appSecretRef`；真实值由 Harness `ctx.credentials` 管理。完整配置示例见 [apps/example/minimal-profile](apps/example/minimal-profile/)。配置 patch 会整体替换目标插件的 `config`，不是深度合并。
 
@@ -208,8 +207,7 @@ pnpm ci:check
 | `packages/channel-harness` | 渠道 ↔ Harness 桥；只保留可选 `ChannelFileProvider` 端口 |
 | `packages/channel-files` | 可选通用文件扩展：私有存储、成熟文档解析库、读取工具 |
 | `packages/channel-control` | 控制面：配置 / 凭据 / 扫码授权 / 运行时生命周期 |
-| `packages/channel-{weixin,qq,dingtalk,lark}` | 内置渠道适配器 |
-| `packages/channel-telegram` | 第三方渠道扩展示例（未正式支持） |
+| `packages/channel-{weixin,qq,dingtalk,lark,telegram}` | 五个内置渠道适配器 |
 | `packages/channel-{compat,testkit,verify,web}` | 契约验证 / 测试工具 / Web 可视化 |
 | `templates/channel-adapter` | 新渠道脚手架 |
 
