@@ -25,11 +25,11 @@
 
 接入后，在 Harness Web“设置 → 渠道”面板统一配置与扫码授权，并在各平台对话框中直接与 Agent 对话（图片来源：[docs/ScreenShot](./docs/ScreenShot)）：
 
-**Harness Web · 渠道设置面板与 Telegram 对话**
+**Harness Web · 渠道设置与 Telegram 接入示例（图片与文件收发、附件内容读取）**
 
 <p align="center">
   <img src="./docs/ScreenShot/dsh-channels-setting.png" alt="Harness Web 渠道设置面板" width="43%"/>
-  <img src="./docs/ScreenShot/telegram.png" alt="Telegram 图片与附件对话" width="54%"/>
+  <img src="./docs/ScreenShot/telegram.png" alt="Telegram 接入示例：图片与文件收发、附件内容读取" width="54%"/>
 </p>
 
 **各平台对话框**

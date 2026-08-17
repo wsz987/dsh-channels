@@ -27,11 +27,11 @@ English | [简体中文](README.md)
 
 Once installed, configure and authorize channels via QR code in the Harness Web "Settings → Channels" panel, then chat with your Agent directly in each platform's conversation (screenshots from [docs/ScreenShot](./docs/ScreenShot)):
 
-**Harness Web · Channels settings and Telegram conversation**
+**Harness Web · Channels settings and Telegram integration example (image and file transfer, attachment reading)**
 
 <p align="center">
   <img src="./docs/ScreenShot/dsh-channels-setting.png" alt="Harness Web channel settings panel" width="43%"/>
-  <img src="./docs/ScreenShot/telegram.png" alt="Telegram image and attachment conversation" width="54%"/>
+  <img src="./docs/ScreenShot/telegram.png" alt="Telegram integration example: image and file transfer with attachment reading" width="54%"/>
 </p>
 
 **Platform conversations**
