@@ -22,7 +22,16 @@ import {
   type UserMessage,
 } from '@deepseek-ai/dsh-llm';
 import type { ImageAttachmentRef, ImageMediaType, SaveImageAttachment } from '@deepseek-ai/dsh-attachment';
-import type { AudioPart, FilePart, ImagePart, MessagePart, MessageReceived, VideoPart } from '@wsz987/channel-core';
+import {
+  mimeHintFromFilename,
+  normalizeMimeHint,
+  type AudioPart,
+  type FilePart,
+  type ImagePart,
+  type MessagePart,
+  type MessageReceived,
+  type VideoPart,
+} from '@wsz987/channel-core';
 import type { ChannelFileDescriptor } from './file-provider.js';
 
 /** Type-level alias: the bridge always produces Harness user messages. */
@@ -199,7 +208,9 @@ async function imageBlock(
 
 /** Infer a raster media type from a part's mimeType / url / dataUri. */
 function inferImageMediaType(part: ImagePart): ImageMediaType | undefined {
-  const candidate = part.mimeType ?? mimeFromDataUri(part.dataUri) ?? mimeFromUrl(part.url);
+  const candidate = normalizeMimeHint(part.mimeType)
+    ?? normalizeMimeHint(mimeFromDataUri(part.dataUri))
+    ?? mimeHintFromFilename(part.url);
   if (!candidate) return undefined;
   const normalized = candidate.split(';')[0]!.trim().toLowerCase();
   switch (normalized) {
@@ -219,20 +230,6 @@ function mimeFromDataUri(dataUri?: string): string | undefined {
   if (!dataUri) return undefined;
   const m = /^data:([^;,]+)/.exec(dataUri);
   return m?.[1];
-}
-
-function mimeFromUrl(url?: string): string | undefined {
-  if (!url) return undefined;
-  const m = /.(png|jpe?g|webp|gif)(?:[?#]|$)/i.exec(url);
-  if (!m) return undefined;
-  switch (m[1]!.toLowerCase()) {
-    case 'png': return 'image/png';
-    case 'jpg':
-    case 'jpeg': return 'image/jpeg';
-    case 'webp': return 'image/webp';
-    case 'gif': return 'image/gif';
-    default: return undefined;
-  }
 }
 
 /**

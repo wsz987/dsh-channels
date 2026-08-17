@@ -18,7 +18,7 @@ describe('installDebugConsoleExporter', () => {
     expect(info).not.toHaveBeenCalled();
   });
 
-  it('exports every channel-harness level and filters other namespaces', () => {
+  it('exports channel diagnostics and filters other namespaces', () => {
     vi.stubEnv(CHANNELS_DEBUG_ENV, '1');
     const consoleDebug = vi.spyOn(console, 'debug').mockImplementation(() => {});
     const consoleInfo = vi.spyOn(console, 'info').mockImplementation(() => {});
@@ -27,11 +27,13 @@ describe('installDebugConsoleExporter', () => {
     const ctx = new Context();
     installDebugConsoleExporter(ctx);
     const logger = ctx.logger('channel-harness');
+    const telegramLogger = ctx.logger('channel-telegram');
 
     logger.debug('debug', { value: 1 });
     logger.info('info', { value: 2 });
     logger.warn('warn', { value: 3 });
     logger.error('error', { value: 4 });
+    telegramLogger.info('telegram inbound', { parts: [{ type: 'image', localDataBytes: 123 }] });
     ctx.logger('other').error('hidden');
 
     expect(consoleInfo).toHaveBeenNthCalledWith(
@@ -43,5 +45,9 @@ describe('installDebugConsoleExporter', () => {
     expect(consoleWarn).toHaveBeenCalledWith('warn {"value":3}');
     expect(consoleError).toHaveBeenCalledTimes(1);
     expect(consoleError).toHaveBeenCalledWith('error {"value":4}');
+    expect(consoleInfo).toHaveBeenNthCalledWith(
+      3,
+      'telegram inbound {"parts":[{"type":"image","localDataBytes":123}]}',
+    );
   });
 });

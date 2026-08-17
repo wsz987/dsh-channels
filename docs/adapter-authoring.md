@@ -175,6 +175,64 @@ starts the upstream and the long-poll receive loop, `stop()` tears down
 reports status. The template includes dedup (via `InboundProcessor`) and
 exponential reconnect backoff.
 
+### Media and attachment integration
+
+New adapters must stop at the shared `MessagePart` boundary; they must not
+import `channel-harness` or `channel-files`:
+
+```text
+platform URL / opaque handle
+  -> platform upstream downloads/decrypts bounded bytes
+  -> ImagePart or FilePart { localData, mimeType?, name?, size? }
+  -> channel-harness
+       image -> Harness attachments.saveImage
+       file  -> optional ChannelFileProvider -> channel-files
+```
+
+- Put only genuine `http(s)` URLs in `url`. Put `file_id`, `image_key`,
+  `mediaId` and similar opaque handles in `resourceRef`; only the platform
+  upstream may resolve them.
+- Preserve downloaded bytes in `localData`. For files also provide the best
+  available `name` and actual downloaded `size`.
+- Treat platform MIME, HTTP `Content-Type`, and filename extensions as hints.
+  Use `normalizeMimeHint` and `mimeHintFromFilename` from `@wsz987/channel-core`
+  instead of a channel-specific extension table. These helpers do not verify
+  bytes; `channel-files` re-verifies stored content with magic signatures.
+- Preserve media captions as `TextPart` content in message order. Do not rely
+  on image `alt` as the only model-visible representation.
+- If a platform album arrives as multiple independently acknowledged events,
+  default to independent ordered delivery. Add aggregation only when the
+  platform or host provides a transactional group boundary; otherwise a
+  buffer complicates retry, offset acknowledgement and crash recovery.
+- A failed media download must not erase other text parts. Keep the structured
+  binary part, set a stable `ingressFailure`, and let the shared bridge degrade
+  gracefully.
+
+### Inbound logging checklist
+
+After mapping and hydration, and before emitting the event, log one structured
+summary through the adapter namespace (`channel-<name>`). Include message and
+conversation identifiers plus a `parts` summary. For images log
+`resourceRef`, `mimeType`, `localDataBytes`, and `ingressFailure`; for files log
+`name`, `mimeType`, `size`, `localDataBytes`, and `ingressFailure`.
+
+The debug exporter only shows namespaces explicitly listed in
+`packages/channel-harness/src/debug-logger.ts`. Adding a channel therefore
+requires both the exporter entry (`channel-<name>: 3`) and a regression test in
+`packages/channel-harness/test/debug-logger.test.ts`. Never log tokens, signed
+URLs, raw file bytes, or the complete platform payload.
+
+Required media tests for every capability declared `true`:
+
+1. Fixture mapping distinguishes `url` from `resourceRef` and preserves captions.
+2. Download hydration produces non-empty `localData` plus usable image MIME or
+   file metadata, including generic/missing `Content-Type` fallback.
+3. Oversize, abort and download failure preserve text and set `ingressFailure`.
+4. Multiple platform media events retain order and have independent retry/ack
+   behavior unless aggregation is explicitly designed and tested.
+5. Shared conversion is covered: image data can become a Harness `ImageBlock`,
+   and file data can be consumed by `ChannelFileProvider` when installed.
+
 ## 5. Contract tests
 
 `@wsz987/channel-testkit` ships `runChannelAdapterContract(adapter, options)`,

@@ -9,6 +9,8 @@ export function channelDisplayName(channelId: string, t: (key: string) => string
       return t('channelDingtalk');
     case 'lark':
       return t('channelLark');
+    case 'telegram':
+      return t('channelTelegram');
     default:
       return channelId;
   }

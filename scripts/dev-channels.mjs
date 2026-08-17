@@ -49,6 +49,7 @@ const LEGACY_IMPLEMENTATION_PACKAGES = [
   '@wsz987/channel-qq',
   '@wsz987/channel-dingtalk',
   '@wsz987/channel-lark',
+  '@wsz987/channel-telegram',
   '@wsz987/channel-web',
 ];
 const RUNTIME_PACKAGE_DIRS = LEGACY_IMPLEMENTATION_PACKAGES.map(
@@ -222,7 +223,7 @@ function clean(profile) {
   }
   const patched = resetPatch(profileDir);
   if (patched) console.log(`dev-channels: reset ${join(profileDir, 'cordis.patch.yml')} to the user layer`);
-  console.log(`dev-channels: cleaned ${profile} — reinstall with \`${dsh.join(' ')} plugin --profile ${profile} add -w @wsz987/dsh-channels@beta\``);
+  console.log(`dev-channels: cleaned ${profile} — reinstall with \`${dsh.join(' ')} plugin --profile ${profile} add -w @wsz987/dsh-channels@latest\``);
 }
 
 function run(args) {

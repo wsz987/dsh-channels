@@ -23,6 +23,7 @@ export function installDebugConsoleExporter(ctx: Context): void {
       'channel-qq': 3,
       'channel-lark': 3,
       'channel-dingtalk': 3,
+      'channel-telegram': 3,
     },
     export(message) {
       console[message.type](Logger.format(exporter, message));

@@ -14,6 +14,7 @@ import {
   InboundProcessor,
   HttpTelegramUpstream,
   FetchTransport,
+  TelegramStreamingReply,
   mapInbound,
   dedupKey,
   apply,
@@ -59,6 +60,7 @@ function makeConfig(overrides: Partial<TelegramConfig> = {}): TelegramConfig {
     enabled: true,
     accountId: 'main',
     baseUrl: 'http://fake',
+    tokenRef: 'TELEGRAM_BOT_TOKEN',
     token: undefined,
     timeoutMs: 1000,
     longPollTimeoutMs: 1000,
@@ -72,6 +74,11 @@ function makeConfig(overrides: Partial<TelegramConfig> = {}): TelegramConfig {
       enabled: true,
       windowMs: 5000,
     },
+    streaming: {
+      enabled: true,
+      placeholder: '…',
+    },
+    maxDownloadBytes: 20 * 1024 * 1024,
     ...overrides,
   });
 }
@@ -94,6 +101,35 @@ describe('mapper (fixture-driven)', () => {
     const expected = fixture.expected as MessageReceived;
     expect(event.conversation).toEqual(expected.conversation);
     expect(event.message.content).toEqual(expected.message.content);
+  });
+
+  it('keeps a document caption as text before the file part', () => {
+    const event = mapInbound(
+      {
+        update_id: 1003,
+        message: {
+          message_id: 503,
+          chat: { id: 100200300, type: 'private' },
+          from: { id: 100200300, first_name: 'Alice' },
+          document: {
+            file_id: 'ANON_DOCUMENT',
+            file_name: 'report.pdf',
+            mime_type: 'application/pdf',
+          },
+          caption: 'quarterly report',
+        },
+      },
+      { channel: 'telegram' as never, accountId: 'main' as never },
+    );
+    expect(event.message.content).toEqual([
+      { type: 'text', text: 'quarterly report' },
+      {
+        type: 'file',
+        resourceRef: 'ANON_DOCUMENT',
+        name: 'report.pdf',
+        mimeType: 'application/pdf',
+      },
+    ]);
   });
 
   it('maps inbound voice fixture to an audio part and a group conversation', async () => {
@@ -123,6 +159,25 @@ describe('mapper (fixture-driven)', () => {
     );
     expect(event.conversation.type).toBe('dm');
     expect(event.conversation.id).toBe('7');
+  });
+
+  it('maps forum topics and reply correlation into the channel contract', () => {
+    const event = mapInbound(
+      {
+        update_id: 2,
+        message: {
+          message_id: 8,
+          message_thread_id: 77,
+          reply_to_message: { message_id: 6 },
+          chat: { id: -1001, type: 'supergroup' },
+          from: { id: 3 },
+          text: 'topic reply',
+        },
+      },
+      { channel: 'telegram' as never, accountId: 'main' as never },
+    );
+    expect(event.conversation.threadId).toBe('77');
+    expect(event.message.replyTo).toBe('6');
   });
 
   it('dedupKey is stable per update_id and falls back to message_id', () => {
@@ -160,6 +215,73 @@ describe('HttpTelegramUpstream (fake transport)', () => {
     await expect(upstream().getMe()).rejects.toMatchObject({ code: 'CHANNEL_AUTH_FAILED' });
   });
 
+  it('infers image metadata from the binary response and Telegram file_path', async () => {
+    transport.route(tgPath('getFile'), () => ({
+      ok: true,
+      result: {
+        file_id: 'ANON_PHOTO',
+        file_unique_id: 'anon-photo',
+        file_path: 'photos/file_42.jpg',
+      },
+    }));
+    transport.requestBinary = vi.fn(async () => ({
+      data: new Uint8Array([0xff, 0xd8, 0xff]),
+      contentType: 'application/octet-stream',
+    }));
+
+    await expect(upstream().downloadFile('ANON_PHOTO')).resolves.toEqual({
+      data: new Uint8Array([0xff, 0xd8, 0xff]),
+      mimeType: 'image/jpeg',
+      name: 'file_42.jpg',
+    });
+  });
+
+  it('keeps FetchTransport requestBinary bound to its transport instance', async () => {
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith(`/bot${TOKEN}/getFile`)) {
+        return new Response(JSON.stringify({
+          ok: true,
+          result: {
+            file_id: 'BOUND_PHOTO',
+            file_unique_id: 'bound-photo',
+            file_path: 'photos/bound.jpg',
+          },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(new Uint8Array([0xff, 0xd8, 0xff]), {
+        status: 200,
+        headers: { 'content-type': 'image/jpeg' },
+      });
+    }) as typeof fetch;
+    const transport = new FetchTransport('https://api.telegram.org', { timeoutMs: 1000, fetchImpl });
+    const driver = new HttpTelegramUpstream({ transport, token: TOKEN, longPollTimeoutMs: 500 });
+
+    await expect(driver.downloadFile('BOUND_PHOTO')).resolves.toMatchObject({
+      mimeType: 'image/jpeg',
+      name: 'bound.jpg',
+      data: new Uint8Array([0xff, 0xd8, 0xff]),
+    });
+  });
+
+  it('deleteWebhook preserves pending updates while switching to polling', async () => {
+    transport.route(tgPath('deleteWebhook'), () => ({ ok: true, result: true }));
+    await upstream().deleteWebhook();
+    expect(transport.calls[0]).toMatchObject({
+      path: tgPath('deleteWebhook'),
+      init: { method: 'POST', body: { drop_pending_updates: false } },
+    });
+  });
+
+  it('deleteWebhook surfaces a failed transition instead of starting conflicting polling', async () => {
+    transport.route(tgPath('deleteWebhook'), () => ({
+      ok: false,
+      error_code: 400,
+      description: 'Bad Request',
+    }));
+    await expect(upstream().deleteWebhook()).rejects.toMatchObject({ code: 'CHANNEL_ERROR' });
+  });
+
   it('getUpdates forwards updates and acks the offset on the next poll', async () => {
     const controller = new AbortController();
     let calls = 0;
@@ -183,9 +305,29 @@ describe('HttpTelegramUpstream (fake transport)', () => {
     });
 
     const received: unknown[] = [];
-    await upstream().getUpdates(0, controller.signal, (update) => received.push(update));
+    const cursor = { offset: 0 };
+    await upstream().getUpdates(cursor, controller.signal, async (update) => {
+      received.push(update);
+    });
     expect(received).toHaveLength(2);
+    expect(cursor.offset).toBe(12);
     expect(calls).toBeGreaterThanOrEqual(2);
+  });
+
+  it('does not advance the offset when update handling fails', async () => {
+    const controller = new AbortController();
+    transport.route(tgPath('getUpdates'), () => ({
+      ok: true,
+      result: [{ update_id: 10, message: { message_id: 1, chat: { id: 1, type: 'private' }, text: 'a' } }],
+    }));
+    const cursor = { offset: 4 };
+
+    await expect(
+      upstream().getUpdates(cursor, controller.signal, async () => {
+        throw new Error('dispatch failed');
+      }),
+    ).rejects.toThrow('dispatch failed');
+    expect(cursor.offset).toBe(4);
   });
 
   it('getUpdates exits gracefully when the signal aborts', async () => {
@@ -196,7 +338,7 @@ describe('HttpTelegramUpstream (fake transport)', () => {
       await new Promise((resolve) => setTimeout(resolve, 5));
       return { ok: true, result: [] };
     });
-    const promise = upstream().getUpdates(0, controller.signal, () => undefined);
+    const promise = upstream().getUpdates({ offset: 0 }, controller.signal, async () => undefined);
     await new Promise((resolve) => setTimeout(resolve, 20));
     controller.abort();
     await expect(promise).resolves.toBeUndefined();
@@ -212,6 +354,17 @@ describe('HttpTelegramUpstream (fake transport)', () => {
     expect(JSON.stringify(call?.init)).not.toContain(TOKEN);
   });
 
+  it('sendMessage maps reply and topic ids to official Bot API fields', async () => {
+    transport.route(tgPath('sendMessage'), () => ({ ok: true, result: { message_id: 42 } }));
+    await upstream().sendMessage('123', 'hello', { replyToMessageId: '40', messageThreadId: '9' });
+    expect(transport.calls[0]?.init?.body).toEqual({
+      chat_id: '123',
+      text: 'hello',
+      reply_parameters: { message_id: 40 },
+      message_thread_id: 9,
+    });
+  });
+
   it('sendMedia posts to the right endpoint with the url and caption', async () => {
     transport.route(tgPath('sendPhoto'), () => ({ ok: true, result: { message_id: 7 } }));
     await upstream().sendMedia('123', { type: 'image', url: 'https://example.com/pic.png', caption: 'look' });
@@ -223,6 +376,72 @@ describe('HttpTelegramUpstream (fake transport)', () => {
       caption: 'look',
     });
     expect(JSON.stringify(call?.init)).not.toContain(TOKEN);
+  });
+
+  it('editMessageText includes both chat_id and message_id', async () => {
+    transport.route(tgPath('editMessageText'), () => ({ ok: true, result: { message_id: 42 } }));
+    await upstream().editMessageText('123', '42', 'updated');
+    expect(transport.calls[0]?.init?.body).toEqual({
+      chat_id: '123',
+      message_id: 42,
+      text: 'updated',
+    });
+  });
+
+  it('uploads localData as multipart with reply and topic fields', async () => {
+    transport.route(tgPath('sendDocument'), () => ({ ok: true, result: { message_id: 7 } }));
+    await upstream().sendMedia(
+      '123',
+      {
+        type: 'file',
+        localData: new Uint8Array([1, 2, 3]),
+        mimeType: 'application/pdf',
+        name: 'report.pdf',
+        caption: 'report',
+      },
+      { replyToMessageId: '41', messageThreadId: '9' },
+    );
+    const form = transport.calls[0]?.init?.body as FormData;
+    expect(form).toBeInstanceOf(FormData);
+    expect(form.get('chat_id')).toBe('123');
+    expect(form.get('caption')).toBe('report');
+    expect(form.get('reply_parameters')).toBe('{"message_id":41}');
+    expect(form.get('message_thread_id')).toBe('9');
+    const document = form.get('document') as File;
+    expect(document.name).toBe('report.pdf');
+    expect(document.type).toBe('application/pdf');
+    expect(Array.from(new Uint8Array(await document.arrayBuffer()))).toEqual([1, 2, 3]);
+  });
+
+  it('FetchTransport preserves FormData and lets fetch set the multipart boundary', async () => {
+    let captured: RequestInit | undefined;
+    const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+      captured = init;
+      return new Response('{"ok":true}', { status: 200 });
+    }) as typeof fetch;
+    const real = new FetchTransport('https://api.telegram.org', { timeoutMs: 1000, fetchImpl });
+    const form = new FormData();
+    form.append('chat_id', '123');
+    await real.request('/upload', { method: 'POST', body: form });
+    expect(captured?.body).toBe(form);
+    expect(new Headers(captured?.headers).has('content-type')).toBe(false);
+  });
+
+  it('FetchTransport preserves binary response metadata for attachment ingestion', async () => {
+    const fetchImpl = (async () => new Response(new Uint8Array([1, 2, 3]), {
+      status: 200,
+      headers: {
+        'content-type': 'image/png',
+        'content-disposition': 'attachment; filename="photo.png"',
+      },
+    })) as typeof fetch;
+    const real = new FetchTransport('https://api.telegram.org', { timeoutMs: 1000, fetchImpl });
+
+    await expect(real.requestBinary('/file/botTEST/photos/photo.png')).resolves.toEqual({
+      data: new Uint8Array([1, 2, 3]),
+      contentType: 'image/png',
+      contentDisposition: 'attachment; filename="photo.png"',
+    });
   });
 
   it('FetchTransport redacts bearer-path credentials from error messages', async () => {
@@ -289,6 +508,159 @@ describe('InboundProcessor dedup', () => {
     });
     expect(listener).toHaveBeenCalledTimes(2);
   });
+
+  it('does not deduplicate an update whose first emit failed', async () => {
+    const service = new ChannelService(new Context());
+    const base = createTestContext(service);
+    const emit = vi.fn()
+      .mockRejectedValueOnce(new Error('temporary dispatch failure'))
+      .mockResolvedValue(undefined);
+    const processor = new InboundProcessor({
+      ctx: { ...base, emit },
+      meta: { channel: 'telegram' as never, accountId: 'main' as never },
+      dedupEnabled: true,
+      dedupWindowMs: 5000,
+      now: () => 1000,
+    });
+    const raw = {
+      update_id: 501,
+      message: { message_id: 4, chat: { id: 1, type: 'private' }, from: { id: 2 }, text: 'retry' },
+    };
+    await expect(processor.handle(raw)).rejects.toThrow('temporary dispatch failure');
+    await expect(processor.handle(raw)).resolves.toBeUndefined();
+    expect(emit).toHaveBeenCalledTimes(2);
+  });
+
+  it('dispatches photos from one media group as independent hydrated updates', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    const files = {
+      downloadFile: vi.fn(async (fileId: string) => ({
+        data: new TextEncoder().encode(fileId),
+        mimeType: 'image/jpeg',
+        name: `${fileId}.jpg`,
+      })),
+    };
+    const processor = new InboundProcessor({
+      ctx,
+      meta: { channel: 'telegram' as never, accountId: 'main' as never },
+      dedupEnabled: true,
+      dedupWindowMs: 5000,
+      files,
+    });
+    const received: MessageReceived[] = [];
+    service.on((event) => {
+      if (event.type === 'message.received') received.push(event);
+    });
+
+    for (const [updateId, messageId, fileId, caption] of [
+      [701, 801, 'ALBUM_PHOTO_1', 'album caption'],
+      [702, 802, 'ALBUM_PHOTO_2', undefined],
+    ] as const) {
+      await processor.handle({
+        update_id: updateId,
+        message: {
+          message_id: messageId,
+          media_group_id: 'album-1',
+          chat: { id: 1, type: 'private' },
+          from: { id: 2, first_name: 'Alice' },
+          photo: [{ file_id: fileId, width: 640, height: 640 }],
+          ...(caption ? { caption } : {}),
+        },
+      });
+    }
+
+    expect(received.map((event) => event.message.id)).toEqual(['801', '802']);
+    expect(received[0]?.message.content.map((part) => part.type)).toEqual(['text', 'image']);
+    expect(received[1]?.message.content.map((part) => part.type)).toEqual(['image']);
+    expect(files.downloadFile).toHaveBeenNthCalledWith(1, 'ALBUM_PHOTO_1', ctx.signal);
+    expect(files.downloadFile).toHaveBeenNthCalledWith(2, 'ALBUM_PHOTO_2', ctx.signal);
+    for (const event of received) {
+      const image = event.message.content.find((part) => part.type === 'image');
+      expect(image).toMatchObject({ mimeType: 'image/jpeg' });
+      expect(image?.localData?.byteLength).toBeGreaterThan(0);
+    }
+  });
+
+  it('preserves document metadata from the Telegram message during hydration', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    const processor = new InboundProcessor({
+      ctx,
+      meta: { channel: 'telegram' as never, accountId: 'main' as never },
+      dedupEnabled: true,
+      dedupWindowMs: 5000,
+      files: {
+        downloadFile: vi.fn(async () => ({
+          data: new Uint8Array([1, 2, 3]),
+          mimeType: 'application/octet-stream',
+          name: 'generated-from-file-path.bin',
+        })),
+      },
+    });
+    const received: MessageReceived[] = [];
+    service.on((event) => {
+      if (event.type === 'message.received') received.push(event);
+    });
+
+    await processor.handle({
+      update_id: 703,
+      message: {
+        message_id: 803,
+        chat: { id: 1, type: 'private' },
+        from: { id: 2 },
+        document: {
+          file_id: 'DOCUMENT_WITH_METADATA',
+          file_name: 'report.pdf',
+          mime_type: 'application/pdf',
+        },
+      },
+    });
+
+    expect(received[0]?.message.content).toContainEqual(expect.objectContaining({
+      type: 'file',
+      name: 'report.pdf',
+      mimeType: 'application/pdf',
+      size: 3,
+      localData: new Uint8Array([1, 2, 3]),
+    }));
+  });
+});
+
+describe('TelegramStreamingReply', () => {
+  it('caps edits at 4096 characters and sends overflow chunks when finishing', async () => {
+    const transport = new FakeTransport();
+    transport.route(tgPath('sendMessage'), () => ({ ok: true, result: { message_id: 42 } }));
+    transport.route(tgPath('editMessageText'), () => ({ ok: true, result: { message_id: 42 } }));
+    const upstream = new HttpTelegramUpstream({ transport, token: TOKEN, longPollTimeoutMs: 500 });
+    const reply = new TelegramStreamingReply(upstream, {
+      channelId: 'telegram' as never,
+      accountId: 'main' as never,
+      conversationId: '123' as never,
+      threadId: '9' as never,
+      replyToMessageId: '41' as never,
+    });
+    await reply.start();
+    const text = 'x'.repeat(4096) + 'tail';
+    await reply.replace({ text });
+    await reply.finish({ text });
+
+    const initial = transport.calls[0]?.init?.body;
+    expect(initial).toEqual({
+      chat_id: '123',
+      text: '…',
+      reply_parameters: { message_id: 41 },
+      message_thread_id: 9,
+    });
+    const edit = transport.calls.find((call) => call.path === tgPath('editMessageText'))?.init?.body as {
+      chat_id: string; message_id: number; text: string;
+    };
+    expect(edit.chat_id).toBe('123');
+    expect(edit.message_id).toBe(42);
+    expect(edit.text).toHaveLength(4096);
+    const overflow = transport.calls.filter((call) => call.path === tgPath('sendMessage'))[1]?.init?.body;
+    expect(overflow).toEqual({ chat_id: '123', text: 'tail', message_thread_id: 9 });
+  });
 });
 
 describe('TelegramAdapter lifecycle', () => {
@@ -307,6 +679,7 @@ describe('TelegramAdapter lifecycle', () => {
       ok: true,
       result: { id: 1, is_bot: true, first_name: 'ProofBot', username: 'proof_bot' },
     }));
+    transport.route(tgPath('deleteWebhook'), () => ({ ok: true, result: true }));
   }
 
   it('reports down health without a token and never starts a receive loop', async () => {
@@ -355,8 +728,10 @@ describe('TelegramAdapter lifecycle', () => {
     service.on(listener);
     const a = adapter({ token: TOKEN });
     await a.start(ctx);
-    expect((await a.getHealth()).status).toBe('ok');
-    expect((await a.getHealth()).authenticated).toBe(true);
+    await vi.waitFor(async () => {
+      expect((await a.getHealth()).status).toBe('ok');
+      expect((await a.getHealth()).authenticated).toBe(true);
+    });
 
     // Wait for the actual message — auth/connection events also reach the
     // listener during start, so a bare call-count check is not enough.
@@ -375,12 +750,107 @@ describe('TelegramAdapter lifecycle', () => {
     expect(event.conversation).toEqual({ id: '123', type: 'dm' });
     expect(event.sender).toEqual({ id: '321', name: 'Alice' });
 
-    // Teardown mirrors apply(): the owning fiber aborts the context signal
-    // first (unwinding the long-poll), then stop() cleans up. stop() alone
-    // cannot unwind a poll that is still awaiting the transport.
-    await ctx.dispose();
     await a.stop();
     await a.stop(); // idempotent
+  });
+
+  it('deletes a webhook before polling and reports connected only after a successful poll', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    routeAuth();
+    let releasePoll!: () => void;
+    let polls = 0;
+    transport.route(tgPath('getUpdates'), async (_init, signal) => {
+      polls += 1;
+      if (polls === 1) {
+        await new Promise<void>((resolve) => {
+          releasePoll = resolve;
+        });
+        return { ok: true, result: [] };
+      }
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      });
+    });
+    const states: string[] = [];
+    service.on((event) => {
+      if (event.type === 'connection.changed') states.push(event.state);
+    });
+
+    const a = adapter({ token: TOKEN });
+    await a.start(ctx);
+    expect(transport.calls.map((call) => call.path).slice(0, 3)).toEqual([
+      tgPath('getMe'),
+      tgPath('deleteWebhook'),
+      tgPath('getUpdates'),
+    ]);
+    expect(states).toEqual(['connecting']);
+    expect((await a.getHealth()).status).toBe('down');
+
+    releasePoll();
+    await vi.waitFor(() => expect(states).toContain('connected'));
+    expect((await a.getHealth()).status).toBe('ok');
+    await a.stop();
+  });
+
+  it('retries a failed inbound update from the same offset before acknowledging it', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    routeAuth();
+    const offsets: number[] = [];
+    let polls = 0;
+    transport.route(tgPath('getUpdates'), async (init) => {
+      offsets.push((init?.body as { offset: number }).offset);
+      polls += 1;
+      if (polls <= 2) {
+        return {
+          ok: true,
+          result: [{
+            update_id: 50,
+            message: { message_id: 5, chat: { id: 1, type: 'private' }, text: 'retry me' },
+          }],
+        };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return { ok: true, result: [] };
+    });
+    let attempts = 0;
+    service.on(async (event) => {
+      if (event.type !== 'message.received') return;
+      attempts += 1;
+      if (attempts === 1) throw new Error('temporary bridge failure');
+    });
+
+    const a = adapter({
+      token: TOKEN,
+      reconnect: { enabled: true, baseDelayMs: 1, maxDelayMs: 1, maxRetries: 2 },
+    });
+    await a.start(ctx);
+    await vi.waitFor(() => expect(attempts).toBe(2));
+    await vi.waitFor(() => expect(offsets).toContain(51));
+    expect(offsets.slice(0, 3)).toEqual([0, 0, 51]);
+    await a.stop();
+  });
+
+  it('stop aborts an in-flight poll without disposing the owning context', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    routeAuth();
+    let observedSignal: AbortSignal | undefined;
+    transport.route(tgPath('getUpdates'), (_init, signal) => {
+      observedSignal = signal;
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      });
+    });
+    const a = adapter({ token: TOKEN });
+    await a.start(ctx);
+    await vi.waitFor(() => expect(observedSignal).toBeDefined());
+
+    await expect(a.stop()).resolves.toBeUndefined();
+    expect(observedSignal?.aborted).toBe(true);
+    expect(ctx.signal.aborted).toBe(false);
+    await expect(a.stop()).resolves.toBeUndefined();
   });
 
   it('with an invalid token: getMe fails → health down, no receive loop', async () => {
@@ -453,6 +923,42 @@ describe('TelegramAdapter lifecycle', () => {
     await a.stop();
   });
 
+  it('send uploads localData instead of degrading to an empty text message', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    routeAuth();
+    transport.route(tgPath('sendDocument'), () => ({ ok: true, result: { message_id: 12 } }));
+    const a = adapter({ token: TOKEN });
+    await a.start(ctx);
+    const result = await a.send(makeChannelTarget(), {
+      parts: [{
+        type: 'file',
+        localData: new Uint8Array([5, 6]),
+        name: 'note.txt',
+        mimeType: 'text/plain',
+      }],
+    });
+    expect(result.delivered).toBe(true);
+    const call = transport.calls.find((item) => item.path === tgPath('sendDocument'));
+    expect(call?.init?.body).toBeInstanceOf(FormData);
+    expect(transport.calls.some((item) => item.path === tgPath('sendMessage'))).toBe(false);
+    await a.stop();
+  });
+
+  it('fails closed when a media part has no supported outbound carrier', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    routeAuth();
+    const a = adapter({ token: TOKEN });
+    await a.start(ctx);
+    await expect(a.send(makeChannelTarget(), {
+      text: 'must not silently drop attachment',
+      parts: [{ type: 'file', dataUri: 'data:text/plain;base64,aGk=' }],
+    })).rejects.toMatchObject({ code: 'CHANNEL_SEND_FAILED' });
+    expect(transport.calls.some((item) => item.path === tgPath('sendMessage'))).toBe(false);
+    await a.stop();
+  });
+
   it('maps a failing send to a ChannelError without leaking the token', async () => {
     const service = new ChannelService(new Context());
     const ctx = createTestContext(service);
@@ -486,12 +992,12 @@ describe('TelegramAdapter lifecycle', () => {
 describe('channel-telegram plugin', () => {
   it('exports the cordis plugin shape', () => {
     expect(name).toBe('channel-telegram');
-    expect(inject).toEqual(['channels']);
+    expect(inject).toEqual(['channels', 'credentials']);
     expect(apply).toBeTypeOf('function');
   });
 
   it('exposes an upstream compatibility manifest', () => {
-    expect(manifest).toMatchObject({ id: 'telegram', adapterVersion: '0.1.0', status: 'tested' });
+    expect(manifest).toMatchObject({ id: 'telegram', adapterVersion: '0.1.0', status: 'experimental' });
     expect(manifest.upstream.strategy).toBe('source');
     expect(manifest.upstream.reference).toContain('core.telegram.org');
   });
@@ -502,11 +1008,16 @@ describe('channel-telegram plugin', () => {
       ok: true,
       result: { id: 1, is_bot: true, first_name: 'ProofBot', username: 'proof_bot' },
     }));
+    transport.route(tgPath('deleteWebhook'), () => ({ ok: true, result: true }));
     transport.route(tgPath('sendMessage'), () => ({ ok: true, result: { message_id: 1 } }));
     transport.route(tgPath('sendPhoto'), () => ({ ok: true, result: { message_id: 2 } }));
     transport.route(tgPath('sendDocument'), () => ({ ok: true, result: { message_id: 3 } }));
     transport.route(tgPath('sendAudio'), () => ({ ok: true, result: { message_id: 4 } }));
     transport.route(tgPath('sendVideo'), () => ({ ok: true, result: { message_id: 5 } }));
+      transport.route(tgPath('getUpdates'), async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return { ok: true, result: [] };
+      });
     runChannelAdapterContract(new TelegramAdapter(makeConfig({ token: TOKEN }), { transport }));
   });
 });

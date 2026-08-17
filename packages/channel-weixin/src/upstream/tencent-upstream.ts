@@ -16,6 +16,7 @@
 import {
   ChannelError,
   SecureRemoteMediaFetcher,
+  mimeHintFromFilename,
   type ChannelAdapterContext,
   type AuthChallenge,
   type ChannelTarget,
@@ -401,7 +402,7 @@ export class TencentWeixinUpstream implements WeixinUpstream {
           encryptQueryParam: media.encrypt_query_param,
           aesKeyHex: img?.aeskey,
           aesKeyBase64: media.aes_key,
-          mimeType: part.mimeType ?? (part.type === 'file' ? inferFileMime(file?.file_name) : 'image/jpeg'),
+          mimeType: part.mimeType ?? (part.type === 'file' ? mimeHintFromFilename(file?.file_name) : 'image/jpeg'),
         };
         const downloaded = part.type === 'image'
           ? await this.downloadImage(ref)
@@ -496,15 +497,4 @@ function guessImageMime(data: Uint8Array): string | undefined {
     data[8] === 0x57 && data[9] === 0x45 && data[10] === 0x42 && data[11] === 0x50
   ) return 'image/webp';
   return undefined;
-}
-
-function inferFileMime(name?: string): string | undefined {
-  const extension = name?.split('.').pop()?.toLowerCase();
-  switch (extension) {
-    case 'pdf': return 'application/pdf';
-    case 'docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-    case 'xlsx': return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-    case 'txt': return 'text/plain';
-    default: return undefined;
-  }
 }

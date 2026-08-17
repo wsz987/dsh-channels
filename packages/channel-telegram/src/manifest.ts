@@ -6,8 +6,8 @@
  *
  * Strategy choice: 'source' — the adapter speaks the Telegram Bot API HTTP
  * protocol directly (`/bot<token>/...`), so no platform SDK is consumed.
- * Status 'tested' is justified by the Channel Contract + fixture tests
- * passing against the fake transport (fully offline, Bot API 7.10 shapes).
+ * Offline contract and fixture coverage is not a live-platform verification,
+ * so the adapter remains experimental until the Telegram live gate passes.
  */
 export interface TelegramUpstreamManifest {
   reference: string;
@@ -21,7 +21,7 @@ export interface TelegramManifest {
   adapterVersion: string;
   upstream: TelegramUpstreamManifest;
   sdk: undefined;
-  status: 'tested';
+  status: 'experimental';
 }
 
 /** M5 manifest: direct HTTP protocol, no SDK. */
@@ -35,5 +35,5 @@ export const manifest: TelegramManifest = {
     strategy: 'source',
   },
   sdk: undefined,
-  status: 'tested',
+  status: 'experimental',
 };

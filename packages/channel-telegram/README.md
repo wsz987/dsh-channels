@@ -1,6 +1,6 @@
 # @wsz987/channel-telegram
 
-Telegram Bot API channel adapter for DeepSeek Harness — the **M5 extensibility proof**.
+Telegram Bot API channel adapter for DeepSeek Harness.
 
 ## Install
 
@@ -8,19 +8,19 @@ Telegram Bot API channel adapter for DeepSeek Harness — the **M5 extensibility
 pnpm add @wsz987/channel-telegram
 ```
 
-## Extensibility proof
+## Official bundle channel
 
-This package was built against the **public Channel Contract** (`@wsz987/channel-core` +
-`@wsz987/channel-testkit`) with **zero changes** to `channel-core`, `channel-harness`,
-the `@wsz987/dsh-channels` bundle, or the four official adapters (weixin / qq / dingtalk /
-lark). It is a fifth channel that joins the ecosystem exactly the way a third-party
-adapter would.
+This package is part of the official bundle (`@wsz987/dsh-channels`).
+It implements the same Channel Contract as weixin / qq / dingtalk / lark,
+with no changes to channel-core, channel-harness or the other adapters.
+Setup and credentials go through the Channel Control Plane; the bot token is
+stored via `ctx.credentials` (`tokenRef`), never in profile config.
 
-> **Deliberately NOT part of the `@wsz987/dsh-channels` bundle.** The bundle ships the four
-> official channels; this adapter is the standalone proof that the contract is
-> extensible from the outside, without any core or harness changes.
+> The bundle patch inserts this adapter as `channels-telegram` and the Web settings
+> panel shows it under the official channels.
 
-What the proof exercises:
+
+Contract coverage:
 
 - `ChannelAdapter` contract (`start` / `stop` / `send` / `getHealth` / capabilities)
 - `runChannelAdapterContract` — the testkit's full contract suite passes
@@ -29,6 +29,9 @@ What the proof exercises:
 - Fixture-driven mapper tests (`fixtures/telegram/*.json`, Bot API 7.10 shapes)
 - M4 governance: `readonly manifest` class field + `manifest.ts` for
   `channels doctor` compatibility checks
+
+The adapter remains `experimental` until its real-platform live gate passes;
+offline contract tests and fixtures do not by themselves justify `tested`.
 
 ## Pointing it at a real bot
 
@@ -41,40 +44,51 @@ In your profile config:
       "enabled": true,
       "accountId": "main",
       "baseUrl": "https://api.telegram.org",
-      "token": "<your bot token from @BotFather>",
+      "tokenRef": "TELEGRAM_BOT_TOKEN",
       "longPollTimeoutMs": 25000
     }
   }
 }
 ```
 
-The token is a **secret**: it is never logged (bearer-style path segments are
+The token is a **secret** resolved through `ctx.credentials` (`tokenRef`): it is never logged (bearer-style path segments are
 redacted in transport error messages) and it only ever appears in the Bot API
 request path built by the upstream driver. It is never written into fixture
 files.
+
+Inbound delivery currently uses Telegram Bot API long polling (`getUpdates`),
+matching OpenClaw's local-install default. Startup removes an existing webhook
+before polling because Telegram makes webhook and `getUpdates` delivery mutually
+exclusive. A hosted webhook transport is not implemented yet.
 
 ## Capabilities
 
 | capability   | value     |
 | ------------ | --------- |
 | text / image / file / audio / video | ✅ |
-| markdown     | ✅        |
-| reactions    | ✅        |
+| markdown     | ❌        |
+| reactions    | ❌        |
 | cards        | ❌        |
-| threads      | ❌        |
-| streaming    | `buffered` — Telegram `editMessageText` makes `edit` streaming reachable; documented future capability |
+| threads      | ✅        |
+| streaming    | `edit` — send one message, then edit it in place with `editMessageText`; set `streaming.enabled: false` for buffered |
 
-## Known limits (V1 proof)
+## Known limits
 
-- `streaming: 'buffered'` — chunks accumulate and are delivered once per turn.
-- Media outbound sends a public `url` or a platform `file_id` (`resourceRef`)
-  as the Bot API file reference (`sendPhoto`/… `photo: <ref>`); real file
-  uploads (`multipart/form-data`) and `getFile`-based downloads are future work.
+- Inbound media hydration downloads image and document bytes through `getFile`; audio/video keep their `resourceRef` placeholder in V1.
+- Telegram albums (`media_group_id`) are intentionally delivered one update at
+  a time. Each image is downloaded, dispatched, retried and acknowledged
+  independently; no cross-update buffering or delayed album aggregation is
+  performed.
+- Media captions are preserved as a text part before the image or document, so
+  the model receives both the caption and the shared attachment representation.
+- Media outbound accepts trusted `localData` via `multipart/form-data`, a
+  public `url`, or a platform `file_id` (`resourceRef`).
 - Inbound media maps Telegram `file_id` to the contract's `resourceRef` carrier
   (an opaque platform handle), never to `url` — `url` is reserved for real
   `http(s)` URLs.
 - `beginAuth`/`pollAuth` are omitted: auth is token-driven (getMe() check at start).
-- `chat.type === 'channel'` currently maps to a `dm` conversation.
+- Forum topics preserve `message_thread_id`; `chat.type === 'channel'`
+  currently maps to a `dm` conversation.
 
 ## Development
 

@@ -30,5 +30,6 @@ export function isLarkCredentialStep(channelId: string, descriptor: ChannelSetup
 export function setupIntroKey(channelId: string): string {
   if (channelId === 'dingtalk') return 'setupIntroDingtalk';
   if (channelId === 'lark') return 'setupIntroLark';
+  if (channelId === 'telegram') return 'setupIntroTelegram';
   return 'setupIntro';
 }

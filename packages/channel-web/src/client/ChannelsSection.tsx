@@ -1,7 +1,7 @@
 /**
  * The "渠道" (Channels) Settings section component (M5).
  *
- * Dashboard that renders four channel cards (Weixin/QQ/DingTalk/Lark) with
+ * Dashboard that renders five channel cards (Weixin/QQ/DingTalk/Lark/Telegram) with
  * live summary from GET /channels/api/v2 via fetchChannelsV2. Each card shows a
  * RuntimeStatus and a «配置» button that opens the generic ChannelSetupDialog.
  *
@@ -11,7 +11,7 @@
  * `border-l3` hover, and `label-primary/secondary` text. Each channel gets a
  * small brand-tinted monogram tile for a bit of visual identity.
  */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, StateDot, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives';
 import { fetchChannelsV2, type AuthMethod, type ChannelSummary } from './api.js';
 import { ChannelSetupDialog } from './ChannelSetupDialog.js';
@@ -25,7 +25,8 @@ export interface ChannelsSectionProps {
   __requestRefresh?: number;
 }
 
-const CARD_IDS = ['weixin', 'qq', 'dingtalk', 'lark'] as const;
+const CARD_IDS = ['weixin', 'qq', 'dingtalk', 'lark', 'telegram'] as const;
+const STATUS_REFRESH_INTERVAL_MS = 3000;
 
 interface ChannelMeta {
   accent: string;
@@ -37,6 +38,7 @@ const CHANNEL_META: Record<string, ChannelMeta> = {
   qq: { accent: '#1ebafc' },
   dingtalk: { accent: '#0089ff' },
   lark: { accent: '#3370ff' },
+  telegram: { accent: '#26a5e4' },
 };
 
 interface OpenDialog {
@@ -51,23 +53,47 @@ export function ChannelsSection(props: ChannelsSectionProps) {
   const [refreshTick, setRefreshTick] = useState(0);
   const [openDialog, setOpenDialog] = useState<OpenDialog | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
+  const requestInFlight = useRef(false);
+  const mounted = useRef(true);
+
+  const loadChannels = useCallback(async () => {
+    if (requestInFlight.current) return;
+    requestInFlight.current = true;
+    try {
+      const data = await fetchChannelsV2();
+      if (!mounted.current) return;
+      setList(data);
+      setError(null);
+    } catch (cause) {
+      if (!mounted.current) return;
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      requestInFlight.current = false;
+    }
+  }, []);
 
   useEffect(() => {
-    let alive = true;
-    fetchChannelsV2()
-      .then((data) => {
-        if (alive) {
-          setList(data);
-          setError(null);
-        }
-      })
-      .catch((e) => {
-        if (alive) setError(e instanceof Error ? e.message : String(e));
-      });
+    mounted.current = true;
     return () => {
-      alive = false;
+      mounted.current = false;
     };
-  }, [refreshTick, props.__requestRefresh]);
+  }, []);
+
+  useEffect(() => {
+    void loadChannels();
+  }, [loadChannels, refreshTick, props.__requestRefresh]);
+
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void loadChannels();
+    };
+    const interval = window.setInterval(refreshWhenVisible, STATUS_REFRESH_INTERVAL_MS);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [loadChannels]);
 
   const byId = (id: string): ChannelSummary | undefined => list?.find((c) => c.id === id);
   const refresh = () => setRefreshTick((n) => n + 1);

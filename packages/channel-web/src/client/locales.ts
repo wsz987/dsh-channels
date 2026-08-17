@@ -11,6 +11,7 @@ export const locales = {
     channelQq: 'QQ',
     channelDingtalk: '钉钉',
     channelLark: '飞书',
+    channelTelegram: 'Telegram',
     loading: '加载中…',
     // dashboard
     connecting: '连接中…',
@@ -37,6 +38,7 @@ export const locales = {
     setupIntro: '填写渠道凭证，保存后自动连接。已配置的字段可留空。',
     setupIntroDingtalk: '扫码授权可一键创建并授权钉钉机器人，成功后自动回填凭证；也可填写已有应用凭证并保存连接。已配置的字段可留空。',
     setupIntroLark: '填写 App ID 和 App Secret 后保存即可连接；扫码授权可一键配置机器人，用于接入 deepseek-harness。已配置的字段可留空。',
+    setupIntroTelegram: '在 @BotFather 创建机器人并获取 Bot Token，填写后保存即可连接。已配置的字段可留空。',
     authMethodTabs: '授权方式',
     credentialsTab: '填写凭证',
     scanTab: '扫码登录',
@@ -80,6 +82,7 @@ export const locales = {
     channelQq: 'QQ',
     channelDingtalk: 'DingTalk',
     channelLark: 'Lark',
+    channelTelegram: 'Telegram',
     loading: 'Loading…',
     // dashboard
     connecting: 'Connecting…',
@@ -106,6 +109,7 @@ export const locales = {
     setupIntro: 'Enter channel credentials and connect. Leave configured fields blank to keep them unchanged.',
     setupIntroDingtalk: 'Scan to create and authorize a DingTalk bot in one step, then fill the credentials automatically; or enter an existing app credential and connect. Leave configured fields blank to keep them unchanged.',
     setupIntroLark: 'Save and connect directly with App ID and App Secret. Scanning one-click configures the bot to connect to deepseek-harness. Leave configured fields blank to keep them unchanged.',
+    setupIntroTelegram: 'Create a bot and get its Bot Token from @BotFather, then save and connect. Leave configured fields blank to keep them unchanged.',
     authMethodTabs: 'Authorization method',
     credentialsTab: 'Credentials',
     scanTab: 'Scan to sign in',

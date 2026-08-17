@@ -363,6 +363,17 @@ export type MessagePart =
 - `dataUri` —— 内联 data URL
 - `localData` —— 适配器已下载/解密的受信字节（优先）；Core 不解码不落盘，由 Harness bridge 转成真实附件
 
+二进制元数据分为两个信任等级：
+
+- **MIME hint**：平台字段、HTTP `Content-Type` 或文件名扩展名提供的提示。各适配器
+  使用 `@wsz987/channel-core` 导出的 `normalizeMimeHint` / `mimeHintFromFilename`，不要维护
+  渠道私有扩展名表。`application/octet-stream` 等泛型值视为“未知”，继续尝试下一来源。
+- **Verified MIME**：基于实际字节签名得到的结果。通用文件进入 `channel-files` 后由
+  magic-signature 嗅探重新验证；扩展名、响应头和平台字段都不能作为解析或安全判断的事实。
+
+`mime-types` 只负责维护“文件名 → MIME hint”数据库，不做内容验证。平台专属 SDK/API
+下载仍归适配器；内容验证、落盘和文档解析仍归公共附件层。
+
 原因：
 
 - 图片理解
@@ -963,7 +974,7 @@ workspace:
 
 ### 图片管道（Harness 原生 attachment）
 
-四个渠道的图片适配器统一产出 `ImagePart.localData`，随后走 Harness 官方附件能力：
+各渠道的图片适配器统一产出 `ImagePart.localData + mimeType`，随后走 Harness 官方附件能力：
 
 ```
 渠道官方 SDK / API 下载 → ImagePart.localData（明文字节）
@@ -974,6 +985,55 @@ workspace:
 适配器负责各平台的下载/解密和上传，`channel-harness` 不复制平台 SDK 实现。
 文本-only 模型的降级策略见 [ADR 0002](adr/0002-image-model-fallback.md)。
 
+### 入站日志与媒体诊断规范
+
+适配器必须在媒体 hydration 完成后、`ctx.emit(event)` 前输出一条结构化入站摘要。
+日志使用 `ctx.logger('channel-<name>')` 取得的适配器专属 namespace；`web:debug`
+通过 `DSH_CHANNELS_DEBUG=1` exporter 输出这些 namespace。
+
+推荐格式：
+
+```ts
+ctx.logger.info(
+  `[channel-telegram] inbound message ${event.message.id} ` +
+    `from ${event.sender.id} in ${event.conversation.id}`,
+  {
+    parts: event.message.content.map((part) => partSummary(part)),
+  },
+);
+```
+
+二进制 part 的摘要只记录诊断字段，不记录秘密和内容：
+
+```ts
+{
+  type: 'image',
+  resourceRef: part.resourceRef,
+  mimeType: part.mimeType,
+  localDataBytes: part.localData?.byteLength,
+  ingressFailure: part.ingressFailure,
+}
+// file: name, mimeType, size, localDataBytes, ingressFailure
+```
+
+`localDataBytes` 是媒体链路的关键断点：没有它时，`message-converter` 无法调用
+`ctx.attachments.saveImage` 生成真实 `ImageBlock`，只能降级成 `[image]`；文件则只能
+降级成文件占位符。日志摘要不得包含 bot token、签名 URL、文件正文或完整 `event.raw`。
+
+每新增一个适配器 logger namespace，必须同步：
+
+1. 在 `packages/channel-harness/src/debug-logger.ts` 的 exporter `levels` 中加入 `channel-<name>: 3`。
+2. 在 `packages/channel-harness/test/debug-logger.test.ts` 增加 namespace 可见性测试。
+3. 在适配器入站测试中断言 hydration 后的 `localDataBytes` / `ingressFailure`，并验证日志摘要覆盖图片和文件。
+
+这样 `pnpm web:debug` 只负责展示诊断，不改变消息语义；真正的图片/附件转换仍统一由
+`channel-harness` 的公共管道完成。
+
+连接与认证状态事件（`connection.changed` / `auth.changed`）属于控制面，不属于 Agent
+入站消息。`channel-harness` bridge 对这两类事件必须静默返回，避免启动和重连期间把正常
+状态变化刷成大量 `ignoring channel event`；状态详情由 `channel-control` / `channel-web`
+的状态订阅和健康检查展示。只有未知的未来事件才应由 bridge 记录 debug 日志。
+
 ### 通用文件是可替换扩展
 
 Harness `0.1.0-rc.6` 的 `ctx.attachments` 只提供栅格图片的验证、保存和读取，
@@ -981,7 +1041,7 @@ Harness `0.1.0-rc.6` 的 `ctx.attachments` 只提供栅格图片的验证、保�
 暂由 `@wsz987/channel-files` 补充：
 
 ```text
-四渠道 FilePart.localData
+各渠道 FilePart.localData
   → channel-harness 的可选 ChannelFileProvider 端口
   → channel-files 私有存储 + 成熟解析库 + read_channel_attachment
 ```

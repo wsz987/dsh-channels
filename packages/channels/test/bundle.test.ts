@@ -100,6 +100,7 @@ const EXPECTED_ITEMS: PatchItem[] = [
   { id: 'channels-qq', name: '@wsz987/dsh-channels/qq', inject: ['channels', 'credentials', 'channelControl'] },
   { id: 'channels-dingtalk', name: '@wsz987/dsh-channels/dingtalk', inject: ['channels', 'credentials', 'channelControl'] },
   { id: 'channels-lark', name: '@wsz987/dsh-channels/lark', inject: ['channels', 'credentials', 'channelControl'] },
+    { id: 'channels-telegram', name: '@wsz987/dsh-channels/telegram', inject: ['channels', 'credentials', 'channelControl'] },
   // The Web client plugin has no module-level `inject` export on its host
   // entry (only `name` + `apply`); the client half declares inject and the
   // settings.section slot, which is not part of the host patch shape.
@@ -115,6 +116,7 @@ const EXPECTED_MODULE_NAMES = new Map([
   ['channels-qq', 'channel-qq'],
   ['channels-dingtalk', 'channel-dingtalk'],
   ['channels-lark', 'channel-lark'],
+  ['channels-telegram', 'channel-telegram'],
   ['channels-web', 'channel-web'],
 ]);
 
@@ -200,7 +202,7 @@ describe('bundle-owned Web client face', () => {
 });
 
 describe('every channel adapter can be disabled through its config', () => {
-  it.each(['weixin', 'qq', 'dingtalk', 'lark'] as const)(
+  it.each(['weixin', 'qq', 'dingtalk', 'lark', 'telegram'] as const)(
     '@wsz987/channel-%s Config exposes an `enabled` boolean',
     async (channel) => {
       const mod: Record<string, unknown> = await import(`@wsz987/channel-${channel}`);

@@ -52,12 +52,14 @@ DeepSeek Harness Agent / Session
 
 ## 渠道状态
 
-当前四渠道的能力矩阵（文本 / 图片 / 文件 / 流式 / 状态）见 [README「能力总览」](../README.md)。
+当前渠道的能力矩阵（文本 / 图片 / 文件 / 流式 / 状态）见 [README「能力总览」](../README.md)。
 规划口径：
 
 - QQ、钉钉、飞书：`tested`（通过 offline contract + fixtures）。
 - 微信：`experimental`，在真实平台 live gate 通过前不得标 `tested`（见
   [weixin-live-verification-runbook.md](../weixin-live-verification-runbook.md)）。
+- Telegram：`experimental`；当前默认采用 Bot API `getUpdates` 长轮询，真实平台
+  入站、流式编辑与媒体路径完成 live gate 后才能标记 `tested`。
 - 音频 / 视频当前降级处理；通用文件支持 PDF、DOCX、XLSX 和文本。
 
 ## 独立 Adapter 安装（未来能力）

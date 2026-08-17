@@ -154,7 +154,7 @@ validation installs the bundle into a **clean profile** with the real dsh CLI
 # 1. add the bundle to a clean profile — `plugin` auto-initializes the
 #    profile on first use (never reuse a dirty profile for release validation;
 #    there is no `dsh profile create` step)
-npx @deepseek-ai/dsh plugin --profile release-validation add -w @wsz987/dsh-channels@beta
+npx @deepseek-ai/dsh plugin --profile release-validation add -w @wsz987/dsh-channels@latest
 
 # 2. dump the merged config — verify the nine plugins were inserted
 npx @deepseek-ai/dsh --profile release-validation --dump-config

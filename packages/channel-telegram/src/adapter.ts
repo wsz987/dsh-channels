@@ -6,12 +6,18 @@
  * and are aborted via the adapter context signal. The adapter never touches
  * Harness Agent APIs.
  *
- * Auth is token-driven: when `config.token` is present, `start` verifies it
- * with getMe() and launches the long-poll receive loop; without a token the
- * adapter reports health 'down' and skips the loop entirely (tests and
- * offline fixtures carry no token). `beginAuth`/`pollAuth` are intentionally
- * not implemented — there is no interactive flow in V1; token rotation can
- * slot in behind the same optional contract methods later.
+ * Auth is token-driven: when a token is resolved (via `deps.token`, the
+ * credential seam, or the deprecated plaintext `config.token`), `start`
+ * verifies it with getMe() and launches the long-poll receive loop; without a
+ * token the adapter reports health 'down' and skips the loop entirely.
+ * `beginAuth`/`pollAuth` are intentionally not implemented — there is no
+ * interactive flow in V1; token rotation can slot in behind the same optional
+ * contract methods later.
+ *
+ * Streaming is `edit`: ReplyRouter opens a `TelegramStreamingReply` which sends
+ * one message and edits it in place with `editMessageText` as full-text
+ * previews arrive. Set `config.streaming.enabled: false` to force the buffered
+ * send-once strategy.
  */
 import type {
   ChannelAdapter,
@@ -19,19 +25,32 @@ import type {
   ChannelCapabilities,
   ChannelHealth,
   ChannelTarget,
+  CreateReplyOptions,
   OutboundMessage,
+  ReplyHandle,
   SendResult,
+  StreamingMode,
 } from '@wsz987/channel-core';
 import { ChannelError } from '@wsz987/channel-core';
 import type { TelegramConfig } from './config.js';
 import { FetchTransport, type HttpTransport } from './transport.js';
-import { HttpTelegramUpstream, type TelegramUpstream } from './upstream.js';
+import {
+  HttpTelegramUpstream,
+  type TelegramUpdateCursor,
+  type TelegramUpstream,
+} from './upstream.js';
 import { InboundProcessor } from './inbound.js';
 import { OutboundSender } from './outbound.js';
+import { TelegramStreamingReply } from './streaming-reply.js';
 import { manifest as telegramManifest, type TelegramManifest } from './manifest.js';
 
 export interface TelegramAdapterDeps {
   transport?: HttpTransport;
+  /**
+   * Resolved Telegram Bot API token. The plugin resolves it via
+   * `ctx.credentials` and hands it in; profile config never carries it.
+   */
+  token?: string;
   /** Injectable clock (tests). */
   now?: () => number;
 }
@@ -51,15 +70,17 @@ export class TelegramAdapter implements ChannelAdapter {
     file: true,
     audio: true,
     video: true,
-    markdown: true,
+    markdown: false,
     cards: false,
-    reactions: true,
-    threads: false,
-    // Telegram can edit sent messages (editMessageText), so 'edit' streaming
-    // is technically reachable; the V1 proof ships 'buffered' (accumulate and
-    // deliver once) with edit streaming documented as a future capability.
-    streaming: 'buffered',
+    reactions: false,
+    threads: true,
+    // Telegram can edit sent messages with editMessageText, so edit streaming
+    // is the default; `resolveStreamingMode` can force buffered through config.
+    streaming: 'edit',
+    maxTextLength: 4096,
   };
+
+  readonly outboxCapabilities = { proactiveText: true, proactiveMedia: true };
 
   private ctx?: ChannelAdapterContext;
   private upstream: TelegramUpstream;
@@ -68,20 +89,26 @@ export class TelegramAdapter implements ChannelAdapter {
   private started = false;
   private stopped = false;
   private receiveLoop?: Promise<void>;
+  private receiveAbort?: AbortController;
+  private removeContextAbortListener?: () => void;
   private connected = false;
   private authState: TelegramAuthState = 'unauthenticated';
-  /** getUpdates offset; acked by the upstream loop, resumed across reconnects. */
-  private offset = 0;
+  /** getUpdates acknowledgement cursor, shared with the driver across retries. */
+  private readonly cursor: TelegramUpdateCursor = { offset: 0 };
   private readonly now: () => number;
+  /** Resolved token used by the upstream driver (deps credential wins over legacy config). */
+  private readonly token: string | undefined;
 
   constructor(private readonly config: TelegramConfig, deps: TelegramAdapterDeps = {}) {
     this.now = deps.now ?? Date.now;
     const transport = deps.transport ?? new FetchTransport(config.baseUrl, { timeoutMs: config.timeoutMs });
+    const token = deps.token ?? config.token;
     this.upstream = new HttpTelegramUpstream({
       transport,
-      token: config.token,
+      token,
       longPollTimeoutMs: config.longPollTimeoutMs,
     });
+    this.token = token;
   }
 
   async start(ctx: ChannelAdapterContext): Promise<void> {
@@ -89,33 +116,46 @@ export class TelegramAdapter implements ChannelAdapter {
     this.ctx = ctx;
     this.stopped = false;
     this.connected = false;
-    this.offset = 0;
-    this.inbound = new InboundProcessor({
-      ctx,
-      meta: { channel: this.id as never, accountId: this.config.accountId as never },
-      dedupEnabled: this.config.dedup.enabled,
-      dedupWindowMs: this.config.dedup.windowMs,
-      now: this.now,
-    });
+    this.cursor.offset = 0;
+    this.inbound = this.createInboundProcessor();
+    this.receiveAbort = new AbortController();
+    const abortReceive = () => this.receiveAbort?.abort();
+    if (ctx.signal.aborted) abortReceive();
+    else {
+      ctx.signal.addEventListener('abort', abortReceive, { once: true });
+      this.removeContextAbortListener = () => ctx.signal.removeEventListener('abort', abortReceive);
+    }
+
     this.outbound = new OutboundSender(this.upstream, ctx.logger);
 
-    if (this.config.token) {
+    if (this.token) {
       try {
         await this.upstream.getMe();
         this.authState = 'authenticated';
         this.emitAuth('authenticated');
-        this.emitConnection('connecting');
-        this.startReceiveLoop();
-        this.connected = true;
-        this.emitConnection('connected');
       } catch (error) {
         this.authState = 'failed';
-        this.connected = false;
         this.emitAuth('failed');
         this.ctx.logger.error(
           '[channel-telegram] auth check failed; receive loop disabled',
           error instanceof Error ? error.message : error,
         );
+        this.started = true;
+        return;
+      }
+
+      try {
+        // getUpdates and webhooks are mutually exclusive. Preserve queued
+        // updates while switching this bot to the local polling transport.
+        await this.upstream.deleteWebhook();
+        this.emitConnection('connecting');
+        this.startReceiveLoop();
+      } catch (error) {
+        this.ctx.logger.error(
+          '[channel-telegram] polling setup failed; receive loop disabled',
+          error instanceof Error ? error.message : error,
+        );
+        this.emitConnection('disconnected');
       }
     } else {
       this.authState = 'unauthenticated';
@@ -124,12 +164,27 @@ export class TelegramAdapter implements ChannelAdapter {
     this.started = true;
   }
 
+  private createInboundProcessor(): InboundProcessor {
+    return new InboundProcessor({
+      ctx: this.ctx!,
+      meta: { channel: this.id as never, accountId: this.config.accountId as never },
+      dedupEnabled: this.config.dedup.enabled,
+      dedupWindowMs: this.config.dedup.windowMs,
+      files: this.upstream,
+      maxDownloadBytes: this.config.maxDownloadBytes,
+      now: this.now,
+    });
+  }
+
   async stop(): Promise<void> {
     if (!this.started || this.stopped) return;
     this.stopped = true;
     this.started = false;
     this.connected = false;
-    // The owning fiber aborts the context signal first; the loop exits on it.
+    this.receiveAbort?.abort();
+    this.receiveAbort = undefined;
+    this.removeContextAbortListener?.();
+    this.removeContextAbortListener = undefined;
     const loop = this.receiveLoop;
     this.receiveLoop = undefined;
     if (loop) await loop.catch(() => undefined);
@@ -141,6 +196,27 @@ export class TelegramAdapter implements ChannelAdapter {
       throw new ChannelError('CHANNEL_NOT_STARTED', 'telegram adapter is not started');
     }
     return this.outbound.send(target, message);
+  }
+
+  resolveStreamingMode(_target: ChannelTarget): StreamingMode {
+    // `streaming.enabled: false` is a hard off-switch: it forces the buffered
+    // send-once strategy even though edit streaming is available.
+    return this.config.streaming.enabled ? 'edit' : 'buffered';
+  }
+
+  async createReply(target: ChannelTarget, _options?: CreateReplyOptions): Promise<ReplyHandle> {
+    if (!this.started || !this.ctx) {
+      throw new ChannelError('CHANNEL_NOT_STARTED', 'telegram adapter is not started');
+    }
+    const reply = new TelegramStreamingReply(
+      this.upstream,
+      target,
+      this.config.streaming.placeholder,
+    );
+    // Send the placeholder immediately so the user sees the bot is working;
+    // subsequent full-text previews edit this same message in place.
+    await reply.start();
+    return reply;
   }
 
   async getHealth(): Promise<ChannelHealth> {
@@ -172,25 +248,37 @@ export class TelegramAdapter implements ChannelAdapter {
 
   private async runReceiveLoop(): Promise<void> {
     let attempt = 0;
-    while (!this.stopped && !this.aborted()) {
+    const signal = this.receiveAbort?.signal;
+    if (!signal) return;
+    while (!this.stopped && !signal.aborted) {
       try {
-        await this.upstream.getUpdates(this.offset, this.ctx!.signal, (raw) => {
-          void this.inbound.handle(raw).catch((error) => {
-            this.ctx!.logger.error('[channel-telegram] inbound handling failed', error);
-          });
-        });
+        await this.upstream.getUpdates(
+          this.cursor,
+          signal,
+          async (raw) => {
+            try {
+              await this.inbound.handle(raw);
+            } catch (error) {
+              // Reset transient processor state before retrying the unacked
+              // update after the receive loop reconnects.
+              this.inbound = this.createInboundProcessor();
+              throw error;
+            }
+          },
+          () => {
+            if (!this.connected) {
+              this.connected = true;
+              this.emitConnection('connected');
+            }
+          },
+        );
         attempt = 0;
-        if (!this.connected) {
-          // A successful long-poll cycle proves the Bot API is reachable.
-          this.connected = true;
-          this.emitConnection('connected');
-        }
       } catch (error) {
-        if (this.stopped || this.aborted()) break;
+        if (this.stopped || signal.aborted) break;
         attempt += 1;
         this.connected = false;
         this.emitConnection('reconnecting');
-        if (this.config.reconnect.enabled && attempt > this.config.reconnect.maxRetries) {
+        if (!this.config.reconnect.enabled || attempt > this.config.reconnect.maxRetries) {
           this.ctx!.logger.warn('[channel-telegram] reconnect budget exhausted');
           this.emitConnection('disconnected');
           break;
@@ -200,17 +288,13 @@ export class TelegramAdapter implements ChannelAdapter {
           this.config.reconnect.maxDelayMs,
         );
         this.ctx!.logger.warn(`[channel-telegram] receive loop error; retry in ${delay}ms`, error);
-        await sleep(delay, this.ctx!.signal);
+        await sleep(delay, signal);
       }
     }
     this.connected = false;
-    if (!this.stopped && !this.aborted()) {
+    if (!this.stopped && !signal.aborted) {
       this.emitConnection('disconnected');
     }
-  }
-
-  private aborted(): boolean {
-    return this.ctx?.signal.aborted ?? false;
   }
 
   private emitAuth(state: 'unknown' | 'authenticated' | 'failed'): void {

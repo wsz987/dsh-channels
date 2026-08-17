@@ -1,5 +1,5 @@
 /**
- * Real channel brand logos (WeChat / QQ / DingTalk / Lark), filled in their
+ * Real channel brand logos (WeChat / QQ / DingTalk / Lark / Telegram), filled in their
  * brand colors. Path data sourced from Simple Icons (WeChat, Tencent QQ) and
  * Iconify's ant-design / icon-park brand sets (DingTalk, Lark). Kept as inline
  * SVG so the client bundle stays self-contained (no runtime dependency).
@@ -57,6 +57,15 @@ const BRAND_ICONS: Record<string, BrandIconSpec> = {
       },
     ],
   },
+    telegram: {
+      viewBox: '0 0 24 24',
+      color: '#26a5e4',
+      paths: [
+        {
+          d: 'M23.91 3.79L20.3 20.84c-.25 1.12-.93 1.4-1.88.87l-5.19-3.82-2.5 2.4c-.28.28-.51.51-1.05.51l.37-5.28L19.1 6.9c.42-.37-.09-.58-.65-.21L7.42 13.02l-5.11-1.6c-1.11-.35-1.13-1.11.23-1.64L22.4 2.46c.93-.35 1.74.21 1.51 1.33z',
+        },
+      ],
+    },
 };
 
 export interface ChannelBrandIconProps {

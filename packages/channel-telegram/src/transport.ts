@@ -19,8 +19,20 @@ export interface HttpRequestInit {
   timeoutMs?: number;
 }
 
+/** Binary body plus safe response metadata needed by the media pipeline. */
+export interface HttpBinaryResponse {
+  data: Uint8Array;
+  contentType?: string;
+  contentDisposition?: string;
+}
+
 export interface HttpTransport {
   request(path: string, init?: HttpRequestInit, signal?: AbortSignal): Promise<unknown>;
+  /**
+   * Binary request used for Telegram file downloads (`/file/bot<token>/...`).
+   * Optional so test fakes only implement it when they exercise file ingress.
+   */
+  requestBinary?(path: string, init?: HttpRequestInit, signal?: AbortSignal): Promise<HttpBinaryResponse>;
 }
 
 export interface FetchTransportOptions {
@@ -30,7 +42,7 @@ export interface FetchTransportOptions {
   fetchImpl?: typeof fetch;
 }
 
-/** Redact bearer-style path segments (e.g. `/bot<token>`) from messages. */
+/** Redact bearer-style path segments (e.g. `/bot<token>` / `/file/bot<token>`) from messages. */
 function redactPath(path: string): string {
   return path.replace(/\/bot[^/?#]+/g, '/bot<redacted>');
 }
@@ -49,6 +61,27 @@ export class FetchTransport implements HttpTransport {
   private readonly baseUrl: string;
 
   async request(path: string, init: HttpRequestInit = {}, signal?: AbortSignal): Promise<unknown> {
+    const response = await this.requestResponse(path, init, signal);
+    const text = await response.text();
+    return text ? JSON.parse(text) : undefined;
+  }
+
+  async requestBinary(path: string, init: HttpRequestInit = {}, signal?: AbortSignal): Promise<HttpBinaryResponse> {
+    const response = await this.requestResponse(path, init, signal);
+    const buffer = await response.arrayBuffer();
+    return {
+      data: new Uint8Array(buffer),
+      contentType: response.headers.get('content-type') ?? undefined,
+      contentDisposition: response.headers.get('content-disposition') ?? undefined,
+    };
+  }
+
+  /** Fetch one response under the request timeout + outer signal. */
+  private async requestResponse(
+    path: string,
+    init: HttpRequestInit = {},
+    signal?: AbortSignal,
+  ): Promise<Response> {
     const controller = new AbortController();
     const timeoutMs = init.timeoutMs ?? this.timeoutMs;
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -57,15 +90,21 @@ export class FetchTransport implements HttpTransport {
     try {
       const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
         method: init.method ?? 'GET',
-        headers: { 'content-type': 'application/json', ...init.headers },
-        body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
+        headers: {
+          ...(init.body instanceof FormData ? {} : { 'content-type': 'application/json' }),
+          ...init.headers,
+        },
+        body: init.body instanceof FormData
+          ? init.body
+          : init.body !== undefined
+            ? JSON.stringify(init.body)
+            : undefined,
         signal: controller.signal,
       });
       if (!response.ok) {
         throw new ChannelError('CHANNEL_ERROR', `telegram http ${response.status} on ${redactPath(path)}`);
       }
-      const text = await response.text();
-      return text ? JSON.parse(text) : undefined;
+      return response;
     } catch (error) {
       if (error instanceof ChannelError) throw error;
       const aborted = (error as Error)?.name === 'AbortError' || controller.signal.aborted;

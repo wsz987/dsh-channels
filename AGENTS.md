@@ -113,6 +113,15 @@ DeepSeek Harness 官方文档站点（**优先查这里**）：
 
 完整清单见 `docs/architecture/common-design.md`「Harness 集成约束（速查）」——覆盖：DSH Bundle / patch 整体替换 / Cordis 插件形态 / inject 名称 / 命令 / Agent 输入语义 / session-event 回复 / 配置与凭据。写共享代码前按需加载。
 
+### 5.2.1 入站日志与媒体诊断
+
+- 每个适配器必须在完成 mapper + media hydration、调用 `ctx.emit(event)` **之前**记录一条 `info` 入站摘要；不得只记录文本而省略附件。
+- `connection.changed` / `auth.changed` 是控制面状态事件，由 `channel-control` / `channel-web` 消费；`channel-harness` bridge 必须静默忽略，不得打印成 `ignoring channel event`。未知的未来事件才进入 bridge debug 日志。
+- 入站摘要必须使用适配器专属 logger namespace：`channel-<name>`，并包含稳定的 message/conversation 标识和 `parts` 摘要。
+- `image` 摘要至少包含 `resourceRef`、`mimeType`、`localDataBytes`、`ingressFailure`；`file` 摘要至少包含 `name`、`mimeType`、`size`、`localDataBytes`、`ingressFailure`。严禁打印 token、签名 URL、文件正文或完整 raw payload。
+- 新增或更名 logger namespace 时，必须同步更新 `packages/channel-harness/src/debug-logger.ts` 的 `DSH_CHANNELS_DEBUG=1` exporter 白名单，并添加回归测试；否则 `pnpm web:debug` 中不会显示该渠道日志。
+- `localDataBytes` 缺失时，模型侧出现 `[image]` / `[file]` 属于媒体未完成 hydration 或附件保存失败，先根据上述摘要定位，不得用增加文本占位符掩盖失败。
+
 ### 5.3 验证与提交
 
 - 适配器必须过 `runChannelAdapterContract` + `pnpm verify <adapter> --test`。
@@ -121,3 +130,13 @@ DeepSeek Harness 官方文档站点（**优先查这里**）：
 - 新增渠道四步：复制 `templates/channel-adapter` → `packages/channels/cordis.patch.yml` 加行 → `pnpm build && pnpm typecheck && pnpm test` → `pnpm verify packages/channel-<name> --test`。
 - 契约表达不了的需求上报 contract gap，禁止改 `channel-core` / `channel-harness`。
 - 运行环境：Node ≥ 22、pnpm 9.15.3、ESM（`"type": "module"`）。
+
+### 5.4 校验与类型安全（zod / Schemastery）
+
+- **所有外部或不可信输入必须使用 zod `safeParse` 校验**：包括第三方 SDK 回调、HTTP/WebSocket 响应、解析后的 JSON、fixture，以及插件导出的未知对象。生产代码在信任边界处禁止使用手写 cast 或 `as` 断言绕过校验；校验成功后只使用解析结果。
+- **契约边界复用统一 schema**：Adapter shape、capabilities、event envelope 等必须复用 `channel-core/src/schema.ts` 中的 schema。`defineChannelAdapter`、`isChannelAdapter` 和 `channel-verify` 应保持同一契约形状，不得各自维护不一致的校验逻辑。
+- **上游驱动负责校验上游 payload**：各 adapter 的 upstream 层必须对 SDK/API 返回值和入站回调 payload 使用 zod `safeParse`。校验失败应转换为明确的渠道错误，不得把未经校验的 `unknown` 继续传入 adapter 或 core。参考 `channel-telegram/src/upstream.ts`、`channel-dingtalk/src/official-upstream.ts`、`channel-lark/src/openapi-outbound.ts`。
+- **配置 Schema 用 Schemastery（`@deepseek-ai/schemastery`），不是 zod**：配置是 Cordis 插件形态，用官方 Schema DSL；Schemastery 负责配置解析、默认值和配置语义，zod 不承担配置 schema 职责（参考 `channel-telegram/src/config.ts`）。
+- **zod 版本统一 `^4.4.3`**（workspace 各包一致）；zod 只做运行时校验，不承担序列化、持久化或配置转换。
+- **简单标量守卫允许手写**：例如 `definition.ts` 中对单个字段的 `typeof` 检查；但跨信任边界的结构化 payload 必须使用 zod schema。
+- **测试代码可以使用必要的类型断言构造 fake 或断言结果**，但不得以此替代生产代码中的运行时校验。

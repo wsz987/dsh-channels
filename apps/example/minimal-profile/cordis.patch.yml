@@ -24,6 +24,10 @@
   name: '@wsz987/dsh-channels/lark'
   disabled: true
 
+- id: channels-telegram
+  name: '@wsz987/dsh-channels/telegram'
+  disabled: true
+
 - id: channels-qq
   name: '@wsz987/dsh-channels/qq'
   inject:

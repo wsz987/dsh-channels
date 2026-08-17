@@ -212,15 +212,22 @@ deepseek-harness-channels/
 严格依赖方向：
 
 ```text
-channel-adapter -> channel-core
-channel-adapter -> upstream driver
+channel-adapter implementation -> channel-core
+channel-adapter implementation -> upstream driver
 upstream driver -> SDK/package/protocol
+
+adapter plugin composition -> channel-core + channel-control
 
 channel-harness -> channel-core
 channel-harness -> Harness public APIs
 
 channels bundle -> plugin configuration only
 ```
+
+这里的 `adapter plugin composition` 仅指包入口的 `apply()` 与
+`ChannelDefinition` 注册，用于把凭据、设置和 runtime mount 接入通用控制面。
+纯 Adapter / mapper / upstream 不得反向依赖 `channel-control`，也不得访问 Harness
+Agent / Session API。
 
 ---
 
@@ -306,12 +313,12 @@ Root package 安装所有渠道 SDK。
              │                        │
              │                        ▼
              │                  ChannelDefinitions
-             │                  WX / QQ / DingTalk / Lark
+             │                  WX / QQ / DingTalk / Lark / Telegram
              │                        │
              │                        ▼
              │                          ┌────┬────┬────┬────┐
              │                          │    │    │    │    │
-             │                         WX   QQ   DD   Lark  ...
+             │                         WX   QQ   DD   Lark   TG   ...
              │                          │    │    │    │
              │                         Driver / SDK / Upstream
              │

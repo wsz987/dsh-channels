@@ -91,6 +91,8 @@ interface TelegramMessage {
   from?: TelegramUser;
   text?: string;
   caption?: string;
+  message_thread_id?: number;
+  reply_to_message?: { message_id?: number };
   photo?: TelegramPhotoSize[];
   document?: TelegramDocument;
   audio?: TelegramAudio;
@@ -144,11 +146,17 @@ export function mapInbound(raw: unknown, meta: TelegramInboundMeta): MessageRece
       // 'private' → dm; 'group'/'supergroup' → group keyed by the chat id.
       // Other chat types (e.g. 'channel') fall back to dm in V1.
       type: chat.type === 'group' || chat.type === 'supergroup' ? 'group' : 'dm',
+      ...(message.message_thread_id !== undefined
+        ? { threadId: String(message.message_thread_id) as never }
+        : {}),
     },
     sender: { id: sender, name: from.first_name },
     message: {
       id: messageId,
       content: partsFor(message),
+      ...(message.reply_to_message?.message_id !== undefined
+        ? { replyTo: String(message.reply_to_message.message_id) as MessageId }
+        : {}),
       // Telegram timestamps are Unix seconds; the contract uses ms.
       createdAt: message.date !== undefined ? message.date * 1000 : Date.now(),
     },
@@ -163,27 +171,27 @@ function partsFor(message: TelegramMessage): MessagePart[] {
   if (Array.isArray(message.photo) && message.photo.length > 0) {
     // Telegram sends several sizes; the last entry is the largest. file_id is
     // a platform-opaque handle, so it maps to `resourceRef` — never `url`,
-    // which is reserved for real http(s) URLs. Downloading real bytes would
-    // need getFile (documented as a V1 limit).
+    // which is reserved for real http(s) URLs. The inbound processor resolves
+    // this reference through getFile before emitting the channel event.
     const last = message.photo[message.photo.length - 1];
     const resourceRef = last?.file_id;
-    return [{ type: 'image', resourceRef, alt: message.caption }];
+    return withCaption(message.caption, [{ type: 'image', resourceRef }]);
   }
   if (message.document) {
-    return [{
+    return withCaption(message.caption, [{
       type: 'file',
       resourceRef: message.document.file_id,
       name: message.document.file_name,
       mimeType: message.document.mime_type,
-    }];
+    }]);
   }
   if (message.audio) {
-    return [{
+    return withCaption(message.caption, [{
       type: 'audio',
       resourceRef: message.audio.file_id,
       durationMs: message.audio.duration !== undefined ? message.audio.duration * 1000 : undefined,
       mimeType: message.audio.mime_type,
-    }];
+    }]);
   }
   if (message.voice) {
     return [{
@@ -194,14 +202,20 @@ function partsFor(message: TelegramMessage): MessagePart[] {
     }];
   }
   if (message.video) {
-    return [{
+    return withCaption(message.caption, [{
       type: 'video',
       resourceRef: message.video.file_id,
       durationMs: message.video.duration !== undefined ? message.video.duration * 1000 : undefined,
       mimeType: message.video.mime_type,
-    }];
+    }]);
   }
   return [{ type: 'unsupported', reason: `unsupported telegram message type '${messageKind(message)}'` }];
+}
+
+function withCaption(caption: string | undefined, parts: MessagePart[]): MessagePart[] {
+  return typeof caption === 'string' && caption.length > 0
+    ? [...textParts(caption), ...parts]
+    : parts;
 }
 
 /** Best-effort content-kind name for the unsupported-part reason. */

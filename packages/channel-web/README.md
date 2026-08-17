@@ -12,7 +12,7 @@ Harness Web UI.
 The Web dashboard is part of the `@wsz987/dsh-channels` bundle:
 
 ```bash
-npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@beta
+npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@latest
 ```
 
 To install it standalone:
@@ -56,7 +56,7 @@ pnpm --filter @wsz987/channel-web test
 ## Related
 
 - [Repository root](../../README.md)
-- [Architecture design](../../docs/deepseek-harness-channels-architecture.md)
+- [Architecture design](../../docs/architecture.md)
 
 ## License
 

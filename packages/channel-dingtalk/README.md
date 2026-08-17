@@ -18,7 +18,7 @@ pnpm add @wsz987/channel-dingtalk
 Or install the whole bundle:
 
 ```bash
-npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@beta
+npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@latest
 ```
 
 ## Configuration

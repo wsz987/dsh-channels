@@ -54,9 +54,12 @@
       "id": "502",
       "content": [
         {
+          "type": "text",
+          "text": "a photo"
+        },
+        {
           "type": "image",
-          "resourceRef": "ANON_FILE_LARGE",
-          "alt": "a photo"
+          "resourceRef": "ANON_FILE_LARGE"
         }
       ]
     }

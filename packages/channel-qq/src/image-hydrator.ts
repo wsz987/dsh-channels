@@ -25,7 +25,11 @@
  *   `ingressFailure` code is set, and hydration of other parts continues.
  *   A download failure must never block text delivery (plan §79A).
  */
-import { SecureRemoteMediaFetcher, toIngressFailureCode } from '@wsz987/channel-core';
+import {
+  SecureRemoteMediaFetcher,
+  mimeHintFromFilename,
+  toIngressFailureCode,
+} from '@wsz987/channel-core';
 import type { BinaryIngressFailureCode, BinaryPartBase, MessagePart } from '@wsz987/channel-core';
 
 /** True when `value` is an absolute `http` / `https` URL. */
@@ -125,7 +129,7 @@ export async function hydrateImageParts(
         if (result.mimeType) {
           existing.mimeType = result.mimeType;
         } else if (platformMime === undefined) {
-          existing.mimeType = sniffMime(existing.name);
+          existing.mimeType = mimeHintFromFilename(existing.name);
         }
         // Generic files also expose the hydrated byte length to the store.
         if (isFile) {
@@ -141,50 +145,4 @@ export async function hydrateImageParts(
   );
 
   return parts;
-}
-
-/**
- * Fallback MIME hint from the filename extension when the platform gave none.
- * Covers the common image types plus the generic file formats the harness
- * extractor understands (plan §48). The adapter's hint is advisory only — the
- * harness re-validates at the trust boundary (plan §47).
- */
-function sniffMime(name: string | undefined): string | undefined {
-  if (!name) return undefined;
-  const ext = name.split('.').pop()?.toLowerCase() ?? '';
-  switch (ext) {
-    case 'png':
-      return 'image/png';
-    case 'jpg':
-    case 'jpeg':
-      return 'image/jpeg';
-    case 'webp':
-      return 'image/webp';
-    case 'gif':
-      return 'image/gif';
-    case 'pdf':
-      return 'application/pdf';
-    case 'doc':
-      return 'application/msword';
-    case 'docx':
-      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-    case 'xls':
-      return 'application/vnd.ms-excel';
-    case 'xlsx':
-      return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-    case 'txt':
-      return 'text/plain';
-    case 'csv':
-      return 'text/csv';
-    case 'json':
-      return 'application/json';
-    case 'md':
-      return 'text/markdown';
-    case 'xml':
-      return 'application/xml';
-    case 'zip':
-      return 'application/zip';
-    default:
-      return undefined;
-  }
 }

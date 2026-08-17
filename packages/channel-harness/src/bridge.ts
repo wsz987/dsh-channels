@@ -153,6 +153,12 @@ export class ChannelHarnessBridge {
    * THIS event has been handled (Promise<void> semantics preserved).
    */
   async handleChannelEvent(event: ChannelEvent): Promise<void> {
+    // Connection/auth state is consumed by the control plane and Web status
+    // surface. It is expected to be frequent during startup/reconnect and is
+    // not an inbound message for the Harness Agent bridge.
+    if (event.type === 'connection.changed' || event.type === 'auth.changed') {
+      return;
+    }
     if (event.type !== 'message.received') {
       this.options.logger.debug(`[channel-harness] ignoring channel event '${event.type}'`);
       return;

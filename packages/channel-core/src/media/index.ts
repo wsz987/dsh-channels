@@ -7,5 +7,6 @@
  * I/O by themselves; the fetcher is the single seam that does.
  */
 export * from './bounded-response.js';
+export * from './mime-hint.js';
 export * from './remote-policy.js';
 export * from './secure-fetcher.js';

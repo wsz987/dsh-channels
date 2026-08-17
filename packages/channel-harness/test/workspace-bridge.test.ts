@@ -317,6 +317,26 @@ function makeBridge(options: {
 }
 
 describe('M5 workspace integration (plan §21)', () => {
+  it('does not log expected connection/auth status events as ignored messages', async () => {
+    const logger = capturingLogger();
+    const { bridge } = makeBridge({ logger });
+
+    await bridge.handleChannelEvent({
+      type: 'connection.changed',
+      channel: 'telegram' as never,
+      accountId: 'main' as never,
+      state: 'connecting',
+    });
+    await bridge.handleChannelEvent({
+      type: 'auth.changed',
+      channel: 'telegram' as never,
+      accountId: 'main' as never,
+      state: 'authenticated',
+    });
+
+    expect(logger.debug).not.toHaveBeenCalled();
+  });
+
   it('Test 1 — no binding + ordinary first message creates a session at the resolved cwd, attaches, persists, and follows up', async () => {
     const resolver = new FakeWorkspaceResolver();
     const logger = capturingLogger();

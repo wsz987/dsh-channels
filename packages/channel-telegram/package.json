@@ -8,7 +8,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "Telegram Bot API channel adapter for DeepSeek Harness (M5 extensibility proof — third-party channel on the public Channel Contract)",
+  "description": "Telegram Bot API channel adapter for DeepSeek Harness (credentials seam, control-plane definition, edit streaming, file hydration)",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -30,7 +30,10 @@
   },
   "dependencies": {
     "@wsz987/channel-core": "workspace:*",
+    "@wsz987/channel-control": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-credentials": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-settings": "^0.1.0-rc.6",
     "@deepseek-ai/schemastery": "^3.18.1",
     "zod": "^4.4.3"
   },

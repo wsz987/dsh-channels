@@ -17,11 +17,14 @@ function makeConfig(overrides: Partial<TelegramConfig> = {}): TelegramConfig {
     enabled: true,
     accountId: 'main',
     baseUrl: 'http://fake',
-    token: undefined,
+    tokenRef: 'TELEGRAM_BOT_TOKEN',
+      token: undefined,
     timeoutMs: 1000,
     longPollTimeoutMs: 1000,
     reconnect: { enabled: false, baseDelayMs: 1, maxDelayMs: 10, maxRetries: 2 },
     dedup: { enabled: true, windowMs: 5000 },
+      streaming: { enabled: true, placeholder: '…' },
+      maxDownloadBytes: 20 * 1024 * 1024,
     ...overrides,
   });
 }
@@ -33,7 +36,12 @@ describe('channel-telegram transactional mount', () => {
     const ctx = new Context();
     new ChannelService(ctx);
 
-    let capturedSignal: AbortSignal | undefined;
+          (ctx as Context & { credentials: unknown }).credentials = {
+        resolve: async () => ({ value: 'TEST_BOT_TOKEN_123', source: 'test' }),
+        describe: async () => ({ configured: true, writable: true }),
+        set: async () => undefined,
+      };
+      let capturedSignal: AbortSignal | undefined;
     const stop = vi.spyOn(TelegramAdapter.prototype, 'stop').mockImplementation(async function () {
       return undefined;
     });
@@ -50,6 +58,8 @@ describe('channel-telegram transactional mount', () => {
       // rollback (abort + stop + unregister) runs as the rejection settles.
       await tick();
       await tick();
+        await tick();
+        await tick();
 
       expect(ctx.channels.get('telegram')).toBeUndefined();
       expect(stop).toHaveBeenCalledTimes(1);

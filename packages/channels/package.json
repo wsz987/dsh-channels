@@ -8,7 +8,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "DeepSeek Harness DSH Bundle: official messaging channels (Weixin, QQ, DingTalk, Lark)",
+  "description": "Connect WeChat, QQ, DingTalk and Lark to DeepSeek Harness — unified config, QR-code auth, chat with your Agent from IM",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -49,6 +49,10 @@
       "types": "./lib/lark.d.ts",
       "default": "./lib/lark.js"
     },
+    "./telegram": {
+      "types": "./lib/telegram.d.ts",
+      "default": "./lib/telegram.js"
+    },
     "./client": {
       "default": "./lib/client.js"
     },
@@ -85,6 +89,7 @@
     "@wsz987/channel-files": "workspace:*",
     "@wsz987/channel-harness": "workspace:*",
     "@wsz987/channel-lark": "workspace:*",
+    "@wsz987/channel-telegram": "workspace:*",
     "@wsz987/channel-qq": "workspace:*",
     "@wsz987/channel-weixin": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
