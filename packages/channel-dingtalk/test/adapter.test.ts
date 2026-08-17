@@ -495,25 +495,27 @@ describe('DingTalkAdapter lifecycle', () => {
     service.on((event) => {
       if (event.type === 'connection.changed') connectionStates.push(event.state);
     });
-    await a.start(ctx);
 
-    // First long-poll returns a message, then the loop is aborted by the test.
-    const controller = new AbortController();
+    // Keep the second poll pending until the inbound event has been observed.
+    // Aborting it earlier races the asynchronous inbound processor.
     let calls = 0;
     transport.route('/stream', (_init, signal) => {
       calls += 1;
       if (calls === 1) {
         return { type: 'text', msgId: 'm1', senderId: 'user_123', conversationId: 'conv_1', content: 'hi' };
       }
-      controller.abort();
-      void ctx.dispose();
-      throw new ChannelError('CHANNEL_ERROR', 'stop loop');
+      return new Promise<never>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      });
     });
 
     const listener = vi.fn();
     service.on(listener);
+    await a.start(ctx);
     await vi.waitFor(() => {
-      expect(listener.mock.calls.length).toBeGreaterThan(0);
+      expect(listener.mock.calls.some(
+        (call) => (call[0] as MessageReceived).type === 'message.received',
+      )).toBe(true);
     }, { timeout: 2000 });
     const event = listener.mock.calls.find(
       (call) => (call[0] as MessageReceived).type === 'message.received',
@@ -521,8 +523,8 @@ describe('DingTalkAdapter lifecycle', () => {
     expect(event.message.id).toBe('m1');
     expect(event.message.content).toEqual([{ type: 'text', text: 'hi' }]);
 
-    // The successful long-poll flipped the connection to connected (the loop
-    // then exits on the aborted signal, so assert the emitted event).
+    // Ending a successful receive cycle flips the connection to connected.
+    await ctx.dispose();
     await vi.waitFor(() => {
       expect(connectionStates).toContain('connected');
     }, { timeout: 2000 });
