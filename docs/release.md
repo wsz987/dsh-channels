@@ -19,12 +19,11 @@ Every release-family package is versioned **independently** — Changesets is
 configured with no `fixed` / `linked` groups
 (`.changeset/config.json`, `baseBranch: main`, `access: public`).
 
-The automated release family is an explicit allowlist: the bundle plus its nine
+The automated release family is an explicit allowlist: the bundle plus its ten
 runtime dependencies (`channel-core`, `channel-harness`, `channel-control`,
-`channel-files`, `channel-web`, and the four built-in adapters). The ignored
-development/governance packages (`channel-compat`, `channel-testkit`,
-`channel-verify`) and the unsupported Telegram example are not packed or
-published by this workflow.
+`channel-files`, `channel-web`, the five built-in adapters, and Telegram). The
+ignored development/governance packages (`channel-compat`, `channel-testkit`,
+`channel-verify`) are not packed or published by this workflow.
 
 | Package                | Version |
 | ---------------------- | ------- |
@@ -119,10 +118,11 @@ update testedVersion
 (`packages/channels/test/bundle.test.ts`, vitest). It:
 
 1. parses `packages/channels/cordis.patch.yml` (hand-rolled parser, no YAML
-   dependency) and asserts the patch inserts exactly the nine plugin ids —
+   dependency) and asserts the patch inserts exactly the ten plugin ids —
    `channels-service`, `channels-files`, `channels-harness`,
    `channels-control`, `channels-weixin`, `channels-qq`,
-   `channels-dingtalk`, `channels-lark`, `channels-web` — with their
+   `channels-dingtalk`, `channels-lark`, `channels-telegram`,
+   `channels-web` — with their
    `inject` lists (`channels-harness` → `[channels, agents, agentDefaultModel,
    commands]`, `channels-control` → `[channels, credentials]`, the channel
    adapters → `[channels, (credentials,) channelControl]`);
@@ -156,12 +156,12 @@ validation installs the bundle into a **clean profile** with the real dsh CLI
 #    there is no `dsh profile create` step)
 npx @deepseek-ai/dsh plugin --profile release-validation add -w @wsz987/dsh-channels@latest
 
-# 2. dump the merged config — verify the nine plugins were inserted
+# 2. dump the merged config — verify the ten plugins were inserted
 npx @deepseek-ai/dsh --profile release-validation --dump-config
 
 # 3. start the profile — all plugins load (channels-service, channels-files,
 #    channels-harness, channels-control, channels-weixin, channels-qq,
-#    channels-dingtalk, channels-lark, channels-web)
+#    channels-dingtalk, channels-lark, channels-telegram, channels-web)
 npx @deepseek-ai/dsh --profile release-validation
 
 # 4. override channels via a profile patch (apps/example/minimal-profile/
