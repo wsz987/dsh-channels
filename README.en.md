@@ -53,27 +53,13 @@ Once installed, configure and authorize channels via QR code in the Harness Web 
 | Lark | Yes | send/receive | send/receive | Yes | ✅ |
 | Telegram | Yes | send/receive | send/receive | Yes | ✅ |
 
-Status: ✅ tested · ⚠️ experimental · 🚧 in development (coming soon)
-
-- Inbound images use the native Harness image path and are passed to vision-capable models.
-- Generic files support PDF, DOCX, XLSX and text. Inbound attachments are stored and their content is extracted for the Agent to inspect through `read_channel_attachment`, with a 100 MiB limit per file.
-- `send_channel_message` can proactively send text and images; file outbound is supported for QQ, the DingTalk SDK, Lark and Telegram (Bot API multipart).
-- Audio and video are currently degraded.
+- Vision-capable multimodal models can inspect images directly; PDF, DOCX, XLSX and text attachments can be extracted for the Agent to read (100 MiB inbound limit per file); audio and video are currently degraded.
 
 ## Before you start
 
-> **Early iteration notice**: the project is evolving quickly, and version upgrades may change configuration or local data formats.
-> Back up your data before upgrading; for now, do not keep the only copy of important data inside channel workspace sessions.
-
-| Check | Requirement |
-| --- | --- |
-| Harness CLI | `npx @deepseek-ai/dsh` runs successfully |
-| LLM model | Configure a model provider, credentials and a default model in Harness Web "Settings → Model", and confirm a normal Web session can chat. See the [official Harness config reference](https://deepseek-harness.github.io/deepseek-harness/reference/config-catalog) |
-| Session permissions | Channel sessions follow Harness permission presets. New sessions default to `Workspace Write`, which can modify files in the current Workspace; wider access requires approval |
-
-If a task genuinely needs to access files outside the Workspace, select `Full access` for that session. See the [Harness permission-preset reference](https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/permission-presets).
-
-> **Security warning**: `Full access` removes the DSH file-sandbox restrictions and disables approval prompts. The Agent will be able to modify any path the running process can access. Enable it only when you trust the current task, working directory and model, and back up important data beforehand.
+- Confirm that `npx @deepseek-ai/dsh` runs and a normal Harness Web session can chat.
+- Channel sessions normally use `Workspace Write`; enable `Full access` only when the task must access files outside the Workspace and you trust it.
+- The project is evolving quickly; back up your data before upgrading.
 
 ## Installation
 
@@ -112,7 +98,7 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 | Lark | AppId, AppSecret | Create an app on the [Lark open platform](https://open.feishu.cn/app), or scan a QR code to create an agent |
 | Telegram | Bot Token | Create a bot in [@BotFather](https://t.me/BotFather) and enter the token |
 
-Do not write secrets into `cordis.patch.yml`. Put only credential references (e.g. `appSecretRef`) in the config; real values are managed by Harness `ctx.credentials`. See [apps/example/minimal-profile](apps/example/minimal-profile/) for full config examples. A config patch replaces the whole `config` of the target plugin — it is not a deep merge.
+Harness manages secrets; put only references such as `appSecretRef` in `cordis.patch.yml`. See [minimal-profile](apps/example/minimal-profile/) for a complete example. A config patch replaces the whole `config`; it is not a deep merge.
 
 ## Common operations
 

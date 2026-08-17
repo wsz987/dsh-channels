@@ -51,25 +51,13 @@
 | 飞书 | 支持 | 收发 | 收发 | 支持 | ✅ |
 | Telegram | 支持 | 收发 | 收发 | 支持 | ✅ |
 
-- 收到的图片通过 Harness 原生图片链路传递给支持视觉的模型。
-- 通用文件支持 PDF、DOCX、XLSX 和文本；入站附件会被保存并提取内容，Agent 可通过 `read_channel_attachment` 读取和识别，单文件上限为 100 MiB。
-- `send_channel_message` 支持主动发送文本和图片；文件外发支持 QQ、钉钉 SDK、飞书和 Telegram（Bot API multipart）。
-- 音频和视频目前会降级处理。
+- 支持视觉的多模态模型可直接识别图片；PDF、DOCX、XLSX 和文本附件可提取内容供 Agent 读取（入站单文件上限 100 MiB）；音频和视频暂为降级处理。
 
 ## 使用前须知
 
-> **迭代期提示**：项目仍在快速迭代，版本升级可能调整配置或本地数据格式。
-> 升级前请备份相关数据；现阶段不要把重要数据的唯一副本存放在渠道工作区会话中。
-
-| 检查项 | 要求 |
-| --- | --- |
-| Harness CLI | 已能运行 `npx @deepseek-ai/dsh` |
-| LLM 模型 | 先在 Harness Web 的“设置 → 模型”中配置模型提供方、凭据和默认模型，并确认普通 Web 会话可以正常对话。参见 [Harness 官方配置参考](https://deepseek-harness.github.io/deepseek-harness/reference/config-catalog) |
-| 会话权限 | 渠道会话遵循 Harness 权限预设。新会话默认通常为 `Workspace Write`，可修改当前 Workspace 内的文件，访问更大范围时需要审批 |
-
-任务确实需要访问 Workspace 外的文件时，可为对应会话选择 `Full access`。详见 [Harness 权限预设参考](https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/permission-presets)。
-
-> **安全警告**：`Full access` 会解除 DSH 文件沙箱限制并关闭审批提示。Agent 将能够修改运行进程有权访问的任意路径。请仅在信任当前任务、工作目录和模型时启用，并提前备份重要数据。
+- 确认 `npx @deepseek-ai/dsh` 可运行，且 Harness Web 普通会话可正常对话。
+- 渠道会话通常使用 `Workspace Write`；仅在确需访问 Workspace 外文件且信任当前任务时启用 `Full access`。
+- 项目仍在快速迭代，升级前请备份数据。
 
 ## 安装
 
@@ -108,7 +96,7 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 | 飞书 | AppId、AppSecret | 在[飞书开放平台](https://open.feishu.cn/app)创建应用，或扫码创建智能体 |
 | Telegram | Bot Token | 在 [@BotFather](https://t.me/BotFather) 创建机器人并填写 Token |
 
-密钥不要写入 `cordis.patch.yml`。配置中只填写凭据引用，例如 `appSecretRef`；真实值由 Harness `ctx.credentials` 管理。完整配置示例见 [apps/example/minimal-profile](apps/example/minimal-profile/)。配置 patch 会整体替换目标插件的 `config`，不是深度合并。
+密钥由 Harness 凭据管理，`cordis.patch.yml` 只填写 `appSecretRef` 等引用。完整示例见 [minimal-profile](apps/example/minimal-profile/)；配置 patch 会整体替换 `config`，不会深度合并。
 
 ## 常用操作
 
