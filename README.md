@@ -21,21 +21,21 @@
 
 ## 效果预览
 
-接入后，在 Harness Web“设置 → 渠道”面板统一配置与扫码授权，并在各平台对话框中直接与 Agent 对话（图片来源：[docs/ScreenShot](docs/ScreenShot)）：
+接入后，在 Harness Web“设置 → 渠道”面板统一配置与扫码授权，并在各平台对话框中直接与 Agent 对话（图片来源：[docs/ScreenShot](./docs/ScreenShot)）：
 
 **Harness Web · 渠道设置面板**
 
 <p align="center">
-  <img src="docs/ScreenShot/dsh-channels-setting.png" alt="Harness Web 渠道设置面板" width="560"/>
+  <img src="./docs/ScreenShot/dsh-channels-setting.png" alt="Harness Web 渠道设置面板" width="560"/>
 </p>
 
 **各平台对话框**
 
 <p align="center">
-  <img src="docs/ScreenShot/weixin.jpg" alt="微信对话" width="24%"/>
-  <img src="docs/ScreenShot/qq.jpg" alt="QQ 对话" width="24%"/>
-  <img src="docs/ScreenShot/dingding.jpg" alt="钉钉对话" width="24%"/>
-  <img src="docs/ScreenShot/feishu.jpg" alt="飞书对话" width="24%"/>
+  <img src="./docs/ScreenShot/weixin.jpg" alt="微信对话" width="24%"/>
+  <img src="./docs/ScreenShot/qq.jpg" alt="QQ 对话" width="24%"/>
+  <img src="./docs/ScreenShot/dingding.jpg" alt="钉钉对话" width="24%"/>
+  <img src="./docs/ScreenShot/feishu.jpg" alt="飞书对话" width="24%"/>
 </p>
 
 ## 使用前须知

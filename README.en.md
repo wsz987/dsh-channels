@@ -23,21 +23,21 @@ English | [简体中文](README.md)
 
 ## Preview
 
-Once installed, configure and authorize channels via QR code in the Harness Web "Settings → Channels" panel, then chat with your Agent directly in each platform's conversation (screenshots from [docs/ScreenShot](docs/ScreenShot)):
+Once installed, configure and authorize channels via QR code in the Harness Web "Settings → Channels" panel, then chat with your Agent directly in each platform's conversation (screenshots from [docs/ScreenShot](./docs/ScreenShot)):
 
 **Harness Web · Channels settings panel**
 
 <p align="center">
-  <img src="docs/ScreenShot/dsh-channels-setting.png" alt="Harness Web channel settings panel" width="560"/>
+  <img src="./docs/ScreenShot/dsh-channels-setting.png" alt="Harness Web channel settings panel" width="560"/>
 </p>
 
 **Platform conversations**
 
 <p align="center">
-  <img src="docs/ScreenShot/weixin.jpg" alt="WeChat conversation" width="24%"/>
-  <img src="docs/ScreenShot/qq.jpg" alt="QQ conversation" width="24%"/>
-  <img src="docs/ScreenShot/dingding.jpg" alt="DingTalk conversation" width="24%"/>
-  <img src="docs/ScreenShot/feishu.jpg" alt="Lark conversation" width="24%"/>
+  <img src="./docs/ScreenShot/weixin.jpg" alt="WeChat conversation" width="24%"/>
+  <img src="./docs/ScreenShot/qq.jpg" alt="QQ conversation" width="24%"/>
+  <img src="./docs/ScreenShot/dingding.jpg" alt="DingTalk conversation" width="24%"/>
+  <img src="./docs/ScreenShot/feishu.jpg" alt="Lark conversation" width="24%"/>
 </p>
 
 ## Before you start
