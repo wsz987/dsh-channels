@@ -8,7 +8,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "Connect WeChat, QQ, DingTalk and Lark to DeepSeek Harness — unified config, QR-code auth, chat with your Agent from IM",
+  "description": "Connect WeChat, QQ, DingTalk, Lark and Telegram to DeepSeek Harness — unified config, QR-code auth, chat with your Agent from IM",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
