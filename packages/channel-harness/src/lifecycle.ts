@@ -13,9 +13,11 @@
  * 6. dispose all owned agent handles;
  * 7. dispose the ReplyRouter (clear timers).
  *
- * Persistence is an OPTIONAL capability resolved at the use site: the caller
- * (plugin) queries `ctx.get('sessionPersistence')`, and the gateway's
- * `canResume()` reflects whether it is present.
+ * Persistence is an OPTIONAL capability resolved LIVE at the use site: the
+ * caller passes a resolver (`() => ctx.get('sessionPersistence')`), and the
+ * gateway's `canResume()` / probes reflect whether it is present RIGHT NOW —
+ * mounting, unmounting, or replacing the service after startup is observed on
+ * the next probe (never a startup snapshot).
  *
  * Two reply-context correlation listeners (`agent/inbox/claimed` and
  * `agent/inbox/discarded`) are registered on the Cordis context; they are
@@ -49,13 +51,13 @@ export interface BridgeLifecycle {
 export function startBridge(
   ctx: Context,
   config: Config,
-  persistence?: SessionPersistence | undefined,
+  resolvePersistence?: () => SessionPersistence | undefined,
 ): BridgeLifecycle {
   installDebugConsoleExporter(ctx);
   const logger: ChannelLogger = ctx.logger('channel-harness');
 
   const bindingStore = createBindingStore(config.bindingStore);
-  const agentGateway = new HarnessAgentGateway(ctx, persistence);
+  const agentGateway = new HarnessAgentGateway(ctx, resolvePersistence);
   const agentManager = new AgentManager(agentGateway, logger, config.maxConcurrency);
   const stopImageFallback = installImageModelFallback(ctx, agentManager, logger, config.imageCompatibility.mode);
   const agentRouter = new AgentRouter(config);
@@ -187,7 +189,7 @@ export function startBridge(
     await drainActiveTurns(agentManager, replyRouter, logger, config.drainTimeoutMs);
     // 3. RECONCILE replies from the Session durable log (final text delivery
     //    does NOT rely on the listener still being attached).
-    await reconcileReplies(ctx, persistence, agentManager, replyRouter, logger);
+    await reconcileReplies(ctx, resolvePersistence, agentManager, replyRouter, logger);
     // 4. Finalize any replies still marked active whose turn/end never arrived.
     await replyRouter.flushAll();
     // 5. Stop listening to session/event.
@@ -245,13 +247,15 @@ async function drainActiveTurns(
 
 /**
  * Reconcile every active session's reply from the durable log. Reads the live
- * Session when it is still in the store; otherwise inspects persistence. Skips
- * gracefully when neither is available. Final-reply correctness comes from the
- * Session log, not from the still-attached event listener.
+ * Session when it is still in the store; otherwise inspects persistence
+ * (resolved LIVE at dispose time — the currently mounted backend, whatever
+ * the bridge started with). Skips gracefully when neither is available.
+ * Final-reply correctness comes from the Session log, not from the
+ * still-attached event listener.
  */
 async function reconcileReplies(
   ctx: Context,
-  persistence: SessionPersistence | undefined,
+  resolvePersistence: (() => SessionPersistence | undefined) | undefined,
   agentManager: AgentManager,
   replyRouter: ReplyRouter,
   logger: ChannelLogger,
@@ -259,6 +263,7 @@ async function reconcileReplies(
   const sessionIds = agentManager.activeSessions();
   if (sessionIds.length === 0) return;
   const sessions = ctx.get('sessions') as SessionStore | undefined;
+  const persistence = resolvePersistence?.();
   for (const sessionId of sessionIds) {
     try {
       const live = sessions?.get(SessionId(sessionId)) as Session | undefined;

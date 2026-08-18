@@ -39,11 +39,14 @@ interface ChannelSessionFactoryOptions {
  * Owns the Channel Session lifecycle as one rollback-aware transaction:
  *
  * - `create` mints a fresh session id for a conversation without a binding;
- * - `recreate` brings an EXISTING binding's session back when its persisted
- *   data is gone (no sessionPersistence mounted, or the persisted session was
- *   lost) — re-running the workspaceResolver so the recreated session lands on
- *   the SAME channel Workspace cwd a first creation would have used, then
- *   re-attaching the workspace and keeping the durable binding.
+ * - `recreate` brings an EXISTING binding's session back for EPHEMERAL
+ *   deployments — the only caller is the bridge's no-sessionPersistence
+ *   branch (re-running the workspaceResolver so the recreated session lands
+ *   on the SAME channel Workspace cwd a first creation would have used, then
+ *   re-attaching the workspace and keeping the durable binding). A live agent
+ *   is borrowed as-is. A durable session that is MISSING behind a binding is
+ *   NOT recreated here: the bridge fails loud with `SessionNotFoundError`
+ *   (`/new` is the explicit repair path).
  *
  * cwd / workspace / binding are SESSION LIFECYCLE concerns, so both paths
  * live here — never in the generic AgentManager.
@@ -107,15 +110,19 @@ export class ChannelSessionFactory {
   }
 
   /**
-   * Recreate the session behind an EXISTING binding whose persisted session is
-   * missing (or persistence is unavailable) — the "existing binding -> missing
-   * persistence -> recreate" case after a process restart.
+   * Recreate the session behind an EXISTING binding in an EPHEMERAL
+   * deployment (no sessionPersistence mounted) — the "existing binding ->
+   * missing persistence -> recreate" case after a process restart.
    *
    * A live agent in this process is borrowed as-is (nothing to recreate). On a
    * miss, the SAME session id is recreated exactly like a first creation:
    * workspaceResolver re-run (so `header.cwd` lands back on the channel
    * Workspace, never on the host cwd), workspace re-attached, and the durable
    * binding kept (only `updatedAt` refreshed, route snapshot reconciled).
+   *
+   * This is NEVER called for a durable session that is missing behind a
+   * binding — that is a durability inconsistency the bridge fails loud on
+   * (`SessionNotFoundError`; `/new` is the explicit repair).
    */
   async recreate(
     binding: SessionBinding,

@@ -15,11 +15,13 @@
  * (doc H0.5 route parity).
  *
  * Create-vs-resume is decided by the CALLER (the bridge), not by error-regex
- * fallback. Persistence is an OPTIONAL capability resolved at the use site:
- * `canResume()` tells the caller whether a sessionPersistence service is
- * available, and `exists()` probes membership via the persistence service —
- * corruption / unsupported-format / backend failures propagate loudly rather
- * than being misread as "no persistence".
+ * fallback. Persistence is an OPTIONAL capability resolved LIVE at the use
+ * site: `canResume()` tells the caller whether a sessionPersistence service
+ * is currently mounted, `exists()` probes membership via the live service,
+ * and `probePersisted()` answers the atomic unavailable/present/missing
+ * question in one resolver call (no canResume/exists TOCTOU across a
+ * persistence HMR) — corruption / unsupported-format / backend failures
+ * propagate loudly rather than being misread as "no persistence".
  *
  * Global concurrency gate: at most `maxConcurrency` `create()`/`resume()` calls
  * are in flight at once across all sessions; `get()` (a live lookup) is never
@@ -57,6 +59,15 @@ export interface GatewayAgentHandle extends GatewayAgent {
 export interface PersistenceProbe {
   exists(sessionId: string): Promise<boolean>;
 }
+
+/**
+ * Atomic result of probing ONE session through the LIVE persistence
+ * capability: `unavailable` (no sessionPersistence service mounted right
+ * now), `present`, or `missing`. Resolving the capability once per probe
+ * closes the canResume/exists TOCTOU window (a persistence HMR between the
+ * two lookups would otherwise pair different backends).
+ */
+export type PersistedProbeResult = 'unavailable' | 'present' | 'missing';
 
 /**
  * A durable binding references a persisted session that no longer exists
@@ -104,6 +115,12 @@ export interface AgentGateway {
   canResume(): boolean;
   /** Probe whether a persisted session exists. */
   exists(sessionId: string): Promise<boolean>;
+  /**
+   * Atomic persistence probe (live capability resolved once). Optional on
+   * the interface so minimal test doubles can rely on the AgentManager's
+   * canResume+exists fallback; the real gateway implements it.
+   */
+  probePersisted?(sessionId: string): Promise<PersistedProbeResult>;
 }
 
 /** A resolved agent reference handed to the caller. */
@@ -164,15 +181,29 @@ export function resolveRoute(
  * Probe a persisted session's existence through the persistence service's
  * `list()` membership. A session that is absent returns `false`; any backend
  * failure (corruption, unsupported format, connectivity) propagates loudly.
+ *
+ * The persistence service is resolved LIVE on every call (a resolver, not a
+ * startup snapshot): a sessionPersistence mounted/unmounted/replaced after
+ * the bridge started is observed on the next probe — reversible Cordis
+ * lifecycle parity, since `ctx.get` only returns currently active providers.
  */
 export class PersistenceMembershipProbe implements PersistenceProbe {
-  constructor(private readonly persistence: SessionPersistence | undefined) {}
+  constructor(private readonly resolvePersistence: () => SessionPersistence | undefined) {}
 
   async exists(sessionId: string): Promise<boolean> {
-    if (!this.persistence) return false;
-    const headers = await this.persistence.list();
+    const persistence = this.resolvePersistence();
+    if (!persistence) return false;
+    const headers = await persistence.list();
     const target = sessionId;
     return headers.some((header) => String(header.id) === target);
+  }
+
+  /** Atomic probe: the live capability is resolved exactly once per call. */
+  async probe(sessionId: string): Promise<PersistedProbeResult> {
+    const persistence = this.resolvePersistence();
+    if (!persistence) return 'unavailable';
+    const headers = await persistence.list();
+    return headers.some((header) => String(header.id) === sessionId) ? 'present' : 'missing';
   }
 }
 
@@ -180,19 +211,22 @@ export class PersistenceMembershipProbe implements PersistenceProbe {
  * Real gateway over `ctx.agents`. This is the only Harness import surface in
  * the bridge (besides the `session/event` feed consumed by ReplyRouter).
  *
- * An optional persistence service (queried by the caller at the use site and
- * passed in) enables `canResume()` and the existence probe.
+ * Persistence is an OPTIONAL capability resolved LIVE at the use site: the
+ * caller passes a resolver (`() => ctx.get('sessionPersistence')`), so
+ * `canResume()` and the existence probe reflect the service's CURRENT
+ * presence — mounting, unmounting, or replacing the service after the bridge
+ * started is observed on the next probe (never a startup snapshot).
  */
 export class HarnessAgentGateway implements AgentGateway {
-  private readonly probe: PersistenceProbe;
-  private readonly _hasPersistence: boolean;
+  private readonly probe: PersistenceMembershipProbe;
+  private readonly resolvePersistence: () => SessionPersistence | undefined;
 
   constructor(
     private readonly ctx: Context,
-    persistence?: SessionPersistence | undefined,
+    resolvePersistence?: () => SessionPersistence | undefined,
   ) {
-    this.probe = new PersistenceMembershipProbe(persistence);
-    this._hasPersistence = persistence !== undefined;
+    this.resolvePersistence = resolvePersistence ?? (() => undefined);
+    this.probe = new PersistenceMembershipProbe(this.resolvePersistence);
   }
 
   get(sessionId: string): GatewayAgent | undefined {
@@ -207,12 +241,16 @@ export class HarnessAgentGateway implements AgentGateway {
   }
 
   canResume(): boolean {
-    // Only a mounted sessionPersistence service enables resume.
-    return this._hasPersistence;
+    // Only a currently mounted sessionPersistence service enables resume.
+    return this.resolvePersistence() !== undefined;
   }
 
   async exists(sessionId: string): Promise<boolean> {
     return this.probe.exists(sessionId);
+  }
+
+  async probePersisted(sessionId: string): Promise<PersistedProbeResult> {
+    return this.probe.probe(sessionId);
   }
 
   /** Read Harness's live default-model selection (undefined when absent). */
@@ -301,6 +339,20 @@ export class AgentManager {
   /** Probe whether a persisted session exists. Backend failures propagate. */
   exists(sessionId: string): Promise<boolean> {
     return this.gateway.exists(sessionId);
+  }
+
+  /**
+   * Atomic persistence probe: resolves the LIVE capability once and answers
+   * `unavailable` / `present` / `missing` — the bridge's single decision
+   * point for recreate-vs-resume-vs-fail, immune to a persistence HMR between
+   * `canResume()` and `exists()`.
+   */
+  async probePersisted(sessionId: string): Promise<PersistedProbeResult> {
+    if (this.gateway.probePersisted) return this.gateway.probePersisted(sessionId);
+    // Fallback for minimal test gateways without the atomic probe: two live
+    // lookups (deterministic in tests).
+    if (!this.gateway.canResume()) return 'unavailable';
+    return (await this.gateway.exists(sessionId)) ? 'present' : 'missing';
   }
 
   /**

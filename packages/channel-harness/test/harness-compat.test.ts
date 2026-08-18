@@ -8,11 +8,12 @@
  * (`KNOWN_SESSION_EVENT_TYPES`) — mirroring Phase 14's intent as far as this
  * repo can without the dsh runtime.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Context } from '@deepseek-ai/cordis';
 import CommandRuntime, { parseCommand, type CommandResult } from '@deepseek-ai/dsh-commands';
 import { createScope } from '@deepseek-ai/dsh-scope';
 import type { Agent } from '@deepseek-ai/dsh-agent';
+import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence';
 import {
   AgentRegistry,
   type AgentFactory,
@@ -289,6 +290,54 @@ describe('HarnessAgentGateway default-model wiring', () => {
 
     expect(observed).toHaveLength(1);
     expect(observed[0]).toEqual({ provider: 'deepseek', model: 'deepseek-chat' });
+  });
+});
+
+describe('sessionPersistence is a LIVE optional capability (no startup snapshot)', () => {
+  /** Minimal structural SessionPersistence: the gateway probes via list(). */
+  function persistenceWith(ids: string[]) {
+    return {
+      list: async () => ids.map((id) => ({ id: SessionId(id) })),
+    } as never as SessionPersistence;
+  }
+
+  it('mounting, unmounting, and replacing the service after startup is observed on the next probe', async () => {
+    const ctx = new Context();
+    const agents = new AgentRegistry(ctx);
+    const holder: { current?: SessionPersistence } = {};
+    const resolvePersistence = vi.fn(() => holder.current);
+    const gateway = new HarnessAgentGateway(ctx, resolvePersistence);
+
+    // Startup WITHOUT persistence: ephemeral semantics (no resume capability).
+    expect(gateway.canResume()).toBe(false);
+    expect(await gateway.probePersisted('s1')).toBe('unavailable');
+
+    // persistence mounts later: the SAME gateway now sees a durable backend.
+    holder.current = persistenceWith(['s1']);
+    expect(gateway.canResume()).toBe(true);
+    expect(await gateway.probePersisted('s1')).toBe('present');
+    expect(await gateway.probePersisted('s2')).toBe('missing');
+
+    // unmount again (HMR teardown): back to ephemeral, same gateway instance.
+    holder.current = undefined;
+    expect(gateway.canResume()).toBe(false);
+    expect(await gateway.probePersisted('s1')).toBe('unavailable');
+    expect(await gateway.exists('s1')).toBe(false);
+  });
+
+  it('the atomic probe resolves the live capability exactly ONCE per call (no canResume/exists TOCTOU)', async () => {
+    const ctx = new Context();
+    const agents = new AgentRegistry(ctx);
+    const holder: { current?: SessionPersistence } = { current: persistenceWith(['s1']) };
+    const resolvePersistence = vi.fn(() => holder.current);
+    const gateway = new HarnessAgentGateway(ctx, resolvePersistence);
+
+    await gateway.probePersisted('s1');
+    // ONE resolver call decides unavailable/present/missing — a persistence
+    // HMR between two separate lookups can never pair different backends.
+    expect(resolvePersistence).toHaveBeenCalledTimes(1);
+    expect(await gateway.probePersisted('s1')).toBe('present');
+    expect(resolvePersistence).toHaveBeenCalledTimes(2);
   });
 });
 

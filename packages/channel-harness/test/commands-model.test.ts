@@ -40,9 +40,11 @@ import { ChannelHarnessBridge } from '../src/bridge.ts';
 import { Config } from '../src/config.ts';
 import { ReplyContextStore } from '../src/reply-context-store.ts';
 import {
+  ChannelModelSelectionBackendError,
   ChannelModelSelectionController,
   type ChannelHostApiProxy,
 } from '../src/model-selection.ts';
+import { SESSION_BINDING_SCHEMA_VERSION } from '../src/session-router.ts';
 import type { ChannelWorkspaceResolver } from '../src/workspace-resolver.ts';
 
 const defaultRoute: AgentRouteSpec = { preset: 'default' };
@@ -142,6 +144,10 @@ class ModelGateway implements AgentGateway {
   disposed: string[] = [];
   followups: { sessionId: string; message: unknown }[] = [];
   agents = new Map<string, ModelFakeAgent>();
+  /** Per-session logged `request/header` configs (resume-restored selections). */
+  requestHeaders = new Map<string, { provider: string; model: string; reasoningEffort?: string }>();
+  /** Ordering instrumentation: invoked when the bridge drives a followup. */
+  followupHook?: () => void;
 
   constructor(private readonly rootCtx: Context) {}
 
@@ -156,6 +162,10 @@ class ModelGateway implements AgentGateway {
   async create(sessionId: string, route: AgentRouteSpec, setup?: Parameters<AgentGateway['create']>[2]) {
     this.createCalls.push(sessionId);
     const agent = fakeScopedAgent(this.rootCtx, sessionId);
+    const header = this.requestHeaders.get(sessionId);
+    if (header) {
+      agent.session.requestHeader = () => ({ config: header });
+    }
     if (setup) {
       const commit = await setup(agent.ctx);
       commit?.commit();
@@ -164,7 +174,10 @@ class ModelGateway implements AgentGateway {
     const handle: GatewayAgentHandle = {
       id: sessionId,
       agent: agent as never,
-      followup: (message) => { this.followups.push({ sessionId, message }); },
+      followup: (message) => {
+        this.followupHook?.();
+        this.followups.push({ sessionId, message });
+      },
       whenIdle: async () => {},
       dispose: async () => {
         if (!this.disposed.includes(sessionId)) this.disposed.push(sessionId);
@@ -283,17 +296,42 @@ function requestWaterfall(
 
 /**
  * Realistic Web Host shim: replicates the official dsh-host-apiproxy
- * selectionFor - a WeakMap<Agent, ref> whose ref is coupled to the agent
- * scope via installModelSelection on first RPC access - plus the official
- * session.selectModel semantics (sets selectionFor(agent).current AND saves
- * the shared default) and session.models (returns the host's current).
+ * `selectionFor` — a WeakMap<Agent, ref> whose ref is coupled to the agent
+ * scope via `installModelSelection` on first access — with the official
+ * reading precedence (picked → logged request/header → live default), the
+ * official `session.selectModel` semantics (sets `selectionFor(agent).current`
+ * AND saves the shared default) and `session.models` (returns the host's
+ * current; always resolvable while an agent exists, exactly like the official
+ * getter chain).
  */
-function makeHostApiProxy(agents: Map<string, ModelFakeAgent>, saveSelection: (selection: ModelSelection) => Promise<void> | void) {
+function makeHostApiProxy(
+  agents: Map<string, ModelFakeAgent>,
+  saveSelection: (selection: ModelSelection) => Promise<void> | void,
+  defaultSelection: () => ModelSelection | undefined,
+) {
   const selections = new WeakMap<object, { current: ModelSelection | undefined; assembled: ModelSelection | undefined }>();
   function selectionFor(agent: ModelFakeAgent) {
     let ref = selections.get(agent);
     if (ref) return ref;
-    ref = { current: undefined, assembled: undefined };
+    let picked: ModelSelection | undefined;
+    ref = {
+      get current() {
+        if (picked !== undefined) return picked;
+        const logged = agent.session.requestHeader?.()?.config;
+        if (logged?.provider && logged.model) {
+          return {
+            provider: logged.provider,
+            model: logged.model,
+            ...(logged.reasoningEffort ? { reasoningEffort: logged.reasoningEffort } : {}),
+          };
+        }
+        return defaultSelection();
+      },
+      set current(next) {
+        picked = next;
+      },
+      assembled: undefined,
+    };
     installModelSelection(agent.ctx, ref);
     selections.set(agent, ref);
     return ref;
@@ -451,9 +489,15 @@ describe('/model (spec §46)', () => {
   it('routes the switch through the host session.selectModel RPC when an apiProxy is mounted (host mode)', async () => {
     const rootCtx = new Context();
     new CommandRuntime(rootCtx);
-    const selectModel = vi.fn(async () => ({ result: { ok: true } }));
+    const selectModel = vi.fn(async () => ({
+      result: { ok: true, value: { selected: { provider: 'openai', model: 'gpt-5.6' } } },
+    }));
+    // prepare() needs the host models RPC (the same one /model reads through).
+    const models = vi.fn(async () => ({
+      result: { ok: true, value: { current: { provider: 'openai', model: 'gpt-5.6' } } },
+    }));
     const saveSelection = vi.fn(async () => {});
-    rootCtx.provide('apiProxy', { sessions: { selectModel } });
+    rootCtx.provide('apiProxy', { sessions: { selectModel, models } });
     rootCtx.provide('agentDefaultModel', {
       currentSelection: () => ({ provider: 'openai', model: 'gpt-5.6' }),
       saveSelection,
@@ -480,6 +524,9 @@ describe('/model (spec §46)', () => {
       sessions: {
         selectModel: vi.fn(async () => ({
           result: { ok: false, error: { code: 'model-unavailable', message: 'no adapter serves provider "bogus"' } },
+        })),
+        models: vi.fn(async () => ({
+          result: { ok: true, value: { current: { provider: 'openai', model: 'gpt-5.6' } } },
         })),
       },
     });
@@ -527,7 +574,7 @@ describe('model-selection ownership: exactly ONE backend per agent (spec §18-§
     const saveSelection = vi.fn(async () => {});
     withLlm(rootCtx, { openai: { models: [{ id: 'gpt-5.6', name: 'GPT 5.6' }] } });
     const { gateway, bridge, adapter, modelSelection } = makeBridge(rootCtx, new ChannelModelSelectionController(rootCtx));
-    const host = makeHostApiProxy(gateway.agents, saveSelection);
+    const host = makeHostApiProxy(gateway.agents, saveSelection, () => ({ provider: 'openai', model: 'gpt-5.6' }));
     rootCtx.provide('apiProxy', host.apiProxy);
     rootCtx.provide('agentDefaultModel', {
       currentSelection: () => ({ provider: 'openai', model: 'gpt-5.6' }),
@@ -575,17 +622,216 @@ describe('model-selection ownership: exactly ONE backend per agent (spec §18-§
     expect(lastSent(adapter)).toContain('Model: claude-4.7');
   });
 
-  it('host mode: install() is a no-op until the host touches the agent', async () => {
+  it('host mode: install() pins the host owner and installs NO local waterfall', async () => {
     const rootCtx = new Context();
     rootCtx.provide('apiProxy', { sessions: {} });
     const controller = new ChannelModelSelectionController(rootCtx);
-    const agent = fakeScopedAgent(rootCtx, 's-host-noop');
+    const agent = fakeScopedAgent(rootCtx, 's-host-pin');
     controller.install(agent.ctx);
-    // No local hook installed: a real assemble passes through untouched.
+    // The pin is recorded (host mode) but no local hook is installed: a real
+    // assemble passes through untouched.
     const assembled = await assembleWaterfall(agent);
     expect(assembled.variables.provider).toBeUndefined();
     const config = await requestWaterfall(agent);
     expect(config).toEqual({ provider: 'base-prov', model: 'base-model' });
+  });
+
+  it('host mode: prepare() forces the official Host selectionFor BEFORE the first plain-text followup', async () => {
+    const rootCtx = new Context();
+    new CommandRuntime(rootCtx);
+    const saveSelection = vi.fn(async () => {});
+    withLlm(rootCtx, { openai: { models: [{ id: 'gpt-5.6', name: 'GPT 5.6' }] } });
+    const { gateway, bridge, modelSelection } = makeBridge(rootCtx, new ChannelModelSelectionController(rootCtx));
+    const host = makeHostApiProxy(gateway.agents, saveSelection, () => ({ provider: 'openai', model: 'gpt-5.6' }));
+    rootCtx.provide('apiProxy', host.apiProxy);
+    rootCtx.provide('agentDefaultModel', {
+      currentSelection: () => ({ provider: 'openai', model: 'gpt-5.6' }),
+      saveSelection,
+    });
+
+    // Ordering instrumentation: the host models RPC (prepare) must happen
+    // BEFORE the bridge drives the followup — the first turn's request must
+    // already route through the Host's ModelSelection.
+    const followupSeen = vi.fn();
+    gateway.followupHook = followupSeen;
+
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
+    const agent = gateway.agents.get(gateway.createCalls[0]!)!;
+
+    // prepare() fired the models RPC once, strictly before the followup.
+    expect(host.models).toHaveBeenCalledTimes(1);
+    expect(host.models.mock.invocationCallOrder[0]).toBeLessThan(followupSeen.mock.invocationCallOrder[0]);
+    // The official selectionFor is now installed on the agent: the first
+    // request routes the host's current (picked -> header -> default).
+    const assembled = await assembleWaterfall(agent);
+    expect(assembled.variables).toMatchObject({ provider: 'openai', model: 'gpt-5.6' });
+    const config = await requestWaterfall(agent);
+    expect(config).toEqual({ provider: 'openai', model: 'gpt-5.6' });
+
+    // prepare() is idempotent: the next message does NOT re-fire the RPC.
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', 'hello again')));
+    expect(host.models).toHaveBeenCalledTimes(1);
+    expect(modelSelection.mode).toBe('host');
+  });
+
+  it('host mode: resume with a logged header A and global default B keeps A on the first channel message', async () => {
+    const rootCtx = new Context();
+    new CommandRuntime(rootCtx);
+    const saveSelection = vi.fn(async () => {});
+    withLlm(rootCtx, { openai: { models: [{ id: 'gpt-5.6', name: 'GPT 5.6' }] } });
+    const { gateway, bridge, modelSelection, bindingStore } = makeBridge(rootCtx, new ChannelModelSelectionController(rootCtx));
+    // Session history says A; the shared default is B.
+    gateway.canResumeValue = true;
+    gateway.existsValue = true;
+    gateway.requestHeaders.set('s-resume', { provider: 'provA', model: 'modelA' });
+    const host = makeHostApiProxy(gateway.agents, saveSelection, () => ({ provider: 'provB', model: 'modelB' }));
+    rootCtx.provide('apiProxy', host.apiProxy);
+    rootCtx.provide('agentDefaultModel', {
+      currentSelection: () => ({ provider: 'provB', model: 'modelB' }),
+      saveSelection,
+    });
+    await bindingStore.put({
+      channelId: 'weixin',
+      accountId: 'main',
+      conversationId: 'user_123',
+      conversationType: 'dm',
+      sessionId: 's-resume',
+      route: defaultRoute,
+      schemaVersion: SESSION_BINDING_SCHEMA_VERSION,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    // First channel message after the restart: prepare() forces the host
+    // selectionFor BEFORE the followup, so the logged header (A) wins over
+    // the global default (B) — never the route/default fallback.
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
+    expect(gateway.createCalls).toContain('s-resume');
+    const agent = gateway.agents.get('s-resume')!;
+    expect(host.models).toHaveBeenCalledTimes(1);
+    expect(host.selectionFor(agent).current).toEqual({ provider: 'provA', model: 'modelA' });
+    expect(await modelSelection.current(agent as never)).toEqual({ provider: 'provA', model: 'modelA' });
+    // The first request config routes A through the Host waterfall.
+    await assembleWaterfall(agent);
+    const config = await requestWaterfall(agent);
+    expect(config).toEqual({ provider: 'provA', model: 'modelA' });
+  });
+
+  it('host mode: a host-owned agent fails loud when the Host backend disappears (no silent local downgrade)', async () => {
+    const rootCtx = new Context();
+    const saveSelection = vi.fn(async () => {});
+    const agent = fakeScopedAgent(rootCtx, 's-host-gone');
+    const host = makeHostApiProxy(new Map([['s-host-gone', agent]]), saveSelection, () => undefined);
+    const disposeHost = rootCtx.provide('apiProxy', host.apiProxy);
+    const controller = new ChannelModelSelectionController(rootCtx);
+    controller.install(agent.ctx);
+
+    // While the Host is mounted the pinned owner works.
+    await controller.select(agent as never, { provider: 'p', model: 'm' });
+    expect(host.selectModel).toHaveBeenCalled();
+
+    // The Host unmounts (apiProxy fiber disposed).
+    await disposeHost();
+    await expect(controller.select(agent as never, { provider: 'p2', model: 'm2' })).rejects.toThrow(
+      ChannelModelSelectionBackendError,
+    );
+    await expect(controller.current(agent as never)).rejects.toThrow(ChannelModelSelectionBackendError);
+    // The agent never silently fell back to a local owner: the mode getter is
+    // deployment-wide, but the AGENT's own owner is still the (gone) Host.
+    expect(controller.mode).toBe('local');
+  });
+
+  it('host mode: a replaced Host apiProxy is also a failed backend (identity pinned)', async () => {
+    const rootCtx = new Context();
+    const saveSelection = vi.fn(async () => {});
+    const host = makeHostApiProxy(new Map(), saveSelection, () => undefined);
+    const disposeHost = rootCtx.provide('apiProxy', host.apiProxy);
+    const controller = new ChannelModelSelectionController(rootCtx);
+    const agent = fakeScopedAgent(rootCtx, 's-host-replaced');
+    controller.install(agent.ctx);
+    expect(controller.mode).toBe('host');
+
+    // Host reload (HMR): the OLD apiProxy goes away, a NEW one mounts.
+    await disposeHost();
+    const host2 = makeHostApiProxy(new Map(), saveSelection, () => undefined);
+    rootCtx.provide('apiProxy', host2.apiProxy);
+    // The agent was pinned against the OLD identity — the new Host must not
+    // be half-adopted (it would install a second waterfall on a live agent).
+    await expect(controller.select(agent as never, { provider: 'p', model: 'm' })).rejects.toThrow(
+      ChannelModelSelectionBackendError,
+    );
+    expect(host2.selectModel).not.toHaveBeenCalled();
+    await expect(controller.prepare(agent as never)).rejects.toThrow(ChannelModelSelectionBackendError);
+  });
+
+  it('local mode: a local-owned agent NEVER auto-upgrades when a Host mounts later (no second owner)', async () => {
+    const rootCtx = new Context();
+    new CommandRuntime(rootCtx);
+    withLlm(rootCtx, { openai: { models: [{ id: 'gpt-5.6', name: 'GPT 5.6' }] } });
+    const saveSelection = vi.fn(async () => {});
+    const controller = new ChannelModelSelectionController(rootCtx);
+    const agent = fakeScopedAgent(rootCtx, 's-local-stays');
+    controller.install(agent.ctx); // pinned LOCAL (no Host yet)
+    expect(controller.mode).toBe('local');
+
+    // The Web Host mounts LATER (startup ordering / HMR).
+    const host = makeHostApiProxy(new Map(), saveSelection, () => ({ provider: 'def', model: 'def-model' }));
+    rootCtx.provide('apiProxy', host.apiProxy);
+    expect(controller.mode).toBe('host'); // deployment-wide mode changed...
+
+    // ...but the AGENT keeps its local owner: the switch never reaches the
+    // Host RPC and no host waterfall is installed on this agent.
+    await controller.select(agent as never, { provider: 'local-p', model: 'local-m' });
+    expect(host.selectModel).not.toHaveBeenCalled();
+    expect(await controller.current(agent as never)).toEqual({ provider: 'local-p', model: 'local-m' });
+    await assembleWaterfall(agent);
+    const config = await requestWaterfall(agent);
+    expect(config).toEqual({ provider: 'local-p', model: 'local-m' });
+  });
+
+  it('install() returns a disposer that unpins the agent and removes the local waterfall', async () => {
+    const rootCtx = new Context();
+    const controller = new ChannelModelSelectionController(rootCtx);
+    const agent = fakeScopedAgent(rootCtx, 's-disposer');
+    const dispose = controller.install(agent.ctx);
+
+    await controller.select(agent as never, { provider: 'p', model: 'm' });
+    await assembleWaterfall(agent);
+    expect(await requestWaterfall(agent)).toEqual({ provider: 'p', model: 'm' });
+
+    // Disposal removes the two official waterfall listeners (a reloading
+    // bridge must release borrowed agents' hooks without disposing the agent).
+    dispose();
+    await assembleWaterfall(agent);
+    expect(await requestWaterfall(agent)).toEqual({ provider: 'base-prov', model: 'base-model' });
+
+    // A re-install (fresh bridge generation) re-pins cleanly and can be
+    // disposed again — no listener stacking.
+    const dispose2 = controller.install(agent.ctx);
+    await controller.select(agent as never, { provider: 'p2', model: 'm2' });
+    await assembleWaterfall(agent);
+    expect(await requestWaterfall(agent)).toEqual({ provider: 'p2', model: 'm2' });
+    dispose2();
+    await assembleWaterfall(agent);
+    expect(await requestWaterfall(agent)).toEqual({ provider: 'base-prov', model: 'base-model' });
+  });
+
+  it('bridge teardown disposes model-selection setups, including borrowed agents', async () => {
+    const rootCtx = new Context();
+    new CommandRuntime(rootCtx);
+    withLlm(rootCtx, { openai: { models: [{ id: 'gpt-5.6', name: 'GPT 5.6' }] } });
+    const { gateway, bridge } = makeBridge(rootCtx, new ChannelModelSelectionController(rootCtx));
+
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', '/model openai gpt-5.6')));
+    const agent = gateway.agents.get(gateway.createCalls[0]!)!;
+    await assembleWaterfall(agent);
+    expect(await requestWaterfall(agent)).toEqual({ provider: 'openai', model: 'gpt-5.6' });
+
+    // Bridge HMR: setup teardown removes the channel's model-selection
+    // waterfall from the (borrowed / never-disposed) agent.
+    await bridge.disposeCommandSetups();
+    await assembleWaterfall(agent);
+    expect(await requestWaterfall(agent)).toEqual({ provider: 'base-prov', model: 'base-model' });
   });
 });
 

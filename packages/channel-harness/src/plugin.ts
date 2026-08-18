@@ -3,10 +3,11 @@
  *
  * The plugin injects `channels` (ChannelService), `agents` (AgentRegistry),
  * `agentDefaultModel`, `llm`, and `commands` (CommandRuntime). `sessionPersistence` is
- * NOT required: it is an optional capability resolved at the use site and
- * passed into the gateway, so `canResume()` reflects whether the service is
- * present. `commands` is a required capability (no optional fallback) so the
- * bridge can install Agent-scoped channel commands.
+ * NOT required: it is an optional capability resolved LIVE at the use site
+ * (a resolver passed into the gateway), so `canResume()` reflects whether the
+ * service is present at probe time — including mounts/unmounts after startup.
+ * `commands` is a required capability (no optional fallback) so the bridge can
+ * install Agent-scoped channel commands.
  *
  * The whole bridge lifecycle is registered as one `ctx.effect` whose disposer
  * is the teardown chain from `startBridge`.
@@ -25,9 +26,11 @@ export const inject: string[] = ['channels', 'agents', 'agentDefaultModel', 'llm
 
 export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => {
-    // Optional service resolved at the use site (never required).
-    const persistence = ctx.get('sessionPersistence');
-    const lifecycle = startBridge(ctx, config, persistence);
+    // Optional service resolved LIVE at the use site (never required): the
+    // resolver is re-queried on every probe, so a sessionPersistence mounted,
+    // unmounted, or replaced AFTER the bridge started is observed on the next
+    // `canResume()` / existence probe (no startup snapshot).
+    const lifecycle = startBridge(ctx, config, () => ctx.get('sessionPersistence'));
     return () => lifecycle.dispose();
   });
 }

@@ -46,6 +46,15 @@ export class ChannelImageUnsupportedError extends Error {
  *   block is replaced by `[图片：当前模型不支持查看]` only in the provider-visible
  *   request.
  * - `reject`: the request is refused with a {@link ChannelImageUnsupportedError}.
+ *
+ * NOTE (ADR 0003): this `llm/stream` rewrite is the LEGACY seam. It rewrites
+ * model-visible content that the durable Session log cannot reconstruct
+ * (placeholder text never enters the log, and the copied request escapes the
+ * official agent-loop reconstruction invariant by object identity). The
+ * target implementation is an agent-scoped `agent/pre-step` surface replace
+ * (ADR 0003) where the rewritten messages ARE the logged `user/message`
+ * events. Keep this listener operational until the migration lands; do not
+ * extend it.
  */
 export function installImageModelFallback(
   ctx: Context,

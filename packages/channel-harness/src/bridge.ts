@@ -156,6 +156,8 @@ export class ChannelWorkspaceAttachError extends Error {
 export class ChannelHarnessBridge {
   private readonly sessionFactory: ChannelSessionFactory;
   private readonly commandDisposers = new Set<ChannelCommandDisposer>();
+  /** Per-agent model-selection pins (official waterfall listeners, local mode). */
+  private readonly modelSelectionDisposers = new Set<() => void>();
   private commandSetupsDisposed = false;
   /** Per-agent model selection (created by default when none is supplied). */
   private readonly modelSelection: ChannelModelSelectionController;
@@ -306,14 +308,19 @@ export class ChannelHarnessBridge {
   // bridge instance.
   private commandSetup = async (agentCtx: Context): Promise<void> => {
     const disposeCommands = await installChannelCommands(agentCtx, this.commandDeps);
+    // Model selection: pin ONE backend per agent and (local mode) couple one
+    // mutable ref to prompt assembly + request routing for this agent scope
+    // (spec §18/§22). The returned disposer removes the pin AND the two
+    // waterfall listeners — required for borrowed agents (never disposed) so
+    // a reloading bridge cannot leave stale listeners behind.
+    const disposeModelSelection = this.modelSelection.install(agentCtx);
     if (this.commandSetupsDisposed) {
       await disposeCommands();
+      disposeModelSelection();
       throw new Error('channel-harness command setup continued after bridge disposal');
     }
     this.commandDisposers.add(disposeCommands);
-    // Model selection: couple one mutable ref to prompt assembly + request
-    // routing for this agent scope (spec §18/§22).
-    this.modelSelection.install(agentCtx);
+    this.modelSelectionDisposers.add(disposeModelSelection);
     // M4: Agent-scoped read_channel_attachment tool. Registered on the agent's
     // own scope so it is disposed with the agent. Best-effort: a tool-install
     // failure must never roll back the agent setup.
@@ -335,12 +342,21 @@ export class ChannelHarnessBridge {
     }
   };
 
-  /** Release this bridge's Agent-scoped command registrations. */
+  /** Release this bridge's Agent-scoped command + model-selection registrations. */
   async disposeCommandSetups(): Promise<void> {
     this.commandSetupsDisposed = true;
-    const disposers = [...this.commandDisposers];
+    const commandDisposers = [...this.commandDisposers];
     this.commandDisposers.clear();
-    await Promise.all(disposers.map((dispose) => dispose()));
+    const modelSelectionDisposers = [...this.modelSelectionDisposers];
+    this.modelSelectionDisposers.clear();
+    // Model-selection disposers unpin agents and (local mode) remove the two
+    // official waterfall listeners — a reloading bridge must release these
+    // BEFORE a replacement bridge can borrow the same live agents, or the
+    // channel hook would stack listeners on borrowed (never-disposed) agents.
+    await Promise.all([
+      ...commandDisposers.map((dispose) => dispose()),
+      ...modelSelectionDisposers.map((dispose) => Promise.resolve(dispose())),
+    ]);
   }
 
   private conversationKey(event: MessageReceived): string {
@@ -369,14 +385,16 @@ export class ChannelHarnessBridge {
    * Whether the durable session behind an existing binding is MISSING — the
    * stale condition behind both the EXPLICIT stale-binding repair (/new) and
    * the loud SessionNotFoundError for every other request. A live agent is
-   * never stale (live-first: no persistence probe), and without
+   * never stale (live-first: no persistence probe), and without a mounted
    * sessionPersistence there is no durable identity to lose (ephemeral
-   * deployments recreate instead).
+   * deployments recreate instead). One ATOMIC probe decides all three cases
+   * (live capability resolved once — no canResume/exists TOCTOU across a
+   * persistence HMR).
    */
   private async isDurableSessionMissing(binding: SessionBinding): Promise<boolean> {
     if (this.options.agentManager.getLiveAgent(binding.sessionId)) return false;
-    if (!this.options.agentManager.canResume()) return false;
-    return !(await this.options.agentManager.exists(binding.sessionId));
+    const probe = await this.options.agentManager.probePersisted(binding.sessionId);
+    return probe === 'missing';
   }
 
   /**
@@ -485,12 +503,13 @@ export class ChannelHarnessBridge {
       //   ① a LIVE agent is borrowed FIRST — persistence is never scanned for
       //      an agent already live in this process (with thousands of sessions
       //      the per-inbound persistence scan would dominate);
-      //   ② no sessionPersistence -> explicit EPHEMERAL semantics: recreate via
-      //      the Session factory (workspace-aware, binding kept) is allowed;
-      //   ③ persistence + membership hit -> resume;
-      //   ④ persistence + membership MISS -> a durable binding pointing at a
-      //      vanished persisted session is a durability inconsistency, not a
-      //      first create: fail loud with session-not-found — NEVER silently
+      //   ② one ATOMIC probe decides the rest — no sessionPersistence mounted
+      //      right now -> explicit EPHEMERAL semantics: recreate via the
+      //      Session factory (workspace-aware, binding kept) is allowed;
+      //   ③ membership hit -> resume;
+      //   ④ membership MISS -> a durable binding pointing at a vanished
+      //      persisted session is a durability inconsistency, not a first
+      //      create: fail loud with session-not-found — NEVER silently
       //      blank-recreate the same session id.
       const borrowed = await this.options.agentManager.borrowIfLive(
         binding.sessionId,
@@ -499,17 +518,31 @@ export class ChannelHarnessBridge {
       );
       if (borrowed) {
         agentRef = borrowed;
-      } else if (!this.options.agentManager.canResume()) {
-        const recreated = await this.sessionFactory.recreate(binding, route);
-        binding = recreated.binding;
-        agentRef = recreated.agentRef;
-      } else if (await this.options.agentManager.exists(binding.sessionId)) {
-        agentRef = await this.options.agentManager.resolve(binding.sessionId, route, this.commandSetup);
       } else {
-        throw new SessionNotFoundError(binding.sessionId, key);
+        const probe = await this.options.agentManager.probePersisted(binding.sessionId);
+        if (probe === 'unavailable') {
+          const recreated = await this.sessionFactory.recreate(binding, route);
+          binding = recreated.binding;
+          agentRef = recreated.agentRef;
+        } else if (probe === 'present') {
+          agentRef = await this.options.agentManager.resolve(binding.sessionId, route, this.commandSetup);
+        } else {
+          throw new SessionNotFoundError(binding.sessionId, key);
+        }
       }
       this.options.agentManager.registerBinding(binding);
     }
+
+    // --- ModelSelection drive-time readiness ----------------------------------
+    // AFTER create/resume/borrow resolved, BEFORE any command execution or
+    // followup: host mode forces the official Host `selectionFor` install on
+    // this agent via ONE `session.models` RPC (pre-publication parity), so a
+    // fresh/resumed/borrowed session's FIRST request already routes through
+    // the Host's ModelSelection — including a plain-text first message that
+    // never touches any other `session.*` RPC. Local mode is a no-op. A
+    // failed prepare fails the message loudly: the agent is never driven
+    // without an owning ModelSelection backend.
+    await this.modelSelection.prepare(agentRef!.agent);
 
     // --- Command admission (spec §12) ----------------------------------------
     // Registered commands run on the Human Command Plane; UNREGISTERED slash
