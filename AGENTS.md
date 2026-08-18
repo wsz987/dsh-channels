@@ -121,6 +121,13 @@ DeepSeek Harness 官方文档站点（**优先查这里**）：
 - 新增或更名 logger namespace 时，必须同步更新 `packages/channel-harness/src/debug-logger.ts` 的 `DSH_CHANNELS_DEBUG=1` exporter 白名单，并添加回归测试；否则 `pnpm web:debug` 中不会显示该渠道日志。
 - `localDataBytes` 缺失时，模型侧出现 `[image]` / `[file]` 属于媒体未完成 hydration 或附件保存失败，先根据上述摘要定位，不得用增加文本占位符掩盖失败。
 
+### 5.2.2 命令面与作用域上下文（易错点）
+
+命令 handler **禁止**从 `invocation.agent.ctx` 读 Harness 服务（`commands` / `llm`，会抛
+`cannot get property "X" without inject`）；服务访问一律走 `deps` 窄能力注入（`/new` 模式）
+或 `ctx.get()` 探测。完整规范、示例与测试写法见
+[`docs/architecture/common-design.md`「命令面：服务访问规范」](docs/architecture/common-design.md#command-plane-service-access)。
+
 ### 5.3 验证与提交
 
 - 适配器必须过 `runChannelAdapterContract` + `pnpm verify <adapter> --test`。

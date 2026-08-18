@@ -19,6 +19,7 @@ import {
   type AgentHandle,
   type AgentOptions,
   type CreateAgentOptions,
+  type ModelSelection,
   type ResumeAgentOptions,
 } from '@deepseek-ai/dsh-agent';
 import { KNOWN_SESSION_EVENT_TYPES, SessionId } from '@deepseek-ai/dsh-session';
@@ -27,7 +28,6 @@ import {
   resolveRoute,
   type AgentGateway,
   type AgentRouteSpec,
-  type DefaultModelSelection,
   type GatewayAgentHandle,
 } from '../src/agent-manager.ts';
 import type { AgentRouteSpec as RouteSpec } from '../src/agent-router.ts';
@@ -234,7 +234,7 @@ describe('Harness compatibility (pinned rc.6 contract)', () => {
 });
 
 describe('resolveRoute (Harness default-model fallback)', () => {
-  const fallback: DefaultModelSelection = { provider: 'deepseek', model: 'deepseek-chat' };
+  const fallback: ModelSelection = { provider: 'deepseek', model: 'deepseek-chat' };
 
   it('keeps an explicit provider+model route', () => {
     const explicit = { provider: 'openai', model: 'gpt-5' };

@@ -864,7 +864,7 @@ Harness latest-compatible
 ```json
 {
   "name": "@wsz987/dsh-channels",
-  "version": "0.9.0",
+  "version": "0.4.0",
   "type": "module",
   "exports": {
     ".": "./lib/index.js",
@@ -1064,8 +1064,41 @@ PDF 解析使用 `unpdf`（PDF.js），DOCX 使用 `mammoth`，XLSX 使用 `xlsx
   Harness 工具支持主动文本/媒体外发，能力由 `outbox/capabilities` 按渠道协商
   （飞书 / QQ 全量，钉钉仅 SDK 模式，微信按上游能力暴露）。
 - **命令面**（`channel-harness/src/commands/`）：以官方 `@deepseek-ai/dsh-commands`
-  格式注册斜杠指令（当前 `/new`），`commandFactories` 是唯一注册点，随 Agent 自动
-  注册，未注册指令会被拦截。
+  格式注册斜杠指令（`/stop` `/new` `/help` `/status` `/models` `/model`），`commandFactories`
+  是唯一注册点，随 Agent 自动注册。`/stop` 由 Bridge Fast Path 调度（立即终止、不等渠道
+  排队消息），并配合 per-conversation generation barrier 与 stop barrier 覆盖 `/new` 竞态；
+  `/model` 通过官方 `installModelSelection` 切换模型，绝不改写 `binding.route`。
+  **未注册的斜杠指令不再被拦截**：`commands.execute()` 对未知指令返回 `undefined`，
+  渠道回退为普通用户输入交给模型；Agent scope 会 shadow 同名 global（同 scope 重名注册直接报错）。
 - **通用控制面 + Web 设置**（`channel-control` + `channel-web`，见上文「通用 Channel
   Control Plane」）：扫码 / 设备授权 / 凭证表单统一为 `AuthSession` 模型，浏览器只
   消费净化的 `PublicAuthSession`，Secret 永不离开进程。
+
+#### 命令面：服务访问规范（易错点）{#command-plane-service-access}
+
+核心：`invocation.agent.ctx` 是 agent-loop 的作用域 ctx，**只用于注册 agent-local 贡献**
+（`agentCtx.inject(['commands'], …)` 注册命令 / tools / prompt 片段，随 agent 生命周期回收），
+**不是读 Harness 服务的入口**。
+
+- **命令 handler 禁止 `invocation.agent.ctx.X` 读服务**（`commands` / `llm` 等）：agent-loop 作用域
+  未注入这些服务，Cordis 属性访问直接抛 `cannot get property "X" without inject`（官方
+  `CommandInvocation` 只有 `{ commandId, agent, rawInput, signal }`，没有 ctx）。要访问服务走
+  `deps` 窄能力注入（同 `/new` 的 `deps.startNewSession` 模式）：`startNewSession` / `modelSelection`
+  / `listCommands` / `findCommand` / `llm`，bridge 在构造时从插件 ctx 惰性桥接。示例：
+  `packages/channel-harness/src/commands/help.ts`、`src/commands/model.ts`、`src/bridge.ts` 的
+  `commandDeps` 归一化。
+- **插件 ctx（`options.ctx`）属性访问服务合法**：channel-harness 的 `inject` 列表已声明
+  `commands` / `llm` / `agentDefaultModel`，所以 bridge 里 `options.ctx.commands.…` 可用；但
+  **未经注入的作用域**（agent.ctx）属性访问会抛 without inject。
+- **`ctx.get(name)` 是官方探测 API**：直接查根 store、任何作用域（含 agent.ctx）都安全、未提供
+  返回 `undefined`。可选 seam（`sessionPersistence` / `attachments` / `channelFiles` /
+  `agentDefaultModel`）一律用 `get`；`agentDefaultModel` 使用官方
+  `@deepseek-ai/dsh-agent-default-model` 的 `AgentDefaultModelConfig` 类型（禁止本地结构体 port）。
+- **模型切换只用官方机制**：`installModelSelection(agentCtx, ref)`，`ModelSelectionRef{current, assembled}`
+  由入口点自持；`/model` 绝不改写 `binding.route`；读取优先级 picked →
+  `session.requestHeader()?.config` → `agent.options` → `agentDefaultModel`。
+- **测试易错**：fake agent 用 `createScope(rootCtx, agent)` 会继承根服务、掩盖真实环境 agent
+  作用域未注入的差异；凡 handler 读服务的用例，用无注入的裸 `new Context()` 替换 fake `agent.ctx`
+  模拟真实环境，并（改代码前）断言旧写法确实失败。参考
+  `packages/channel-harness/test/commands-help-status-models.test.ts` 的「real-env agent scoped
+  context」用例。

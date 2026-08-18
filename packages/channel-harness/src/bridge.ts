@@ -1,30 +1,41 @@
 /**
  * ChannelHarnessBridge — the inbound half: `ChannelEvent` -> session binding
  * -> agent resolution -> command plane / `agent.followup` (doc H0.3–H0.7,
- * command plane plan §8–§20).
+ * command plane spec §2–§12, §36).
  *
  * Only `message.received` is handled in v1; every other event type is logged
  * at debug level. Conversations are isolated by their canonical key
  * (channel:account:conversation[:thread]), never by account alone.
  *
- * Two input planes (§30): a **human command plane** (official
+ * Two input planes: a **human command plane** (official
  * `@deepseek-ai/dsh-commands` `parseCommand`/`commands.execute`) and a
  * **model message plane** (`agent.followup`). A syntactically valid command
  * is resolved through the official registry and its `CommandResult` is
  * rendered directly to the channel — it is never sent to the model and never
- * creates `assistant/message` (`ReplyRouter` is bypassed). Ordinary text
- * keeps the unchanged followup path.
+ * creates `assistant/message` (`ReplyRouter` is bypassed). An UNREGISTERED
+ * slash command is no longer intercepted: it falls through to the model as
+ * ordinary user input (spec §12), because `commands.execute` returns
+ * `undefined` for admission misses.
  *
- * Per-conversation serialization (§18): all `message.received` handling for
- * one canonical key runs through a lightweight per-key promise chain so a
- * `/new` fully completes (Binding → B) before the next message on the SAME
+ * Per-conversation serialization: all `message.received` handling for one
+ * canonical key runs through a lightweight per-key promise chain so a `/new`
+ * fully completes (Binding → B) before the next message on the SAME
  * conversation starts, while different conversations run in parallel. Errors
  * are caught + logged and never poison the chain.
+ *
+ * `/stop` is the one scheduling exception (spec §4–§10): its COMMAND
+ * semantics belong to the registry (see commands/stop.ts), but its SCHEDULING
+ * is a FAST PATH executed outside the serial chain — it bumps the
+ * per-conversation generation first (invalidating every stale queued message),
+ * cancels the live agent, acknowledges immediately (never waiting for
+ * `whenIdle`), and enqueues an internal stop barrier that re-cancels the
+ * LATEST binding's agent after prior chain work converges (covering the /new
+ * race).
  */
 import { randomUUID } from 'node:crypto';
 import { type Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
-import { parseCommand, type CommandResult } from '@deepseek-ai/dsh-commands';
+import { parseCommand, type CommandResult, type ParsedCommand } from '@deepseek-ai/dsh-commands';
 import type {
   ChannelAdapter,
   ChannelLogger,
@@ -59,6 +70,7 @@ import {
   type ChannelCommandDisposer,
   type ChannelCommandDependencies,
 } from './commands/index.js';
+import { ChannelModelSelectionManager } from './model-selection.js';
 import { toLoggableError } from './loggable-error.js';
 import { ChannelSessionFactory } from './channel-session-factory.js';
 
@@ -76,19 +88,30 @@ export interface ChannelHarnessBridgeOptions {
   fileProvider?: ChannelFileProvider;
   /**
    * The Cordis context on which the official `commands` registry is mounted.
-   * `ctx.commands.execute` is the official command dispatcher (plan §8).
+   * `ctx.commands.execute` is the official command dispatcher.
    */
   ctx: Context;
-  /** Bridge hook the channel commands need (the one-capability `startNewSession`). */
-  commandDeps: ChannelCommandDependencies;
+  /**
+   * Bridge hook the channel commands need (`startNewSession` + optional
+   * model-selection manager; absent -> the bridge owns a default instance).
+   */
+  commandDeps: Omit<
+    ChannelCommandDependencies,
+    'modelSelection' | 'listCommands' | 'findCommand' | 'llm'
+  > & {
+    modelSelection?: ChannelModelSelectionManager;
+    listCommands?: ChannelCommandDependencies['listCommands'];
+    findCommand?: ChannelCommandDependencies['findCommand'];
+    llm?: ChannelCommandDependencies['llm'];
+  };
   /**
    * Resolves a channel conversation to a Session working directory and (when
-   * applicable) a Harness `WorkspaceRegistry` member (plan §6 / §9 / M3).
+   * applicable) a Harness `WorkspaceRegistry` member.
    */
   workspaceResolver: ChannelWorkspaceResolver;
   /**
-   * Optional durable outbox (plan M6 / §60-§71 / §95). Presence enables the
-   * Model-facing `send_channel_message` tool. Absent -> no proactive send tool.
+   * Optional durable outbox. Presence enables the Model-facing
+   * `send_channel_message` tool. Absent -> no proactive send tool.
    */
   outbox?: ChannelOutboxService;
 }
@@ -130,8 +153,36 @@ export class ChannelHarnessBridge {
   private readonly sessionFactory: ChannelSessionFactory;
   private readonly commandDisposers = new Set<ChannelCommandDisposer>();
   private commandSetupsDisposed = false;
+  /** Per-agent model selection (created by default when none is supplied). */
+  private readonly modelSelection: ChannelModelSelectionManager;
+  /** Normalized command deps handed to every agent setup. */
+  private readonly commandDeps: ChannelCommandDependencies;
+  /** Per-conversation generation counters, invalidated by /stop (spec §6). */
+  private readonly conversationGenerations = new Map<string, number>();
 
   constructor(private readonly options: ChannelHarnessBridgeOptions) {
+    this.modelSelection =
+      options.commandDeps.modelSelection ?? new ChannelModelSelectionManager();
+    // Every Harness service reach is bridged LAZILY from the plugin context
+    // (options.ctx): command handlers must never read services through
+    // invocation.agent.ctx — the agent-loop scoped context does not inject
+    // commands/llm, and Cordis throws "without inject" there. This mirrors the
+    // /new pattern: narrow deps, bridge-owned implementations (official
+    // compact/goal/plan commands close over their plugin ctx the same way).
+    this.commandDeps = {
+      ...options.commandDeps,
+      modelSelection: this.modelSelection,
+      listCommands: (agent) => this.options.ctx.commands.list(agent),
+      findCommand: (agent, name) => this.options.ctx.commands.find(agent, name),
+      llm: {
+        listProviders: () => this.options.ctx.llm.listProviders(),
+        listModels: (provider) => this.options.ctx.llm.listModels(provider),
+        resolveModelInfo: (provider, model, signal) =>
+          this.options.ctx.llm.resolveModelInfo(provider, model, signal),
+        resolveCallConfig: (config, signal) =>
+          this.options.ctx.llm.resolveCallConfig(config, signal),
+      },
+    };
     this.sessionFactory = new ChannelSessionFactory({
       ctx: options.ctx,
       cwd: options.config.cwd,
@@ -143,15 +194,55 @@ export class ChannelHarnessBridge {
     });
   }
 
+  /** Per-conversation promise chains; entries self-clean on settle. */
+  private readonly chains = new Map<string, Promise<void>>();
+
   /**
-   * Per-conversation serialization (plan §18). Each canonical key has an
-   * owning promise chain; a new `message.received` is appended onto the
-   * previous entry for that key so it starts only after the prior one settles,
-   * while distinct keys run in parallel. Errors in one message are caught +
-   * logged (the chain never rejects), finished entries are removed so the map
-   * does not grow unboundedly, and the current call still resolves only after
-   * THIS event has been handled (Promise<void> semantics preserved).
+   * Per-conversation serialization. Each canonical key has an owning promise
+   * chain; `fn` is appended onto the previous entry for that key so it starts
+   * only after the prior one settles, while distinct keys run in parallel. The
+   * returned promise resolves only after THIS operation has been handled; the
+   * chain entry absorbs errors (logged, never rethrown) so ONE failing message
+   * never poisons the conversation chain, while this call still surfaces THIS
+   * operation's error to its await-er (preserving prior rejection semantics).
    */
+  private async enqueueSelf(key: string, fn: () => Promise<void>): Promise<void> {
+    const prev = this.chains.get(key) ?? Promise.resolve();
+    const task = prev.then(fn);
+    const chain = task.catch((error: unknown) => {
+      this.options.logger.error(
+        `[channel-harness] message handling failed for conversation '${key}'`,
+        toLoggableError(error),
+      );
+    });
+    this.chains.set(key, chain);
+    void chain.finally(() => {
+      if (this.chains.get(key) === chain) this.chains.delete(key);
+    });
+    await task;
+  }
+
+  /**
+   * Append work onto the per-conversation chain WITHOUT awaiting its
+   * completion (used by the /stop stop barrier — spec §9). The returned
+   * promise never rejects.
+   */
+  private enqueueConversation(key: string, fn: () => Promise<void>): Promise<void> {
+    const prev = this.chains.get(key) ?? Promise.resolve();
+    const task = prev.then(fn);
+    const chain = task.catch((error: unknown) => {
+      this.options.logger.error(
+        `[channel-harness] queued message handling failed for conversation '${key}'`,
+        toLoggableError(error),
+      );
+    });
+    this.chains.set(key, chain);
+    void chain.finally(() => {
+      if (this.chains.get(key) === chain) this.chains.delete(key);
+    });
+    return task.catch(() => undefined);
+  }
+
   async handleChannelEvent(event: ChannelEvent): Promise<void> {
     // Connection/auth state is consumed by the control plane and Web status
     // surface. It is expected to be frequent during startup/reconnect and is
@@ -165,48 +256,62 @@ export class ChannelHarnessBridge {
     }
 
     const key = this.conversationKey(event);
-    const prev = this.chains.get(key) ?? Promise.resolve();
-    // This event's actual work, chained onto the previous entry for this key.
-    const task = prev.then(() => this.handleMessageReceived(event));
-    // The chain entry absorbs errors (logged, never rethrown) so ONE failing
-    // message never poisons the conversation chain; the next event still starts.
-    const chain = task.catch((error: unknown) => {
-      this.options.logger.error(
-        `[channel-harness] message handling failed for conversation '${key}'`,
-        toLoggableError(error),
-      );
-    });
-    this.chains.set(key, chain);
-    void chain.finally(() => {
-      if (this.chains.get(key) === chain) this.chains.delete(key);
-    });
-    // Surface THIS event's error to its await-er (preserves the prior
-    // rejection semantics), even though the chain itself never rejects.
-    await task;
+    // The command parser operates on the RAW user text (the concatenated plain
+    // text blocks), never on the '[channel=.. sender=.. message=..] ' metadata
+    // prefix the model-facing converter prepends, and never after a trim (the
+    // official parseCommand requires '/' at byte zero — spec §5).
+    const text = event.message.content
+      .filter((part): part is TextPart => part.type === 'text')
+      .map((part) => part.text)
+      .join('');
+    const parsed = parseCommand(text);
+
+    // P0: /stop is handled on a FAST PATH AND RUNS IMMEDIATELY — it must
+    // NEVER be chained behind queued conversation work (spec §4/§5), because
+    // the whole point is to interrupt an in-flight turn. `handleImmediateStop`
+    // bumps the generation synchronously before its first await, so every
+    // already-queued message (captured with the OLD generation) is invalidated
+    // at its next generation check and can never re-wake the agent.
+    if (parsed?.name === 'stop') {
+      try {
+        await this.handleImmediateStop(event, key, text);
+      } catch (error) {
+        this.options.logger.error(
+          `[channel-harness] /stop handling failed for conversation '${key}'`,
+          toLoggableError(error),
+        );
+      }
+      return;
+    }
+
+    const generation = this.generationOf(key);
+    await this.enqueueSelf(key, () =>
+      this.handleQueuedMessage(event, key, text, parsed, generation),
+    );
   }
 
-  /** Per-conversation promise chains (plan §18); entries self-clean on settle. */
-  private readonly chains = new Map<string, Promise<void>>();
-
   /**
-   * One-time Agent-scoped command setup (plan §4/§6). Installs the channel
-   * commands onto an Agent's scoped context. Passed to every
-   * create/resolve/resolveOrCreate so a fresh OR resumed session gets the
-   * /new registration before any driving happens.
+   * One-time Agent-scoped command + model-selection setup. Installed onto an
+   * Agent's scoped context by every create/resolve/resolveOrCreate so a fresh
+   * OR resumed session gets the channel commands AND /model support before any
+   * driving happens (spec §22).
    */
   // Bound arrow: passed to create/resolve/resolveOrCreate as the official
   // AgentSetup (invoked as a bare setup(agentCtx)), so this must stay the
   // bridge instance.
   private commandSetup = async (agentCtx: Context): Promise<void> => {
-    const disposeCommands = await installChannelCommands(agentCtx, this.options.commandDeps);
+    const disposeCommands = await installChannelCommands(agentCtx, this.commandDeps);
     if (this.commandSetupsDisposed) {
       await disposeCommands();
       throw new Error('channel-harness command setup continued after bridge disposal');
     }
     this.commandDisposers.add(disposeCommands);
-    // M4: Agent-scoped read_channel_attachment tool (plan §81). Registered on
-    // the agent's own scope so it is disposed with the agent. Best-effort: a
-    // tool-install failure must never roll back the agent setup.
+    // Model selection: couple one mutable ref to prompt assembly + request
+    // routing for this agent scope (spec §18/§22).
+    this.modelSelection.install(agentCtx);
+    // M4: Agent-scoped read_channel_attachment tool. Registered on the agent's
+    // own scope so it is disposed with the agent. Best-effort: a tool-install
+    // failure must never roll back the agent setup.
     if (this.options.fileProvider) {
       try {
         await this.options.fileProvider.installTools(agentCtx);
@@ -214,9 +319,8 @@ export class ChannelHarnessBridge {
         this.options.logger.warn('[channel-harness] failed to install read_channel_attachment tool', error);
       }
     }
-    // M6: Agent-scoped send_channel_message tool (plan §62/§95). Only installed
-    // when the durable outbox is wired. Best-effort (never rolls back the agent
-    // setup), mirroring the attachment tool.
+    // M6: Agent-scoped send_channel_message tool. Only installed when the
+    // durable outbox is wired. Best-effort, mirroring the attachment tool.
     if (this.options.outbox) {
       try {
         await installSendChannelMessageTool(agentCtx, { outbox: this.options.outbox });
@@ -256,24 +360,27 @@ export class ChannelHarnessBridge {
     };
   }
 
-  private async handleMessageReceived(event: MessageReceived): Promise<void> {
-    const key = this.conversationKey(event);
+  /**
+   * Queued (serialized) message handling for one conversation. Captures the
+   * generation at ENQUEUE time; /stop bumps it, so this callback drops out at
+   * either generation check and can never re-wake a stopped agent (spec §7).
+   */
+  private async handleQueuedMessage(
+    event: MessageReceived,
+    key: string,
+    text: string,
+    parsed: ParsedCommand | undefined,
+    generation: number,
+  ): Promise<void> {
+    // Check #1: fast-drop work already invalidated by /stop (spec §7).
+    if (!this.isGenerationCurrent(key, generation)) return;
+
     const route = this.options.agentRouter.resolve({
       channelId: event.channel,
       accountId: event.accountId,
       conversationId: event.conversation.id,
     });
     const now = Date.now();
-
-    // The command parser operates on the RAW user text (the concatenated plain
-    // text blocks), never on the '[channel=.. sender=.. message=..] ' metadata
-    // prefix the model-facing converter prepends, and never after a trim (the
-    // official parseCommand requires '/' at byte zero).
-    const text = event.message.content
-      .filter((part): part is TextPart => part.type === 'text')
-      .map((part) => part.text)
-      .join('');
-    const parsed = parseCommand(text);
     const parsedName = parsed?.name ?? null;
 
     let binding = await this.options.bindingStore.get(key);
@@ -292,29 +399,26 @@ export class ChannelHarnessBridge {
     let agentRef: AgentRef | undefined;
 
     if (!binding) {
-      // --- Bootstrap: no receiving agent exists yet (plan §19) ------------------
-      if (parsed) {
-        if (parsedName === 'new') {
-          // First message is /new: boot a brand-new session directly — do NOT
-          // create session A and then run /new on it (no double-create). The
-          // arg contract mirrors the registered handler (用法：/new).
-          if (parsed.rawInput.trim().length > 0) {
-            await this.sendCommandNotice(event, '用法：/new');
-            return;
-          }
-          await this.sessionFactory.create(this.conversationInput(event), route);
-          if (archivedSessionId) {
-            await this.options.agentManager.retireSession(archivedSessionId);
-          }
-          await this.sendCommandNotice(event, '已开启新会话。');
+      // --- Bootstrap: no receiving agent exists yet (spec §37/§38) -----------
+      if (parsed && parsedName === 'new') {
+        // First message is /new: boot a brand-new session directly — do NOT
+        // create session A and then run /new on it (no double-create). The
+        // arg contract mirrors the registered handler (用法：/new).
+        if (parsed.rawInput.trim().length > 0) {
+          await this.sendCommandNotice(event, '用法：/new');
           return;
         }
-        // Unknown command before any session exists.
-        await this.sendCommandNotice(event, '未知指令：/' + parsed.name);
+        await this.sessionFactory.create(this.conversationInput(event), route);
+        if (archivedSessionId) {
+          await this.options.agentManager.retireSession(archivedSessionId);
+        }
+        await this.sendCommandNotice(event, '已开启新会话。');
         return;
       }
-      // Ordinary first message: mint the session, create the agent, persist the
-      // binding (with rollback on binding-write failure), and register it.
+      // Every other first message (ordinary text, /help, /status, /models,
+      // /model, or an unknown /foo) mints the session and continues below —
+      // first-message /help/status/models/model must work (spec §38) and
+      // unknown commands must NOT be rejected (spec §12).
       const fresh = await this.sessionFactory.create(this.conversationInput(event), route);
       binding = fresh.binding;
       agentRef = fresh.agentRef;
@@ -338,7 +442,9 @@ export class ChannelHarnessBridge {
       this.options.agentManager.registerBinding(binding);
     }
 
-    // --- Command admission (plan §8) -------------------------------------------
+    // --- Command admission (spec §12) ----------------------------------------
+    // Registered commands run on the Human Command Plane; UNREGISTERED slash
+    // commands fall through to the model as ordinary user input.
     if (parsed) {
       const beforeSessionId = binding.sessionId;
       const controller = new AbortController();
@@ -347,23 +453,26 @@ export class ChannelHarnessBridge {
         text,
         controller.signal,
       );
-      if (!execution) {
-        // Syntactically valid but unregistered command — never sent to the model.
-        await this.sendCommandNotice(event, "未知指令：/" + parsed.name);
+      if (execution !== undefined) {
+        await this.renderCommandResult(event, execution.result);
+        // Generic post-command cleanup: whichever command switched the active
+        // binding gets its previous session retired. No command-name
+        // special-casing.
+        const currentBinding = await this.options.bindingStore.get(key);
+        if (currentBinding && currentBinding.sessionId !== beforeSessionId) {
+          await this.options.agentManager.retireSession(beforeSessionId);
+        }
         return;
       }
-      await this.renderCommandResult(event, execution.result);
-      // Generic post-command cleanup (plan §14): whichever command switched the
-      // active binding gets its previous session retired. No command-name
-      // special-casing.
-      const currentBinding = await this.options.bindingStore.get(key);
-      if (currentBinding && currentBinding.sessionId !== beforeSessionId) {
-        await this.options.agentManager.retireSession(beforeSessionId);
-      }
-      return;
+      // Unregistered command: NOT an error — the FULL raw text continues to
+      // the model below (never trimmed, never replaced by a notice).
     }
 
-    // --- Ordinary message followup -----------------------------------------------
+    // Check #2: a /stop may have arrived while this message was resolving
+    // (spec §7) — do not re-wake a stopped agent.
+    if (!this.isGenerationCurrent(key, generation)) return;
+
+    // --- Ordinary message followup --------------------------------------------
     const runId = randomUUID();
     this.logInboundBinaryAvailability(event, binding.sessionId);
     const userMessage = await toHarnessUserMessage(event, {
@@ -388,8 +497,76 @@ export class ChannelHarnessBridge {
   }
 
   /**
-   * Build the converter's optional file/audio/video store hook (plan \u00a750).
-   * Absent `fileProvider` -> no hook -> the converter keeps `[file: name]`
+   * /stop FAST PATH (spec §4–§10). Runs OUTSIDE the serial chain:
+   * ① bump the generation FIRST (synchronous, before any await) so every
+   *    queued/stale message on this conversation is invalidated;
+   * ② cancel the live agent — preferably by executing the registered /stop
+   *    command (lifecycle recorded, behavior owned by the handler), with a
+   *    direct `agent.cancel({ kind: 'user' })` fallback;
+   * ③ acknowledge immediately (never wait for `whenIdle`);
+   * ④ enqueue a fire-and-forget STOP BARRIER that, after prior chain work
+   *    converges, re-cancels the LATEST binding's agent (covers the /new race,
+   *    spec §9).
+   */
+  private async handleImmediateStop(event: MessageReceived, key: string, text: string): Promise<void> {
+    // ① Generation bump must happen before any await (spec §8).
+    this.bumpGeneration(key);
+
+    // ② Resolve + cancel.
+    const binding = await this.options.bindingStore.get(key);
+    if (binding) {
+      const agent = this.options.agentManager.getLiveAgent(binding.sessionId);
+      if (agent) {
+        try {
+          const controller = new AbortController();
+          const execution = await this.options.ctx.commands.execute(agent, text, controller.signal);
+          if (execution !== undefined) {
+            await this.renderCommandResult(event, execution.result);
+          } else {
+            agent.cancel({ kind: 'user' });
+            await this.sendCommandNotice(event, '已停止当前任务。');
+          }
+        } catch {
+          agent.cancel({ kind: 'user' });
+          await this.sendCommandNotice(event, '已停止当前任务。');
+        }
+      } else {
+        // Binding exists but no process-local live agent (cold/resumed
+        // elsewhere): nothing to cancel here; the barrier re-checks below.
+        await this.sendCommandNotice(event, '已停止当前任务。');
+      }
+    } else {
+      // ③ No session: never create one for /stop (spec §39).
+      await this.sendCommandNotice(event, '当前没有可停止的任务。');
+    }
+
+    // ④ Stop barrier: after existing chain work converges, re-read the LATEST
+    // binding and cancel its agent (spec §9).
+    void this.enqueueConversation(key, async () => {
+      const latestBinding = await this.options.bindingStore.get(key);
+      if (!latestBinding) return;
+      this.options.agentManager.getLiveAgent(latestBinding.sessionId)?.cancel({ kind: 'user' });
+    });
+  }
+
+  /** Generation helpers (spec §6). */
+  private generationOf(key: string): number {
+    return this.conversationGenerations.get(key) ?? 0;
+  }
+
+  private bumpGeneration(key: string): number {
+    const next = this.generationOf(key) + 1;
+    this.conversationGenerations.set(key, next);
+    return next;
+  }
+
+  private isGenerationCurrent(key: string, generation: number): boolean {
+    return this.generationOf(key) === generation;
+  }
+
+  /**
+   * Build the converter's optional file/audio/video store hook. Absent
+   * `fileProvider` -> no hook -> the converter keeps `[file: name]`
    * placeholders (unchanged fallback). The hook binds the current binding's
    * session + event identity so a stored asset is correctly session-ACL'd.
    */
@@ -460,17 +637,13 @@ export class ChannelHarnessBridge {
   }
 
   /**
-   * The `commandDeps.startNewSession` implementation (plan §12/§13/§17).
-   * Resolves the conversation from the CURRENT binding of the invoking agent
-   * (the session id IS the agent id), then asks the Session factory to mint a
-   * NEW session id (never a copy of the old one). The factory also attaches
-   * the new session to the same channel Workspace and
-   * registers its binding. The OLD agent is NOT disposed here; the bridge's
-   * post-command retire handles that. If the factory throws, the old binding
-   * stays untouched (we never delete it before the new
-   * one is safely written; a binding-write failure disposes the fresh agent
-   * inside its transaction, while a Workspace-attach failure does NOT —
-   * the new session stays alive, merely ungrouped).
+   * The `commandDeps.startNewSession` implementation. Resolves the
+   * conversation from the CURRENT binding of the invoking agent (the session id
+   * IS the agent id), then asks the Session factory to mint a NEW session id
+   * (never a copy of the old one). The factory also attaches the new session to
+   * the same channel Workspace and registers its binding. The OLD agent is NOT
+   * disposed here; the bridge's post-command retire handles that. If the
+   * factory throws, the old binding stays untouched.
    */
   async startNewSession(agent: Agent): Promise<void> {
     const sessionId = String(agent.id);
@@ -500,7 +673,7 @@ export class ChannelHarnessBridge {
 
   /**
    * Deliver a command-plane notice directly through the channel adapter — never
-   * through ReplyRouter and never as an assistant/model message (plan §10).
+   * through ReplyRouter and never as an assistant/model message.
    */
   private async sendCommandNotice(event: MessageReceived, text: string): Promise<void> {
     const adapter = this.options.getAdapter(event.channel);

@@ -38,7 +38,8 @@ import { AgentRouter } from '../src/agent-router.ts';
 import { MemoryBindingStore } from '../src/binding-store.ts';
 import { ChannelHarnessBridge } from '../src/bridge.ts';
 import { Config } from '../src/config.ts';
-import { installChannelCommands } from '../src/commands/index.ts';
+import { installChannelCommands, type ChannelCommandDependencies } from '../src/commands/index.ts';
+import { ChannelModelSelectionManager } from '../src/model-selection.ts';
 import { ReplyContextStore } from '../src/reply-context-store.ts';
 import type { ChannelWorkspaceResolver } from '../src/workspace-resolver.ts';
 
@@ -61,6 +62,22 @@ function baseConfig(overrides: Partial<Config> = {}): Config {
 }
 
 const silentLogger = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
+
+/** Minimal command deps for registration-only tests (handlers never run). */
+function channelTestDeps(): ChannelCommandDependencies {
+  return {
+    startNewSession: async () => {},
+    modelSelection: new ChannelModelSelectionManager(),
+    listCommands: () => [],
+    findCommand: () => undefined,
+    llm: {
+      listProviders: () => [],
+      listModels: async () => [],
+      resolveModelInfo: async () => ({ provider: '', id: '', name: '' }),
+      resolveCallConfig: async (config) => config,
+    },
+  };
+}
 
 /** Hermetic no-op workspace resolver: no workspace, no cwd (bridge falls back to config.cwd ?? process.cwd()). */
 const noopResolver: ChannelWorkspaceResolver = {
@@ -98,6 +115,8 @@ interface FakeSessionLog {
   id: string;
   events: { type: string; data: unknown; seq: number; time: number }[];
   append(type: string, data: unknown): { type: string; data: unknown; seq: number; time: number };
+  /** Optional real-Session-compatible header probe (model-selection manager reads it optionally). */
+  requestHeader?(): { config: { provider: string; model: string; reasoningEffort?: string } } | undefined;
 }
 
 export interface CommandFakeAgent {
@@ -105,6 +124,10 @@ export interface CommandFakeAgent {
   session: FakeSessionLog;
   status: 'idle' | 'running';
   ctx: Context;
+  /** Route-derived agent options (provider/model); present like the real Agent. */
+  options: { provider?: string; model?: string; maxTokens?: number };
+  /** Official cancel(cause, options?) spy (real Agent has cancel). */
+  cancel: ReturnType<typeof vi.fn>;
   followup(message: unknown): void;
   whenIdle(): Promise<void>;
 }
@@ -124,6 +147,8 @@ function fakeScopedAgent(ctx: Context, id: string): CommandFakeAgent {
       },
     },
     status: 'idle',
+    options: {},
+    cancel: vi.fn(),
     ctx: new Context(),
     followup: () => {},
     whenIdle: async () => {},
@@ -330,7 +355,7 @@ describe('A. official dsh-commands compatibility', () => {
     new CommandRuntime(ctx);
     const agent = fakeScopedAgent(ctx, 's-injected');
     const caller = ctx.plugin(async function uninjectedCaller() {
-      await installChannelCommands(agent.ctx, { startNewSession: async () => {} });
+      await installChannelCommands(agent.ctx, channelTestDeps());
     });
 
     await caller.await();
@@ -345,9 +370,7 @@ describe('A. official dsh-commands compatibility', () => {
     const agent = fakeScopedAgent(ctx, 's-exact-context');
     const inject = vi.spyOn(agent.ctx, 'inject');
 
-    const dispose = await installChannelCommands(agent.ctx, {
-      startNewSession: async () => {},
-    });
+    const dispose = await installChannelCommands(agent.ctx, channelTestDeps());
 
     expect(inject).toHaveBeenCalledWith(['commands'], expect.any(Function));
     expect(ctx.commands.find(agent as never, 'new')).toBeDefined();
@@ -359,17 +382,13 @@ describe('A. official dsh-commands compatibility', () => {
     new CommandRuntime(ctx);
     const agent = fakeScopedAgent(ctx, 's-reload');
 
-    const firstDispose = await installChannelCommands(agent.ctx, {
-      startNewSession: async () => {},
-    });
+    const firstDispose = await installChannelCommands(agent.ctx, channelTestDeps());
     expect(ctx.commands.find(agent as never, 'new')).toBeDefined();
 
     await firstDispose();
     expect(ctx.commands.find(agent as never, 'new')).toBeUndefined();
 
-    const secondDispose = await installChannelCommands(agent.ctx, {
-      startNewSession: async () => {},
-    });
+    const secondDispose = await installChannelCommands(agent.ctx, channelTestDeps());
     expect(ctx.commands.find(agent as never, 'new')).toBeDefined();
     await secondDispose();
   });
@@ -660,29 +679,53 @@ describe('F. command result rendering', () => {
   it('preserves message-scoped reply context for direct command replies', async () => {
     const rootCtx = new Context();
     new CommandRuntime(rootCtx);
+    rootCtx.commands.register({
+      name: 'ping',
+      description: 'x',
+      handler: () => ({ kind: 'success', text: 'pong' }),
+    });
     const { bridge, adapter } = makeBridge(rootCtx);
     const raw = { sessionWebhook: 'https://example.dingtalk.com/session/reply' };
 
     await bridge.handleChannelEvent(makeMessageEvent({
-      ...textEvent('m1', '/not-exist'),
+      ...textEvent('m1', '/ping'),
       raw,
     }));
 
     expect(adapter.targets).toHaveLength(1);
     expect(adapter.targets[0]?.raw).toBe(raw);
+    expect(adapter.sent.map((s) => s.text)).toContain('pong');
   });
 });
 
-describe('G. unknown command', () => {
-  it('rejects an unregistered command and never calls followup', async () => {
+describe('G. unknown slash command falls through to the model', () => {
+  it('passes an unregistered command verbatim to followup instead of replying to the channel', async () => {
     const rootCtx = new Context();
     new CommandRuntime(rootCtx);
     const { gateway, bridge, adapter } = makeBridge(rootCtx);
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
     const before = gateway.followups.length;
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', '/not-exist')));
-    expect(adapter.sent.map((s) => s.text)).toContain('未知指令：/not-exist');
-    expect(gateway.followups.length).toBe(before);
+    expect(adapter.sent).toEqual([]);
+    expect(gateway.followups.length).toBe(before + 1);
+    const followup = gateway.followups[gateway.followups.length - 1]!.message as {
+      content: { type: string; text: string }[];
+    };
+    expect(followup.content.map((b) => b.text).join('')).toContain('/not-exist');
+  });
+
+  it('preserves the full raw text of an unknown command with arguments', async () => {
+    const rootCtx = new Context();
+    new CommandRuntime(rootCtx);
+    const { gateway, bridge } = makeBridge(rootCtx);
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', '/unknown foo bar')));
+    expect(gateway.followups.length).toBe(2);
+    const followup = gateway.followups[gateway.followups.length - 1]!.message as {
+      content: { type: string; text: string }[];
+    };
+    const text = followup.content.map((b) => b.text).join('');
+    expect(text).toContain('/unknown foo bar');
   });
 });
 
@@ -871,5 +914,45 @@ describe('AgentManager borrowed setup runs exactly once', () => {
     expect(setupCount).toBe(1);
     expect(r1.sessionId).toBe('borrowed');
     expect(r2.sessionId).toBe('borrowed');
+  });
+});
+
+
+describe('M. command scope (spec §43)', () => {
+  it('agent-scoped /stop shadows a global /stop in the bridge fast path', async () => {
+    const rootCtx = new Context();
+    new CommandRuntime(rootCtx);
+    const globalStop = vi.fn();
+    rootCtx.commands.register({
+      name: 'stop',
+      description: 'global stop',
+      handler: () => {
+        globalStop();
+        return { kind: 'success', text: 'global-stop' };
+      },
+    });
+    const { gateway, bridge, adapter } = makeBridge(rootCtx);
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
+    const agent = gateway.agents.get(gateway.createCalls[0]!)!;
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', '/stop')));
+    // The channel's AGENT-scoped /stop wins (shadow); the global handler never fires.
+    expect(globalStop).not.toHaveBeenCalled();
+    expect(agent.cancel).toHaveBeenCalledWith({ kind: 'user' });
+    expect(adapter.sent.map((s) => s.text)).toContain('已停止当前任务。');
+    expect(agent.session.events.map((e) => e.type)).toEqual(['command/run', 'command/done']);
+  });
+
+  it('throws when the same name is registered twice in the same agent scope', async () => {
+    const ctx = new Context();
+    new CommandRuntime(ctx);
+    const agent = fakeScopedAgent(ctx, 's-dup');
+    await installChannelCommands(agent.ctx, channelTestDeps());
+    expect(() =>
+      agent.ctx.commands.register({
+        name: 'stop',
+        description: 'second stop',
+        handler: () => ({ kind: 'success', text: 'x' }),
+      }),
+    ).toThrow(/already registered in this scope/);
   });
 });

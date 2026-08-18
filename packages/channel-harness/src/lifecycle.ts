@@ -35,7 +35,7 @@ import { ChannelHarnessBridge } from './bridge.js';
 import { ChannelOutboxService } from './outbox/service.js';
 import { HarnessChannelWorkspaceResolver } from './workspace-resolver.js';
 import { ReplyContextStore, type ChannelReplyContext } from './reply-context-store.js';
-import type { ChannelCommandDependencies } from './commands/index.js';
+import type { ChannelHarnessBridgeOptions } from './bridge.js';
 import type { SaveImageHook } from './message-converter.js';
 import { installDebugConsoleExporter } from './debug-logger.js';
 import type { ChannelFileProvider } from './file-provider.js';
@@ -151,7 +151,7 @@ export function startBridge(
   });
 
   let bridge!: ChannelHarnessBridge;
-  const commandDeps: ChannelCommandDependencies = {
+  const commandDeps: ChannelHarnessBridgeOptions['commandDeps'] = {
     startNewSession: (agent) => bridge.startNewSession(agent),
   };
   bridge = new ChannelHarnessBridge({

@@ -106,9 +106,23 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 
 | 指令 | 说明 |
 | --- | --- |
+| `/stop` | 立即终止当前任务（最高优先级：不等渠道排队消息，直接取消当前 Agent） |
 | `/new` | 开启全新会话（遇到 bug 可以尝试使用） |
+| `/help [command]` | 查看当前会话实际生效的命令，或单个命令的用法 |
+| `/status` | 查看当前 Session / Agent / 模型状态 |
+| `/models [provider]` | 查看 Harness 当前注册的模型 Provider 及其模型 |
+| `/model [<provider> <model> [<reasoningEffort>]]` | 查看或切换当前会话的模型 |
 
-未注册的指令会被拦截（“未知指令”），不会发给模型。后续版本会继续完善更多渠道指令。
+- 若宿主加载了官方插件（`/compact`、`/goal`、`/plan`、`/feedback` 等），这些命令也会自动出现在渠道里，无需额外升级。
+- **未注册的斜杠指令不再被拦截**：会原样作为普通用户输入交给模型处理。
+
+#### `/model` 示例
+
+```text
+/model                       # 查看当前模型
+/model deepseek deepseek-chat
+/model openai gpt-5.6 high   # 指定 reasoning effort
+```
 
 ### 主动外发
 
@@ -140,15 +154,12 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 
 | 当前限制 | 临时处理方式 | 后续方向 |
 | --- | --- | --- |
-| 无法从渠道终止正在运行的会话 | 模型长时间推理或工具调用未结束时，暂时需要等待本轮执行完成 | Harness 已提供 `Agent.cancel()`，后续增加 `/stop` 指令 |
-| 无法在当前渠道会话中直接切换模型 | 先在 Harness Web 中选择模型，再发送 `/new` 创建使用新默认模型的会话 | 增加模型选择指令 |
 | 渠道内没有权限切换指令 | 在 Harness Web 中调整未来新会话的默认权限，或修改对应会话的 Access 设置 | 完善渠道内的会话管理能力 |
 
-上述限制是当前渠道交互层尚未接入对应能力，不代表 Harness 完全不支持取消或模型选择。相关上游能力可查阅 [Harness Reference](https://deepseek-harness.github.io/deepseek-harness/reference/)。
+该限制是当前渠道交互层尚未接入对应能力，不代表 Harness 不支持。相关上游能力可查阅 [Harness Reference](https://deepseek-harness.github.io/deepseek-harness/reference/)。
 
 ## Roadmap
 
-- 增加 `/stop`、模型选择等渠道指令。
 - 完善渠道内的会话管理和异常恢复体验。
 - 接入更多即时通讯渠道（画饼中）。
 

@@ -28,7 +28,8 @@
 import { SessionId } from '@deepseek-ai/dsh-session';
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence';
 import type { Context } from '@deepseek-ai/cordis';
-import type { Agent, AgentHandle, AgentOptions, AgentSetup } from '@deepseek-ai/dsh-agent';
+import type { Agent, AgentHandle, AgentOptions, AgentSetup, ModelSelection } from '@deepseek-ai/dsh-agent';
+import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model';
 import type { UserMessage } from '@deepseek-ai/dsh-llm';
 import type { ChannelLogger } from '@wsz987/channel-core';
 import type { AgentRouteSpec } from './agent-router.js';
@@ -105,20 +106,6 @@ export function optionsFor(route: AgentRouteSpec): AgentOptions | undefined {
 }
 
 /**
- * Structural view of Harness's `agentDefaultModel` service. Declared locally
- * (rather than importing `@deepseek-ai/dsh-agent-default-model`) so the bridge
- * keeps its dependency surface minimal; the real service satisfies this shape.
- */
-export interface DefaultModelSelection {
-  provider: string;
-  model: string;
-}
-
-export interface AgentDefaultModelService {
-  currentSelection(): DefaultModelSelection;
-}
-
-/**
  * Resolve a route's provider/model, falling back to Harness's default model
  * selection when the route leaves the model unset.
  *
@@ -134,7 +121,7 @@ export interface AgentDefaultModelService {
  */
 export function resolveRoute(
   route: AgentRouteSpec,
-  defaultSelection: DefaultModelSelection | undefined,
+  defaultSelection: ModelSelection | undefined,
 ): AgentRouteSpec {
   if (route.model) return route;
 
@@ -203,8 +190,8 @@ export class HarnessAgentGateway implements AgentGateway {
   }
 
   /** Read Harness's live default-model selection (undefined when absent). */
-  private defaultSelection(): DefaultModelSelection | undefined {
-    const service = this.ctx.get('agentDefaultModel') as AgentDefaultModelService | undefined;
+  private defaultSelection(): ModelSelection | undefined {
+    const service = this.ctx.get('agentDefaultModel') as AgentDefaultModelConfig | undefined;
     return service?.currentSelection();
   }
 
@@ -377,6 +364,15 @@ export class AgentManager {
   /** Reverse lookup for the ReplyRouter. */
   bindingFor(sessionId: string): SessionBinding | undefined {
     return this.bindings.get(sessionId);
+  }
+
+  /**
+   * Live agent lookup for the /stop fast path (spec §8). Returns the raw
+   * Agent when it is currently live in this process — NEVER creates or
+   * resumes a session just to answer this probe.
+   */
+  getLiveAgent(sessionId: string): Agent | undefined {
+    return this.gateway.get(sessionId)?.agent;
   }
 
   /** Resolved ref for drain purposes, if any. */

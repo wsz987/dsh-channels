@@ -108,9 +108,23 @@ In any channel conversation you can send slash commands, parsed and executed by 
 
 | Command | Description |
 | --- | --- |
+| `/stop` | Stop the current task immediately (highest priority: does not wait for queued channel messages; cancels the current agent directly) |
 | `/new` | Start a fresh session (try it if you hit a bug) |
+| `/help [command]` | List the commands active in the current session, or show one command's usage |
+| `/status` | Show the current session / agent / model status |
+| `/models [provider]` | List the model providers and their models registered in Harness |
+| `/model [<provider> <model> [<reasoningEffort>]]` | Show or switch the current session's model |
 
-Unregistered commands are intercepted ("unknown command") and never sent to the model. More channel commands will be added in later versions.
+If the host loads official plugins (`/compact`, `/goal`, `/plan`, `/feedback`, ...), those commands also appear in channels automatically — no channel upgrade needed.
+**Unregistered slash commands are no longer intercepted**: they pass through to the model as ordinary user input.
+
+#### `/model` examples
+
+```text
+/model                       # show the current model
+/model deepseek deepseek-chat
+/model openai gpt-5.6 high   # specify a reasoning effort
+```
 
 ### Proactive send
 
@@ -142,15 +156,12 @@ Set the corresponding channel plugin's `enabled` to `false` in the profile patch
 
 | Current limitation | Workaround | Planned direction |
 | --- | --- | --- |
-| Cannot stop a running session from a channel | Wait for the current turn to finish while the model is still reasoning or a tool call is in flight | Harness already provides `Agent.cancel()`; a `/stop` command is planned |
-| Cannot switch models inside a channel session | Select a model in Harness Web first, then send `/new` to create a session with the new default model | Add a model-selection command |
 | No permission-switching command in channels | Adjust the default permission for future sessions in Harness Web, or change the Access setting of the session | Improve in-channel session management |
 
-These limitations mean the channel interaction layer has not yet wired up the corresponding capability — not that Harness lacks cancel or model selection. See the [Harness Reference](https://deepseek-harness.github.io/deepseek-harness/reference/) for the underlying upstream capabilities.
+This limitation means the channel interaction layer has not yet wired up the corresponding capability — not that Harness lacks it. See the [Harness Reference](https://deepseek-harness.github.io/deepseek-harness/reference/) for the underlying upstream capabilities.
 
 ## Roadmap
 
-- Add `/stop`, model-selection and other channel commands.
 - Improve in-channel session management and error recovery.
 - Support more IM channels (wishlist).
 
