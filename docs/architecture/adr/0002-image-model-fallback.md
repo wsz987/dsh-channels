@@ -9,7 +9,11 @@
 
 ## Status
 
-Accepted — implemented.
+Accepted — product policy retained; implementation seam superseded by
+[ADR 0003](0003-image-compatibility-pre-step.md) (`agent/pre-step` logged
+surface replace, per the official Model-visible ⇔ durably referenced
+invariant). The `llm/stream` provider-boundary rewrite described below remains
+the SHIPPED implementation until ADR 0003's migration lands.
 
 ## Context
 

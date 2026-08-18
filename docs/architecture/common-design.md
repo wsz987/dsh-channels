@@ -1022,7 +1022,10 @@ workspace:
 适配器负责各平台的下载/解密和上传，`channel-harness` 不复制平台 SDK 实现。
 文本-only 模型的图片兼容策略（`imageCompatibility.mode`：`degrade` 默认 /
 `reject`，属显式 Channel 策略而非 Web host parity）见
-[ADR 0002](adr/0002-image-model-fallback.md)。
+[ADR 0002](adr/0002-image-model-fallback.md)（产品策略）与
+[ADR 0003](adr/0003-image-compatibility-pre-step.md)（实现 seam：`agent/pre-step`
+logged surface replace，按官方 Model-visible ⇔ durably referenced 不变式；
+当前 `llm/stream` 改写仍是 shipped 实现，迁移未落地前不得扩展）。
 
 ### 入站日志与媒体诊断规范
 
@@ -1136,23 +1139,35 @@ PDF 解析使用 `unpdf`（PDF.js），DOCX 使用 `mammoth`，XLSX 使用 `xlsx
 - **模型切换只用官方机制**：`installModelSelection(agentCtx, ref)`，`ModelSelectionRef{current, assembled}`
   由入口点自持；`/model` 绝不改写 `binding.route`；读取优先级 picked →
   `session.requestHeader()?.config` → `agent.options` → `agentDefaultModel`。
-- **每个 Agent 只有一个 ModelSelection owner**（`ChannelModelSelectionController`，mode:
+- **每个 Agent 只有一个 ModelSelection owner**（`ChannelModelSelectionController`，owner:
   `host` | `local`）：官方 `installModelSelection` 注册的是 `system-prompt/assemble` +
   `agent/request` 两条 waterfall，最终 routing 由**最外层（先注册）listener 自己的 ref** 决定。
   `dsh-host-apiproxy` 自己也持有 `WeakMap<Agent, ref>`（`selectionFor`）并会再装一次
   `installModelSelection`；若 channel 再装自己的 ref，同一个 agent 就有两个独立 routing
   决策者——Web 选 B、channel hook 仍可能把请求改回 A。因此：
-  - **host（挂载了 apiProxy）**：channel 的 `install()` 是 no-op（Host 是唯一 owner，首次
-    `session.*` RPC 时懒装 waterfall）；`/model` 走官方 `session.selectModel` RPC（Host 自己
+  - **ownership 是 per-Agent 一次性 pin 的，不是 per-deployment 动态 mode**：`install()` 在
+    agent setup（publication）时按「此刻有没有 apiProxy」决定并**永久记录**；live Agent
+    之后**不会**因 apiProxy 出现而从 local 自动升级（那会装上第二个 waterfall），也**不会**
+    因 apiProxy 消失而从 host 自动降级 local（host-owned 直接 fail-loud，绝不静默降级）。
+    `install()` 返回 disposer（unpin + 移除两条 waterfall listener），bridge teardown 统一
+    释放——borrowed Agent 不能 dispose，必须靠它防止 HMR 后 listener 堆积。
+  - **host（setup 时挂载了 apiProxy）**：channel 的 `install()` 只记录 pin（Host 是唯一
+    owner，首次 `session.*` RPC 时懒装 waterfall）；**`prepare()`**（create/resume/borrow
+    完成后、任何 command/followup 之前调用）通过官方 `session.models` RPC 强制
+    `selectionFor` 先装上——对齐官方 pre-publication `installSelection`，堵住「新会话第一条
+    普通消息没有 Host hook」的窗口；`/model` 走官方 `session.selectModel` RPC（Host 自己
     更新 `selectionFor(...).current` 并保存默认）；读取走 `session.models` 的 `current`（与
-    composer 同源，不漂移）。channel 不再自己 `saveSelection`（Host 会做）。
-  - **local（无 apiProxy，headless）**：channel 自持 ref + `installModelSelection`（对齐官方
+    composer 同源，不漂移）。RPC 失败 / malformed / apiProxy 被替换 → 抛
+    `ChannelModelSelectionBackendError`。channel 不再自己 `saveSelection`（Host 会做）。
+  - **local（setup 时无 apiProxy，headless）**：channel 自持 ref + `installModelSelection`（对齐官方
     Headless）；`/model` 设置 `ref.current` 并 `agentDefaultModel.saveSelection(selection)`
     （写 settings，Web 页面 / 新会话可见）。保存失败 best-effort：官方 catch 后 warn，
-    会话内切换仍生效。
+    会话内切换仍生效。pin 缺失 = invariant violation，抛错而不是静默 return。
 - **回归测试走真实 waterfall**：`commands-model.test.ts` 的 ownership 用例直接 dispatch
   真实的 `system-prompt/assemble` + `agent/request`，断言 host 模式下「channel /model A →
-  Web selectModel B → 下一次真实 assemble/request = B」（双 owner 时会退回 A）。
+  Web selectModel B → 下一次真实 assemble/request = B」（双 owner 时会退回 A）；并覆盖
+  prepare 先于 followup、resume 后 header=A 优先于 default=B、host 消失 fail-loud、
+  disposer 移除 waterfall。
 - **测试易错**：fake agent 用 `createScope(rootCtx, agent)` 会继承根服务、掩盖真实环境 agent
   作用域未注入的差异；凡 handler 读服务的用例，用无注入的裸 `new Context()` 替换 fake `agent.ctx`
   模拟真实环境，并（改代码前）断言旧写法确实失败。参考

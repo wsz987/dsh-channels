@@ -20,7 +20,7 @@ status: as-built
 | 第三方接入指南 | [adapter-authoring.md](adapter-authoring.md) | `defineChannelAdapter`、contract tests、fixtures、manifest、verify |
 | 发布流程 | [release.md](release.md) | Changesets 发版、上游更新策略、release gate |
 | 微信 live 验证 | [weixin-live-verification-runbook.md](weixin-live-verification-runbook.md) | Weixin live gate 操作手册 |
-| 架构决策记录 | [architecture/adr/](architecture/adr/) | ADR 0001（上游边界）、ADR 0002（图片模型降级） |
+| 架构决策记录 | [architecture/adr/](architecture/adr/) | ADR 0001（上游边界）、ADR 0002（图片模型降级策略）、ADR 0003（图片兼容实现 seam） |
 
 ## 分层
 
