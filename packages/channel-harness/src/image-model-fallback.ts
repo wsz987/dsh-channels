@@ -12,13 +12,6 @@ import { toLoggableError } from './loggable-error.js';
 
 export const UNSUPPORTED_IMAGE_PLACEHOLDER = '[图片：当前模型不支持查看]';
 
-interface LlmModelCapabilityService {
-  resolveModelInfo(provider: string, model: string): Promise<{
-    inputModalities?: readonly string[];
-  }>;
-  stream(options: GenerateOptions): AsyncIterable<StreamChunk>;
-}
-
 /**
  * Keep immutable Session history intact while degrading images only at the
  * provider boundary for text-only models used by channel-bound sessions.
@@ -44,9 +37,8 @@ async function* streamWithFallback(
   active: WeakSet<GenerateOptions>,
   logger: ChannelLogger,
 ): AsyncIterable<StreamChunk> {
-  const llm = ctx.llm as unknown as LlmModelCapabilityService;
   try {
-    const info = await llm.resolveModelInfo(options.provider, options.model);
+    const info = await ctx.llm.resolveModelInfo(options.provider, options.model, options.signal);
     if (info.inputModalities === undefined || info.inputModalities.includes('image')) {
       yield* next();
       return;
@@ -73,7 +65,7 @@ async function* streamWithFallback(
       model: options.model,
       sessionId: String(options.sessionId),
     });
-    yield* llm.stream(degraded);
+    yield* ctx.llm.stream(degraded);
   } finally {
     active.delete(degraded);
   }
