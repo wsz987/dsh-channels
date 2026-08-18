@@ -161,6 +161,7 @@ function fakeScopedAgent(ctx: Context, id: string): CommandFakeAgent {
 class CommandGateway implements AgentGateway {
   canResumeValue = true;
   existsValue = false;
+  existsCalls = 0;
   live = new Map<string, GatewayAgentHandle>();
   createCalls: string[] = [];
   createRoutes: (AgentRouteSpec | undefined)[] = [];
@@ -179,7 +180,10 @@ class CommandGateway implements AgentGateway {
     return { id: handle.id, agent: handle.agent, followup: handle.followup, whenIdle: handle.whenIdle };
   }
   canResume(): boolean { return this.canResumeValue; }
-  async exists(): Promise<boolean> { return this.existsValue; }
+  async exists(): Promise<boolean> {
+    this.existsCalls += 1;
+    return this.existsValue;
+  }
 
   async create(sessionId: string, route: AgentRouteSpec, setup?: Parameters<AgentGateway['create']>[2]) {
     this.createStarted.push(sessionId);
@@ -568,6 +572,91 @@ describe('C2. archived binding rollover', () => {
     ).rejects.toThrow('replacement failed');
     expect((await bindingStore.get('weixin:main:user_123'))?.sessionId).toBe(A);
     expect(gateway.disposed).not.toContain(A);
+  });
+});
+
+describe('C3. /new is the repair escape hatch for a STALE durable binding', () => {
+  it('lets /new bootstrap a fresh session and replace the binding when the persisted session is missing', async () => {
+    const rootCtx = new Context();
+    new CommandRuntime(rootCtx);
+    const { gateway, bridge, adapter, bindingStore } = makeBridge(rootCtx);
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
+    const A = gateway.createCalls[0]!;
+
+    // Durable data loss: the agent is gone from this process AND the persisted
+    // session is missing — only the binding survives.
+    gateway.live.clear();
+    gateway.canResumeValue = true;
+    gateway.existsValue = false;
+
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', '/new')));
+
+    // Repair: a FRESH session replaces the stale binding — no session-not-found.
+    const B = gateway.createCalls[1]!;
+    expect(B).not.toBe(A);
+    expect(adapter.sent.map((s) => s.text)).toContain('旧会话数据已丢失，已开启新会话。');
+    expect((await bindingStore.get('weixin:main:user_123'))?.sessionId).toBe(B);
+    // A was owned by this process (created in the first message), so the
+    // repair's retireSession disposes it; after a real restart it would be a
+    // no-op (never live/owned).
+    expect(gateway.disposed).toContain(A);
+    // One membership probe for the stale check, then the repair.
+    expect(gateway.existsCalls).toBe(1);
+  });
+
+  it('keeps ordinary requests failing loud on a stale durable binding (only /new bypasses)', async () => {
+    const rootCtx = new Context();
+    new CommandRuntime(rootCtx);
+    const { gateway, bridge } = makeBridge(rootCtx);
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
+    gateway.live.clear();
+    gateway.canResumeValue = true;
+    gateway.existsValue = false;
+
+    await expect(
+      bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', 'hello again'))),
+    ).rejects.toThrow(/not found in persistence/);
+    expect(gateway.existsCalls).toBe(1);
+  });
+
+  it('keeps /new on a LIVE agent on the normal path (repair probe never runs)', async () => {
+    const rootCtx = new Context();
+    new CommandRuntime(rootCtx);
+    const { gateway, bridge, adapter, bindingStore } = makeBridge(rootCtx);
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
+    const A = gateway.createCalls[0]!;
+    // existsValue=false would read as stale IF the agent were not live.
+    gateway.canResumeValue = true;
+    gateway.existsValue = false;
+
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', '/new')));
+
+    // Live agent -> normal /new flow (borrow -> command plane -> fresh B).
+    const B = gateway.createCalls[1]!;
+    expect(B).not.toBe(A);
+    expect(adapter.sent.map((s) => s.text)).toContain('已开启新会话。');
+    expect((await bindingStore.get('weixin:main:user_123'))?.sessionId).toBe(B);
+    expect(gateway.disposed).toContain(A);
+    // No repair probe: the live agent short-circuits isDurableSessionMissing.
+    expect(gateway.existsCalls).toBe(0);
+  });
+
+  it('shows the usage line for a malformed /new on a stale binding (no repair)', async () => {
+    const rootCtx = new Context();
+    new CommandRuntime(rootCtx);
+    const { gateway, bridge, adapter, bindingStore } = makeBridge(rootCtx);
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
+    const A = gateway.createCalls[0]!;
+    gateway.live.clear();
+    gateway.canResumeValue = true;
+    gateway.existsValue = false;
+
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', '/new junk')));
+
+    expect(adapter.sent.map((s) => s.text)).toContain('用法：/new');
+    // Binding untouched: no fresh session was minted.
+    expect(gateway.createCalls).toHaveLength(1);
+    expect((await bindingStore.get('weixin:main:user_123'))?.sessionId).toBe(A);
   });
 });
 

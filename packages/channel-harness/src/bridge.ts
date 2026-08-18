@@ -366,6 +366,20 @@ export class ChannelHarnessBridge {
   }
 
   /**
+   * Whether the durable session behind an existing binding is MISSING — the
+   * stale condition that makes ordinary resolution fail loud with
+   * SessionNotFoundError (a binding/session durability inconsistency, never
+   * auto-repaired). A live agent is never stale (live-first: no persistence
+   * probe), and without sessionPersistence there is no durable identity to
+   * lose (ephemeral deployments recreate instead).
+   */
+  private async isDurableSessionMissing(binding: SessionBinding): Promise<boolean> {
+    if (this.options.agentManager.getLiveAgent(binding.sessionId)) return false;
+    if (!this.options.agentManager.canResume()) return false;
+    return !(await this.options.agentManager.exists(binding.sessionId));
+  }
+
+  /**
    * Queued (serialized) message handling for one conversation. Captures the
    * generation at ENQUEUE time; /stop bumps it, so this callback drops out at
    * either generation check and can never re-wake a stopped agent (spec §7).
@@ -400,6 +414,36 @@ export class ChannelHarnessBridge {
       // durable entry is intentionally left untouched until the Session factory
       // commits its replacement, preserving rollback semantics on failure.
       binding = undefined;
+    }
+    // /new is the ONE repair escape hatch for a STALE durable binding (the
+    // persisted session behind a durable binding is missing): the user is
+    // explicitly abandoning the old session, so skip recovery — which would
+    // otherwise throw SessionNotFoundError — and bootstrap a fresh session
+    // that replaces the binding. Every other request on the stale binding
+    // still fails loud: the inconsistency is never auto-repaired.
+    if (
+      binding &&
+      parsed &&
+      parsedName === 'new' &&
+      (await this.isDurableSessionMissing(binding))
+    ) {
+      // Arg contract mirrors the registered handler (用法：/new).
+      if (parsed.rawInput.trim().length > 0) {
+        await this.sendCommandNotice(event, '用法：/new');
+        return;
+      }
+      const staleSessionId = binding.sessionId;
+      this.options.logger.info('[channel-harness] /new repairs a stale binding (persisted session missing)', {
+        sessionId: staleSessionId,
+        bindingKey: key,
+      });
+      await this.sessionFactory.create(this.conversationInput(event), route);
+      // Clear the stale session's reverse cache (never live/owned -> the
+      // retire is a no-op dispose); the factory has already overwritten the
+      // binding with the fresh session.
+      await this.options.agentManager.retireSession(staleSessionId);
+      await this.sendCommandNotice(event, '旧会话数据已丢失，已开启新会话。');
+      return;
     }
     let agentRef: AgentRef | undefined;
 
