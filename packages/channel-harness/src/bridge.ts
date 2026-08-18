@@ -47,6 +47,7 @@ import type {
 import type { Config } from './config.js';
 import type { SessionBindingStore } from './binding-store.js';
 import type { AgentManager, AgentRef } from './agent-manager.js';
+import { SessionNotFoundError } from './agent-manager.js';
 import type { AgentRouter, AgentRouteSpec } from './agent-router.js';
 import { routesEqual } from './agent-router.js';
 import {
@@ -430,23 +431,38 @@ export class ChannelHarnessBridge {
         await this.options.agentManager.retireSession(archivedSessionId);
       }
     } else {
-      // --- Existing conversation: reconcile route snapshot + create-vs-resume --
+      // --- Existing conversation: reconcile route snapshot + resolve ----------
       if (!routesEqual(binding.route, route)) {
         binding = { ...binding, route, updatedAt: now };
         await this.options.bindingStore.put(binding);
       }
-      // Decide create vs resume. Live agent -> borrow (both paths). Otherwise
-      // resume when persistence is present and the persisted session exists; a
-      // missing persistence (or missing persisted session) is handed to the
-      // Session factory's `recreate` — it re-runs the workspaceResolver so the
-      // recreated session lands back on the channel Workspace cwd (never the
-      // host cwd) and re-attaches the workspace, keeping the durable binding.
-      if (this.options.agentManager.canResume() && (await this.options.agentManager.exists(binding.sessionId))) {
-        agentRef = await this.options.agentManager.resolve(binding.sessionId, route, this.commandSetup);
-      } else {
+      // Existing-binding resolution follows the official Host resolver order
+      // (live agent -> persistence membership -> resume), never the reverse:
+      //   ① a LIVE agent is borrowed FIRST — persistence is never scanned for
+      //      an agent already live in this process (with thousands of sessions
+      //      the per-inbound persistence scan would dominate);
+      //   ② no sessionPersistence -> explicit EPHEMERAL semantics: recreate via
+      //      the Session factory (workspace-aware, binding kept) is allowed;
+      //   ③ persistence + membership hit -> resume;
+      //   ④ persistence + membership MISS -> a durable binding pointing at a
+      //      vanished persisted session is a durability inconsistency, not a
+      //      first create: fail loud with session-not-found — NEVER silently
+      //      blank-recreate the same session id.
+      const borrowed = await this.options.agentManager.borrowIfLive(
+        binding.sessionId,
+        route,
+        this.commandSetup,
+      );
+      if (borrowed) {
+        agentRef = borrowed;
+      } else if (!this.options.agentManager.canResume()) {
         const recreated = await this.sessionFactory.recreate(binding, route);
         binding = recreated.binding;
         agentRef = recreated.agentRef;
+      } else if (await this.options.agentManager.exists(binding.sessionId)) {
+        agentRef = await this.options.agentManager.resolve(binding.sessionId, route, this.commandSetup);
+      } else {
+        throw new SessionNotFoundError(binding.sessionId, key);
       }
       this.options.agentManager.registerBinding(binding);
     }

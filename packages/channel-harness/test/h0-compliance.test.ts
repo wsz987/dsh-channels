@@ -17,6 +17,7 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session';
 import {
   AgentManager,
   HarnessAgentGateway,
+  SessionNotFoundError,
   type AgentGateway,
   type AgentRouteSpec,
   type GatewayAgentHandle,
@@ -77,6 +78,7 @@ class FakeGateway implements AgentGateway {
   canResumeValue = true;
   existsValue = false;
   persistError?: Error;
+  existsCalls = 0;
   live = new Map<string, GatewayAgentHandle>();
   createCalls: { sessionId: string; route: AgentRouteSpec }[] = [];
   resumeCalls: { sessionId: string; route: AgentRouteSpec }[] = [];
@@ -88,6 +90,7 @@ class FakeGateway implements AgentGateway {
   }
   canResume(): boolean { return this.canResumeValue; }
   async exists(_sessionId: string): Promise<boolean> {
+    this.existsCalls += 1;
     if (this.persistError) throw this.persistError;
     return this.existsValue;
   }
@@ -176,6 +179,8 @@ describe('create/resume route parity', () => {
     // Live agent exists (from create), so both paths borrow; force a live miss by clearing the registry.
     g.live.clear();
     await bridge.handleChannelEvent(makeMessageEvent({ message: { id: 'm2', content: [{ type: 'text', text: 'again' }] } }));
+    // The membership probe runs exactly once, only because the agent was NOT live.
+    expect(g.existsCalls).toBe(1);
     expect(g.resumeCalls).toHaveLength(1);
     expect(g.resumeCalls[0]?.route).toEqual(createdRoute);
     expect(g.resumeCalls[0]?.sessionId).toBe(g.createCalls[0]?.sessionId);
@@ -192,9 +197,11 @@ describe('create/resume route parity', () => {
     // The route stays the same across both messages of one conversation.
     g.live.clear();
     await bridge.handleChannelEvent(makeMessageEvent({ message: { id: 'm2', content: [{ type: 'text', text: 'again' }] } }));
-    // no persistence -> recreates (second create, same sessionId).
+    // no persistence -> ephemeral recreate (second create, same sessionId).
     expect(g.createCalls).toHaveLength(2);
     expect(g.createCalls[1]?.sessionId).toBe(firstSession);
+    // Without persistence the membership probe is never consulted.
+    expect(g.existsCalls).toBe(0);
   });
 });
 describe('optional persistence capability (no error-regex)', () => {
@@ -208,6 +215,8 @@ describe('optional persistence capability (no error-regex)', () => {
     await bridge.handleChannelEvent(makeMessageEvent({ message: { id: 'm2', content: [{ type: 'text', text: 'again' }] } }));
     expect(g.resumeCalls).toHaveLength(0);
     expect(g.createCalls).toHaveLength(2);
+    // No persistence -> the membership probe is never consulted.
+    expect(g.existsCalls).toBe(0);
   });
 
   it('persistence backend error propagates loudly (no create fallback)', async () => {
@@ -218,11 +227,67 @@ describe('optional persistence capability (no error-regex)', () => {
     // First message: new conversation -> create (probe not consulted).
     await bridge.handleChannelEvent(makeMessageEvent());
     const beforeCreates = g.createCalls.length;
-    // Second message: canResume true but the probe throws -> loud, no create fallback.
+    // Second message: the agent is NOT live (live-first order means the probe
+    // only runs on a live miss), canResume true, but the probe throws -> loud,
+    // no create fallback.
+    g.live.clear();
     await expect(
       bridge.handleChannelEvent(makeMessageEvent({ message: { id: 'm2', content: [{ type: 'text', text: 'again' }] } })),
     ).rejects.toThrow(/disk read failed/);
     expect(g.createCalls.length).toBe(beforeCreates);
+  });
+});
+
+describe('existing-binding resolution follows the official Host order (live -> persistence -> resume)', () => {
+  it('borrows a LIVE agent first — persistence is never consulted for a live agent', async () => {
+    const gateway = new FakeGateway();
+    gateway.canResumeValue = true;
+    gateway.existsValue = false; // would be a loud session-not-found if consulted
+    const { gateway: g, bridge } = makeBridge(gateway);
+
+    await bridge.handleChannelEvent(makeMessageEvent());
+    expect(g.createCalls).toHaveLength(1);
+
+    // Second message: the agent is STILL LIVE -> borrowed; the membership
+    // probe must not run (scanning the persisted Session index on every
+    // inbound would dominate at scale).
+    await bridge.handleChannelEvent(makeMessageEvent({ message: { id: 'm2', content: [{ type: 'text', text: 'again' }] } }));
+    expect(g.existsCalls).toBe(0);
+    expect(g.resumeCalls).toHaveLength(0);
+    expect(g.createCalls).toHaveLength(1);
+  });
+
+  it('probes persistence only on a live miss, then resumes when the persisted session exists', async () => {
+    const gateway = new FakeGateway();
+    gateway.canResumeValue = true;
+    gateway.existsValue = true;
+    const { gateway: g, bridge } = makeBridge(gateway);
+    await bridge.handleChannelEvent(makeMessageEvent());
+    g.live.clear();
+    await bridge.handleChannelEvent(makeMessageEvent({ message: { id: 'm2', content: [{ type: 'text', text: 'again' }] } }));
+    expect(g.existsCalls).toBe(1);
+    expect(g.resumeCalls).toHaveLength(1);
+  });
+
+  it('persisted session MISSING behind a durable binding -> loud session-not-found, no blank recreate', async () => {
+    const gateway = new FakeGateway();
+    gateway.canResumeValue = true;
+    gateway.existsValue = false; // the persisted session vanished
+    const { gateway: g, bridge } = makeBridge(gateway);
+
+    await bridge.handleChannelEvent(makeMessageEvent());
+    const beforeCreates = g.createCalls.length;
+
+    // Live miss -> probe consulted -> absent -> the durable binding points at
+    // a vanished persisted session: session-not-found, NEVER a silent blank
+    // recreate of the same id (official Host: session-not-found).
+    g.live.clear();
+    await expect(
+      bridge.handleChannelEvent(makeMessageEvent({ message: { id: 'm2', content: [{ type: 'text', text: 'again' }] } })),
+    ).rejects.toBeInstanceOf(SessionNotFoundError);
+    expect(g.existsCalls).toBe(1);
+    expect(g.createCalls.length).toBe(beforeCreates); // no blank recreate
+    expect(g.resumeCalls).toHaveLength(0);
   });
 });
 

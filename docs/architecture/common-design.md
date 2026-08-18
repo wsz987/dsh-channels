@@ -666,6 +666,36 @@ interface SessionBindingStore {
 
 ---
 
+## 已有 Binding 的 Session 恢复顺序（对齐官方 Host resolver）
+
+已有 binding 的入站消息按官方 Host resolver 的顺序解析：**live Agent 是第一优先级**，
+先查 `ctx.agents`，命中即借用，**绝不先扫持久化 Session 索引**（几千/几万 Session 后
+每条入站的 `persistence.list()` 会成为热点）。
+
+```text
+binding 存在
+  → live?（ctx.agents.get）
+      ├─ yes → borrow（不碰 persistence）
+      └─ no
+           → sessionPersistence 未挂载 → recreate（明确 ephemeral 语义，允许）
+           → membership 命中           → resume
+           → membership 缺失           → 抛 session-not-found（fail loud）
+```
+
+- **无 persistence 的 deployment（ephemeral）**：允许按 recorded id recreate。
+  `ChannelSessionFactory.recreate` 会重跑 `workspaceResolver`（落到 channel
+  workspace cwd，而不是 host cwd）、软 attach workspace、保留 durable binding
+  （仅刷新 `updatedAt` 与 route 快照）。
+- **有 persistence 时，binding 指向的 persisted session 缺失** = binding/session
+  durability 不一致（通常不是「第一次创建」），抛 `SessionNotFoundError`
+  fail loud，**绝不**静默用同 ID 空 Session 顶替 —— 对齐官方
+  「persisted identity missing → session-not-found」。
+- 恢复路径集中在 `channel-harness`：`AgentManager.borrowIfLive` /
+  `resolve` + `ChannelSessionFactory.recreate`，bridge 只编排顺序，不引入
+  error-regex 兜底。
+
+---
+
 ## 输出：只消费官方 `session/event`
 
 Harness 中：

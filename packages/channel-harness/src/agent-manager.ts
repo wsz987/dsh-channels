@@ -58,6 +58,32 @@ export interface PersistenceProbe {
   exists(sessionId: string): Promise<boolean>;
 }
 
+/**
+ * A durable binding references a persisted session that no longer exists
+ * (session-not-found, aligned with the official Host's
+ * "persisted identity missing -> session-not-found"). With a
+ * sessionPersistence service mounted, a missing persisted session behind an
+ * existing binding is a binding/session durability inconsistency — NEVER a
+ * first create — so resolution fails loudly instead of silently
+ * blank-recreating the same session id. Deployments WITHOUT persistence
+ * (ephemeral semantics) never throw this: they recreate on the recorded id.
+ */
+export class SessionNotFoundError extends Error {
+  constructor(
+    readonly sessionId: string,
+    readonly bindingKey?: string,
+  ) {
+    super(
+      `session '${sessionId}' not found in persistence: the binding` +
+        (bindingKey ? ` '${bindingKey}'` : '') +
+        ` references a durable session that no longer exists (binding/session ` +
+        `durability inconsistency); refusing to silently recreate it. Restore ` +
+        `the session or clear/repair the binding.`,
+    );
+    this.name = 'SessionNotFoundError';
+  }
+}
+
 /** Caller-supplied metadata for a fresh agent create (plan §8). */
 export interface AgentCreateMeta {
   /** Explicit working directory for the new session's header.cwd. */
