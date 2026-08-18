@@ -1,6 +1,6 @@
 {
   "name": "@wsz987/channel-files",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/wsz987/dsh-channels.git"
@@ -30,8 +30,8 @@
   },
   "dependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-home-paths": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-llm": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-home-paths": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-llm": "^0.1.0-rc.7",
     "@wsz987/channel-core": "workspace:*",
     "@wsz987/channel-harness": "workspace:*",
     "mammoth": "1.12.1",
@@ -40,11 +40,11 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.7",
     "rimraf": "^6.0.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.7"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-tools": {
@@ -53,4 +53,3 @@
   },
   "license": "MIT"
 }
-

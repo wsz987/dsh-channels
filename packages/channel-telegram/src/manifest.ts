@@ -27,7 +27,7 @@ export interface TelegramManifest {
 /** M5 manifest: direct HTTP protocol, no SDK. */
 export const manifest: TelegramManifest = {
   id: 'telegram',
-  adapterVersion: '0.1.0',
+  adapterVersion: '0.4.0',
   upstream: {
     reference: 'Telegram Bot API (https://core.telegram.org/bots/api)',
     testedVersion: '7.10',

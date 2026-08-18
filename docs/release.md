@@ -28,18 +28,17 @@ ignored development/governance packages (`channel-compat`, `channel-testkit`,
 
 | Package                | Version |
 | ---------------------- | ------- |
-| @wsz987/channel-core      | 0.3.0   |
-| @wsz987/channel-harness   | 0.4.2   |
-| @wsz987/channel-control   | 0.3.0   |
-| @wsz987/channel-files     | 0.3.0   |
-| @wsz987/channel-web       | 0.3.0   |
-| @wsz987/channel-weixin    | 0.8.1   |
-| @wsz987/channel-qq        | 0.5.4   |
-| @wsz987/channel-dingtalk  | 0.7.0   |
-| @wsz987/channel-lark      | 0.6.3   |
-| @wsz987/channel-telegram  | 0.3.0   |
-| @wsz987/dsh-channels      | 0.9.0   |
-
+| @wsz987/channel-core      | 0.4.0   |
+| @wsz987/channel-harness   | 0.4.0   |
+| @wsz987/channel-control   | 0.4.0   |
+| @wsz987/channel-files     | 0.4.0   |
+| @wsz987/channel-web       | 0.4.0   |
+| @wsz987/channel-weixin    | 0.4.0   |
+| @wsz987/channel-qq        | 0.4.0   |
+| @wsz987/channel-dingtalk  | 0.4.0   |
+| @wsz987/channel-lark      | 0.4.0   |
+| @wsz987/channel-telegram  | 0.4.0   |
+| @wsz987/dsh-channels      | 0.4.0   |
 `apps/*` are private (`"private": true`) and never published.
 
 Internal workspace dependencies are declared as `workspace:*` and rewritten to

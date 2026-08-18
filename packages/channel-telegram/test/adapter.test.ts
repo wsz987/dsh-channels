@@ -997,7 +997,7 @@ describe('channel-telegram plugin', () => {
   });
 
   it('exposes an upstream compatibility manifest', () => {
-    expect(manifest).toMatchObject({ id: 'telegram', adapterVersion: '0.1.0', status: 'experimental' });
+    expect(manifest).toMatchObject({ id: 'telegram', adapterVersion: '0.4.0', status: 'experimental' });
     expect(manifest.upstream.strategy).toBe('source');
     expect(manifest.upstream.reference).toContain('core.telegram.org');
   });

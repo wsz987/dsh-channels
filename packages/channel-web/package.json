@@ -1,6 +1,6 @@
 {
   "name": "@wsz987/channel-web",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/wsz987/dsh-channels.git"
@@ -54,7 +54,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.7",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.1",
     "esbuild": "^0.28.2",
@@ -64,7 +64,7 @@
     "vitest": "^3.2.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.6"
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.7"
   },
   "license": "MIT"
 }
