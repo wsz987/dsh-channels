@@ -459,6 +459,9 @@ describe('M5 workspace integration (plan §21)', () => {
     const resolver = new FakeWorkspaceResolver();
     const logger = capturingLogger();
     const { gateway, bridge, bindingStore } = makeBridge({ resolver, logger });
+    // This fixture models an ephemeral deployment: no session persistence is
+    // mounted when the binding is first created.
+    gateway.canResumeValue = false;
 
     // First message -> fresh session on the channel workspace.
     await bridge.handleChannelEvent(makeMessageEvent({ message: { id: 'm1', content: [{ type: 'text', text: 'hello' }] } }));

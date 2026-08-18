@@ -3,13 +3,12 @@
 > Supersedes the *implementation location* of ADR 0002 (the product policy —
 > `degrade` / `reject` as an explicit Channel choice — is retained unchanged).
 > Target implementation lives in `packages/channel-harness`; this record pins
-> the seam and the invariants, and stages the migration away from the current
+> the seam and the invariants for the landed migration away from the old
 > `llm/stream` provider-boundary rewrite.
 
 ## Status
 
-Accepted — design. Implementation staged (the current `llm/stream` listener
-remains operational as the legacy seam until the pre-step listener lands).
+Accepted — implemented.
 
 ## Context
 
@@ -57,17 +56,14 @@ Keep the ADR 0002 product policy (`degrade` default / `reject` opt-in —
 explicitly not host parity) and move the implementation to
 **`agent/pre-step`**, the open-step reconstruction boundary: a listener
 installed on the Agent's scoped context by the channel's existing
-`commandSetup` (next to `installModelSelection`, so only channel-bound agents
-carry it — no global `bindingFor` scan) that, per step:
+`commandSetup` (so only channel-bound agents carry it — no global
+`bindingFor` scan) that, per step:
 
 1. runs `next()` to obtain the proposed `{ kind: 'enter', messages }` decision;
 2. determines the effective selection for THIS step:
-   - local mode: the channel-owned `ModelSelectionRef`'s `assembled` snapshot
-     (set by `system-prompt/assemble`, which the loop runs before `pre-step`)
-     — exactly the provider/model `agent/request` will apply, zero staleness;
-   - host mode: the channel's cached host `current` (from `prepare()`'s
-     `session.models` read) → logged `request/header` → `agent.options` →
-     `agentDefaultModel.currentSelection()`;
+   - the logged `request/header` → `agent.options` →
+     `agentDefaultModel.currentSelection()` chain that Harness uses when it
+     creates/resumes the Session;
 3. probes `llm.resolveModelInfo(provider, model)`; when `inputModalities`
    explicitly omits `image` and any entered message contains an image block:
    - `degrade` — replace each image block in the entered messages with
@@ -98,22 +94,15 @@ carry it — no global `bindingFor` scan) that, per step:
   in the release notes. (Rejected alternative: keep the real image in the log
   and rewrite only the provider request — that is the current invariant
   violation, by definition.)
-- **Capability timing is solved for local mode, bounded for host mode.**
-  Local mode reads the step's actual `assembled` selection, so the probe is
-  exact. Host mode cannot read the Host's ref; the probe uses the fallback
-  chain, leaving a documented one-step window: the first step after a
-  Web-side model switch (the pre-step probe may still see the previous
-  model). The Web UI itself refuses image-orphaning switches
-  (`session.selectModel` image admission), so the residual race is a
-  Web-side switch that ADMITS images onto a text-only model — rare, bounded
-  to one step, and already observable today through the same channel.
+- **Capability timing follows the current Session model.** The probe reads the
+  same current selection that `/status` and `/model` expose. `/model` updates
+  the live Session through Harness's official API/hook, so there is no second
+  channel owner or cached Host selection to reconcile.
 - **Scoping tightens.** Agent-scoped installation removes the global
   listener's `bindingFor` session-scan and the per-request `active` WeakSet
   recursion guard (no recursive dispatch exists anymore).
-- **Cost.** One `resolveModelInfo` lookup per step with images (per agent
-  step, cached per selection); no RPC per step — host `current` is cached at
-  `prepare()` and refreshed on channel `/model` and on logged
-  `request/header` changes.
+- **Cost.** One `resolveModelInfo` lookup per step with images. Model selection
+  itself uses only the official current-session/default surfaces.
 
 ### Known limitations / follow-ups (implementation notes)
 
@@ -123,26 +112,24 @@ carry it — no global `bindingFor` scan) that, per step:
 - `degrade` + later image-capable switch: the placeholder is durable (see
   above); consider surfacing the placeholder text in `/status` or the
   channel notice when a degraded turn occurs (log line already exists).
-- The current `llm/stream` listener must be REMOVED when the pre-step
-  listener lands, not kept in parallel (two seams would double-rewrite or
-  disagree). Until then it remains the shipped behavior; its invariant
-  bypass is documented above.
+- The legacy `llm/stream` listener was removed when the pre-step listener
+  landed; it must not be reintroduced in parallel because two seams would
+  double-rewrite or disagree.
 
 ### Migration stages
 
-1. **This ADR** — seam and invariants pinned (no code change).
-2. Implement the agent-scoped `agent/pre-step` listener
+1. **This ADR** — seam and invariants pinned.
+2. **Completed:** implement the agent-scoped `agent/pre-step` listener
    (`installImageCompatibility(agentCtx, deps)` invoked from
-   `ChannelHarnessBridge.commandSetup`, next to `installModelSelection`;
-   deps = bridge root `llm.resolveModelInfo` seam + the
-   `ChannelModelSelectionController` for the step selection), with the
-   `imageCompatibility.mode` config unchanged.
-3. Regression tests: degraded step's `user/message` durable events contain
+   `ChannelHarnessBridge.commandSetup`; deps = bridge root
+   `llm.resolveModelInfo` seam plus the read-only current-session model view),
+   with the `imageCompatibility.mode` config unchanged.
+3. **Completed:** regression tests: degraded step's `user/message` durable events contain
    the placeholder; `deriveMessages()` equals the model-visible request;
    the official reconstruction invariant passes for a degraded request;
    reject mode; fail-open on missing metadata; non-channel agents untouched;
    mixed text→image→text order preserved.
-4. Delete the `llm/stream` listener + its recursion guard; update
+4. **Completed:** delete the `llm/stream` listener + its recursion guard; update
    `image-model-fallback.ts` (keep `ChannelImageUnsupportedError` and the
    placeholder constant; move the rewrite helper), ADR 0002's status, and
    `config.ts` docs.

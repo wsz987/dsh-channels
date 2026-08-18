@@ -1,223 +1,147 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Context } from '@deepseek-ai/cordis';
-import {
-  freezeMessage,
-  type GenerateOptions,
-  type Message,
-  type StreamChunk,
-} from '@deepseek-ai/dsh-llm';
-import type { AgentManager } from '../src/agent-manager.ts';
+import { Context } from '@deepseek-ai/cordis';
+import type { Agent, ModelSelection } from '@deepseek-ai/dsh-agent';
+import { createScope, scopeTarget } from '@deepseek-ai/dsh-scope';
+import { createUserMessage, freezeMessage, type UserMessage } from '@deepseek-ai/dsh-llm';
+import type { ChannelLogger } from '@wsz987/channel-core';
 import type { ImageCompatibilityMode } from '../src/config.ts';
+import type { ChannelModelSelectionController } from '../src/model-selection.ts';
 import {
   ChannelImageUnsupportedError,
   degradeMessageImages,
-  installImageModelFallback,
+  installImageCompatibility,
   UNSUPPORTED_IMAGE_PLACEHOLDER,
 } from '../src/image-model-fallback.ts';
 
-type StreamListener = (
-  options: GenerateOptions,
-  next: () => AsyncIterable<StreamChunk>,
-) => AsyncIterable<StreamChunk>;
+const logger = {
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+} as unknown as ChannelLogger;
 
-function imageRequest(sessionId = 'channel-session'): GenerateOptions {
-  return {
-    provider: 'test-provider',
-    model: 'test-model',
-    sessionId: sessionId as never,
-    messages: [freezeMessage({
-      id: 'message-request' as never,
-      role: 'user' as const,
-      source: { kind: 'user' as const },
-      content: [
-        { type: 'text' as const, text: 'before' },
-        { type: 'image' as const, attachment: { attachmentId: 'att-request' } as never },
-        { type: 'text' as const, text: 'after' },
-      ],
-    })],
-  };
+function imageMessage(): UserMessage {
+  return createUserMessage({
+    content: [
+      { type: 'text', text: 'before' },
+      { type: 'image', attachment: { attachmentId: 'att-1' } as never },
+      { type: 'text', text: 'after' },
+    ],
+    source: { kind: 'user' },
+  });
 }
 
-async function consume(stream: AsyncIterable<StreamChunk>): Promise<void> {
-  for await (const _chunk of stream) {
-    // The assertions inspect the request that reached the provider boundary.
-  }
+function fakeAgent(root: Context): Agent {
+  const raw = {
+    id: 'channel-session',
+    session: { requestHeader: () => undefined },
+    options: {},
+    ctx: new Context(),
+  } as unknown as Agent;
+  raw.ctx = createScope(root, raw).ctx;
+  return raw;
 }
 
-function fallbackHarness(
+function harness(
   inputModalities: readonly string[] | undefined,
+  selection: ModelSelection = { provider: 'test-provider', model: 'test-model' },
   lookupError?: Error,
   mode: ImageCompatibilityMode = 'degrade',
 ) {
-  let listener: StreamListener | undefined;
-  const providerRequests: GenerateOptions[] = [];
+  const root = new Context();
   const resolveModelInfo = vi.fn(async () => {
     if (lookupError) throw lookupError;
     return { inputModalities };
   });
-  const terminal = (options: GenerateOptions): AsyncIterable<StreamChunk> => {
-    providerRequests.push(options);
-    return (async function* () {})();
-  };
-  const llm = {
-    resolveModelInfo,
-    stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-      if (!listener) throw new Error('llm/stream listener was not installed');
-      return listener(options, () => terminal(options));
-    },
-  };
-  const ctx = {
-    llm,
-    on(event: string, callback: StreamListener) {
-      expect(event).toBe('llm/stream');
-      listener = callback;
-      return () => { listener = undefined; };
-    },
-  } as unknown as Context;
-  const agentManager = {
-    bindingFor: (sessionId: string) => sessionId === 'channel-session' ? {} : undefined,
-  } as AgentManager;
-  const logger = {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  };
-
-  const dispose = installImageModelFallback(ctx, agentManager, logger, mode);
-  return { llm, providerRequests, resolveModelInfo, logger, dispose };
+  (root as unknown as { llm: { resolveModelInfo: typeof resolveModelInfo } }).llm = { resolveModelInfo };
+  const agent = fakeAgent(root);
+  const modelSelection = {
+    selectionForStep: vi.fn(async () => selection),
+  } as unknown as ChannelModelSelectionController;
+  const dispose = installImageCompatibility(agent.ctx, root, modelSelection, logger, mode);
+  async function preStep(messages: UserMessage[]): Promise<{ kind: 'enter'; messages: UserMessage[] }> {
+    const decision = await agent.ctx.waterfall(
+      scopeTarget(agent, agent),
+      'agent/pre-step',
+      {
+        agent,
+        messages,
+        turn: 1,
+        step: 1,
+        signal: new AbortController().signal,
+      },
+      () => Promise.resolve({ kind: 'enter' as const, messages }),
+    );
+    if (decision.kind !== 'enter') throw new Error('unexpected rejected decision');
+    return decision;
+  }
+  return { agent, resolveModelInfo, modelSelection, preStep, dispose };
 }
 
-describe('image model fallback', () => {
-  it('replaces images in place while preserving message identity and text order', () => {
-    const original = freezeMessage({
-      id: 'message-1' as never,
-      role: 'user' as const,
-      source: { kind: 'user' as const },
-      content: [
-        { type: 'text' as const, text: 'before' },
-        { type: 'image' as const, attachment: { attachmentId: 'att-1' } as never },
-        { type: 'text' as const, text: 'after' },
-      ],
-    }) as Message;
-
+describe('image compatibility at agent/pre-step', () => {
+  it('replaces images in place while preserving identity and text order', () => {
+    const original = freezeMessage(imageMessage());
     const degraded = degradeMessageImages(original);
-
     expect(degraded.id).toBe(original.id);
     expect(degraded.content).toEqual([
       { type: 'text', text: 'before' },
       { type: 'text', text: UNSUPPORTED_IMAGE_PLACEHOLDER },
       { type: 'text', text: 'after' },
     ]);
-    expect(original.content[1]?.type).toBe('image');
+    expect(original.content[1]!.type).toBe('image');
   });
 
-  it('returns messages without images unchanged', () => {
-    const original = freezeMessage({
-      id: 'message-2' as never,
-      role: 'user' as const,
-      source: { kind: 'user' as const },
-      content: [{ type: 'text' as const, text: 'text only' }],
-    }) as Message;
-
-    expect(degradeMessageImages(original)).toBe(original);
-  });
-
-  it('degrades a channel request once at the provider boundary', async () => {
-    const harness = fallbackHarness(['text']);
-    const original = imageRequest();
-
-    await consume(harness.llm.stream(original));
-
-    expect(harness.resolveModelInfo).toHaveBeenCalledTimes(1);
-    expect(harness.providerRequests).toHaveLength(1);
-    expect(harness.providerRequests[0]).not.toBe(original);
-    expect(harness.providerRequests[0]!.messages[0]!.content).toEqual([
-      { type: 'text', text: 'before' },
-      { type: 'text', text: UNSUPPORTED_IMAGE_PLACEHOLDER },
-      { type: 'text', text: 'after' },
-    ]);
-    expect(original.messages[0]!.content[1]!.type).toBe('image');
+  it('degrades the proposed step before it is logged', async () => {
+    const h = harness(['text']);
+    const original = imageMessage();
+    const decision = await h.preStep([original]);
+    expect(h.resolveModelInfo).toHaveBeenCalledTimes(1);
+    expect(decision.messages[0]).not.toBe(original);
+    expect(decision.messages[0]!.content[1]).toEqual({
+      type: 'text',
+      text: UNSUPPORTED_IMAGE_PLACEHOLDER,
+    });
   });
 
   it.each([
     ['image-capable model', ['text', 'image'] as const, undefined],
     ['unknown capabilities', undefined, undefined],
     ['failed lookup', undefined, new Error('metadata unavailable')],
-  ] as const)('passes the original request for %s', async (_case, modalities, error) => {
-    const harness = fallbackHarness(modalities, error);
-    const original = imageRequest();
-
-    await consume(harness.llm.stream(original));
-
-    expect(harness.providerRequests).toEqual([original]);
-    if (error) expect(harness.logger.warn).toHaveBeenCalledTimes(1);
+  ] as const)('passes the proposed step unchanged for %s', async (_name, modalities, error) => {
+    const h = harness(modalities, undefined, error);
+    const original = imageMessage();
+    const decision = await h.preStep([original]);
+    expect(decision.messages[0]).toBe(original);
+    if (error) expect(logger.warn).toHaveBeenCalled();
   });
 
-  it('does not affect image requests outside channel-bound sessions', async () => {
-    const harness = fallbackHarness(['text']);
-    const original = imageRequest('web-session');
-
-    await consume(harness.llm.stream(original));
-
-    expect(harness.resolveModelInfo).not.toHaveBeenCalled();
-    expect(harness.providerRequests).toEqual([original]);
+  it('does not query model capability for text-only steps', async () => {
+    const h = harness(['text']);
+    const original = createUserMessage({ content: [{ type: 'text', text: 'text only' }], source: { kind: 'user' } });
+    const decision = await h.preStep([original]);
+    expect(decision.messages[0]).toBe(original);
+    expect(h.resolveModelInfo).not.toHaveBeenCalled();
+    expect(h.modelSelection.selectionForStep).not.toHaveBeenCalled();
   });
-});
 
-describe('image compatibility policy (degrade | reject)', () => {
-  it('defaults to degrade: a text-only model gets the placeholder, never an error', async () => {
-    const harness = fallbackHarness(['text']);
-    const original = imageRequest();
+  it('rejects a text-only model without returning a provider request', async () => {
+    const h = harness(['text'], undefined, undefined, 'reject');
+    await expect(h.preStep([imageMessage()])).rejects.toBeInstanceOf(ChannelImageUnsupportedError);
+  });
 
-    await consume(harness.llm.stream(original));
-
-    expect(harness.providerRequests).toHaveLength(1);
-    expect(harness.providerRequests[0]!.messages[0]!.content[1]).toEqual({
-      type: 'text',
-      text: UNSUPPORTED_IMAGE_PLACEHOLDER,
+  it('preserves nested image order in tool results', () => {
+    const original = createUserMessage({
+      content: [{
+        type: 'tool-result',
+        toolCallId: 'call-1' as never,
+        content: [{ type: 'image', attachment: { attachmentId: 'att-1' } as never }],
+      }],
+      source: { kind: 'user' },
     });
-  });
-
-  it('reject: a text-only model gets a ChannelImageUnsupportedError and the request is never sent', async () => {
-    const harness = fallbackHarness(['text'], undefined, 'reject');
-    const original = imageRequest();
-
-    await expect(consume(harness.llm.stream(original))).rejects.toThrow(
-      ChannelImageUnsupportedError,
-    );
-
-    expect(harness.providerRequests).toHaveLength(0);
-    expect(original.messages[0]!.content[1]!.type).toBe('image');
-    expect(harness.logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('rejected image request'),
-      expect.objectContaining({ provider: 'test-provider', model: 'test-model' }),
-    );
-  });
-
-  it('reject: image-capable models and non-channel sessions still pass through untouched', async () => {
-    const harness = fallbackHarness(['text', 'image'], undefined, 'reject');
-    const original = imageRequest();
-    await consume(harness.llm.stream(original));
-    expect(harness.providerRequests).toEqual([original]);
-
-    const harnessOutside = fallbackHarness(['text'], undefined, 'reject');
-    const web = imageRequest('web-session');
-    await consume(harnessOutside.llm.stream(web));
-    expect(harnessOutside.resolveModelInfo).not.toHaveBeenCalled();
-    expect(harnessOutside.providerRequests).toEqual([web]);
-  });
-
-  it('reject: unknown capabilities and failed lookups still fail open', async () => {
-    const unknown = fallbackHarness(undefined, undefined, 'reject');
-    const req = imageRequest();
-    await consume(unknown.llm.stream(req));
-    expect(unknown.providerRequests).toEqual([req]);
-
-    const failed = fallbackHarness(undefined, new Error('metadata unavailable'), 'reject');
-    const req2 = imageRequest();
-    await consume(failed.llm.stream(req2));
-    expect(failed.providerRequests).toEqual([req2]);
-    expect(failed.logger.warn).toHaveBeenCalledTimes(1);
+    const degraded = degradeMessageImages(original);
+    expect(degraded.content[0]).toMatchObject({
+      type: 'tool-result',
+      content: [{ type: 'text', text: UNSUPPORTED_IMAGE_PLACEHOLDER }],
+    });
   });
 });

@@ -27,16 +27,15 @@ As a Cordis plugin:
     - commands
 ```
 
-Inbound channel images remain real `ImageBlock`s in the original Session. How a
-text-only model handles them is an explicit **Channel compatibility policy**
-(`imageCompatibility.mode`, default `degrade`), not host parity: the official
-Web host refuses to switch a Session to a model that cannot see its existing
-images, while channels keep serving the conversation. With `degrade`, each
-image is replaced by `[图片：当前模型不支持查看]` only in the provider-visible
-request (Session history keeps the real blocks, text and image order preserved,
-unknown capabilities fail open). With `reject`, the request is refused with an
-error instead — the user must start a new Session (`/new`) or switch to an
-image-capable model.
+How a text-only model handles inbound channel images is an explicit **Channel
+compatibility policy** (`imageCompatibility.mode`, default `degrade`), not host
+parity: the official Web host refuses to switch a Session to a model that
+cannot see its existing images, while channels keep serving the conversation.
+With `degrade`, each image is replaced by `[图片：当前模型不支持查看]` at the
+agent `pre-step` boundary, so the durable `user/message` and the model request
+stay reconstructable and text/image order is preserved. Unknown capabilities
+fail open. With `reject`, the step is refused with an error instead — the user
+must start a new Session (`/new`) or switch to an image-capable model.
 
 ## What it does
 
@@ -49,6 +48,13 @@ image-capable model.
 | `WorkspaceResolver` | Maps conversations to Harness workspaces (`channel-account` by default) |
 | commands | Registers Agent-scoped slash commands (`/new`) through Harness `CommandRuntime` |
 | outbox | Proactive `send_channel_message` tool support (`OutboxService`) |
+
+Model routing remains Harness-owned. A channel Session uses the model resolved
+at create/resume time from its request header, route options, or the shared
+`agentDefaultModel`. `/model` delegates the current-Session switch to the
+official Host RPC (or the official headless hook) and persists the same choice
+as the default for future Sessions. The bridge does not add a second owner or
+run a first-turn model preparation RPC.
 
 ## Configuration
 

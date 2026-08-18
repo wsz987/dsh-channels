@@ -17,6 +17,7 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session';
 import {
   AgentManager,
   HarnessAgentGateway,
+  PersistenceUnavailableError,
   SessionNotFoundError,
   type AgentGateway,
   type AgentRouteSpec,
@@ -234,6 +235,25 @@ describe('optional persistence capability (no error-regex)', () => {
     await expect(
       bridge.handleChannelEvent(makeMessageEvent({ message: { id: 'm2', content: [{ type: 'text', text: 'again' }] } })),
     ).rejects.toThrow(/disk read failed/);
+    expect(g.createCalls.length).toBe(beforeCreates);
+  });
+
+  it('durable binding does not recreate when persistence becomes temporarily unavailable', async () => {
+    const gateway = new FakeGateway();
+    gateway.canResumeValue = true;
+    gateway.existsValue = true;
+    const { gateway: g, bridge } = makeBridge(gateway);
+    await bridge.handleChannelEvent(makeMessageEvent());
+    const beforeCreates = g.createCalls.length;
+
+    // The binding was created while persistence was available, so its policy
+    // is durable. A later HMR/unmount is capability loss, not an ephemeral
+    // deployment transition.
+    gateway.canResumeValue = false;
+    g.live.clear();
+    await expect(
+      bridge.handleChannelEvent(makeMessageEvent({ message: { id: 'm2', content: [{ type: 'text', text: 'again' }] } })),
+    ).rejects.toBeInstanceOf(PersistenceUnavailableError);
     expect(g.createCalls.length).toBe(beforeCreates);
   });
 });

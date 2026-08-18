@@ -295,13 +295,14 @@ describe('/status (spec §14)', () => {
     expect(out).toContain('Status: idle');
   });
 
-  it('shows the picked model selection in the model block', async () => {
+  it('shows the Harness default model in the model block', async () => {
     const rootCtx = new Context();
     new CommandRuntime(rootCtx);
-    const { gateway, bridge, adapter, modelSelection } = makeBridge(rootCtx, new ChannelModelSelectionController(rootCtx));
+    rootCtx.provide('agentDefaultModel', {
+      currentSelection: () => ({ provider: 'openai', model: 'gpt-5.6' }),
+    });
+    const { bridge, adapter } = makeBridge(rootCtx, new ChannelModelSelectionController(rootCtx));
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
-    const agent = gateway.agents.get(gateway.createCalls[0]!)!;
-    await modelSelection.select(agent as never, { provider: 'openai', model: 'gpt-5.6' });
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', '/status')));
     const out = lastSent(adapter);
     expect(out).toContain('Provider: openai');
@@ -389,9 +390,13 @@ describe('real-env agent scoped context (no injected services)', () => {
     const { gateway, bridge, adapter } = makeBridge(rootCtx);
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
     const agent = gateway.agents.get(gateway.createCalls[0]!)!;
+    const realAgentCtx = agent.ctx;
     agent.ctx = new Context() as never;
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', '/models')));
     expect(adapter.sent[adapter.sent.length - 1]?.text).toContain('openai');
+    // Restore the exact Agent scope before exercising the current-session model
+    // hook; the previous replacement only tests the command's llm dependency.
+    agent.ctx = realAgentCtx;
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m3', '/model openai gpt-5.6')));
     expect(adapter.sent[adapter.sent.length - 1]?.text).toContain('模型已切换');
   });

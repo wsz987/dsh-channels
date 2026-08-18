@@ -10,7 +10,8 @@
  * - a v2 entry (has `route` + `sessionId`, no `conversationType`) is converted
  *   to v3 by adding the documented legacy default `conversationType: 'dm'`
  *   (v2 did not model group vs dm) and leaving `senderId` unset, then stamped
- *   `schemaVersion: 3` and logged.
+ *   `schemaVersion: 3` and logged. Bindings without the later optional
+ *   `durability` policy are treated as durable by the bridge (fail closed).
  *
  * Old fields are NEVER silently reinterpreted as the new semantics: `agentId`
  * is explicitly carried into `route.model` (never onto the identity), and a v2

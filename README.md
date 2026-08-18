@@ -111,7 +111,7 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 | `/help [command]` | 查看当前会话实际生效的命令，或单个命令的用法 |
 | `/status` | 查看当前 Session / Agent / 模型状态 |
 | `/models [provider]` | 查看 Harness 当前注册的模型 Provider 及其模型 |
-| `/model [<provider> <model> [<reasoningEffort>]]` | 查看或切换当前会话的模型 |
+| `/model [<provider> <model> [<reasoningEffort>]]` | 查看或切换当前会话模型 |
 
 - 若宿主加载了官方插件（`/compact`、`/goal`、`/plan`、`/feedback` 等），这些命令也会自动出现在渠道里，无需额外升级。
 - **未注册的斜杠指令不再被拦截**：会原样作为普通用户输入交给模型处理。
@@ -119,12 +119,12 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 #### `/model` 示例
 
 ```text
-/model                       # 查看当前模型
+/model                       # 查看当前会话解析到的模型
 /model deepseek deepseek-chat
 /model openai gpt-5.6 high   # 指定 reasoning effort
 ```
 
-> `/model` 会同时设为全局默认模型（Web 页面 / 新会话可见，无需刷新）。
+> `/model` 切换当前会话，并同步写入 Harness 的全局默认模型，供后续新会话使用。
 
 ### 主动外发
 

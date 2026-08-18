@@ -99,9 +99,9 @@ export type ImageCompatibilityMode = 'degrade' | 'reject';
 export interface ImageCompatibilityConfig {
   /**
    * `degrade` (default): a text-only model keeps serving the Session — every
-   * image block is replaced by `[图片：当前模型不支持查看]` only in the
-   * provider-visible request, while Session history keeps the real
-   * `ImageBlock`s.
+   * image block is replaced by `[图片：当前模型不支持查看]` at the
+   * `agent/pre-step` boundary, so the placeholder is the durable user message
+   * and the exact content reconstructed for the model request.
    * `reject`: the request is refused with an error instead (closest to the
    * official Web behavior) — the user must start a new Session (`/new`) or
    * switch to an image-capable model.

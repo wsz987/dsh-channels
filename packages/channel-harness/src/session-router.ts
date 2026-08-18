@@ -12,11 +12,11 @@
  * durable outbox needs — `conversationType: 'dm' | 'group'` (required) and the
  * optional `senderId` of the peer behind a DM. It also keeps `sessionId` (the
  * unique Agent/Session runtime identity — Harness Agent identity IS
- * `SessionId`) plus a `route` snapshot used to keep create/resume parity, and
- * `schemaVersion: 3`.
+ * `SessionId`) plus a `route` snapshot used to keep create/resume parity, an
+ * optional stable `durability` policy, and `schemaVersion: 3`.
  *
  * v3 persists ONLY stable identity (plan \u00a756): channel / account /
- * conversation / type / thread / sender / session / route. Transient platform
+ * conversation / type / thread / sender / session / durability / route. Transient platform
  * state is NEVER stored here — `sessionWebhook`, `replyToMessageId`,
  * `runId`, `contextToken`, a media URL and an AES key all travel only with the
  * triggering turn (see `reply-context-store`), never in a binding.
@@ -29,6 +29,9 @@ import type { AgentRouteSpec } from './agent-router.js';
 
 export const SESSION_BINDING_SCHEMA_VERSION = 3 as const;
 
+/** Stable policy recorded with a binding; it is independent of live service availability. */
+export type SessionDurability = 'ephemeral' | 'durable';
+
 export interface SessionBinding {
   channelId: string;
   accountId: string;
@@ -40,6 +43,12 @@ export interface SessionBinding {
   senderId?: string;
   /** Unique Agent/Session runtime identity (Harness Agent id === SessionId). */
   sessionId: string;
+  /**
+   * Whether this binding is expected to survive process restarts. Optional for
+   * pre-durability bindings; consumers treat an omitted value as durable so a
+   * temporarily unavailable persistence service cannot trigger recreation.
+   */
+  durability?: SessionDurability;
   /** Routing snapshot used for create/resume parity. */
   route: AgentRouteSpec;
   schemaVersion: typeof SESSION_BINDING_SCHEMA_VERSION;

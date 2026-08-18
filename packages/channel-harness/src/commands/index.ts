@@ -50,12 +50,7 @@ export interface ChannelModelCatalog {
 export interface ChannelCommandDependencies {
   /** Start a brand-new Harness session for the current conversation. */
   startNewSession(agent: Agent): Promise<void>;
-  /**
-   * Per-agent model selection with exactly ONE backend per deployment (host
-   * RPC when a Web Host is mounted, a local ref otherwise), backing /status
-   * and /model. `select` also persists the switch as the Harness-wide
-   * default through the owning backend.
-   */
+  /** Harness session/default model view used by /status, /model and images. */
   modelSelection: ChannelModelSelectionController;
   /** Effective command view for an agent (global + agent-scope shadow). */
   listCommands(agent: Agent): readonly CommandDescriptor[];

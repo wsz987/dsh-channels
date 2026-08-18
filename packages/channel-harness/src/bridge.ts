@@ -47,7 +47,7 @@ import type {
 import type { Config } from './config.js';
 import type { SessionBindingStore } from './binding-store.js';
 import type { AgentManager, AgentRef } from './agent-manager.js';
-import { SessionNotFoundError } from './agent-manager.js';
+import { PersistenceUnavailableError, SessionNotFoundError } from './agent-manager.js';
 import type { AgentRouter, AgentRouteSpec } from './agent-router.js';
 import { routesEqual } from './agent-router.js';
 import {
@@ -75,6 +75,7 @@ import {
 import { ChannelModelSelectionController } from './model-selection.js';
 import { toLoggableError } from './loggable-error.js';
 import { ChannelSessionFactory } from './channel-session-factory.js';
+import { installImageCompatibility } from './image-model-fallback.js';
 
 export interface ChannelHarnessBridgeOptions {
   config: Config;
@@ -156,10 +157,9 @@ export class ChannelWorkspaceAttachError extends Error {
 export class ChannelHarnessBridge {
   private readonly sessionFactory: ChannelSessionFactory;
   private readonly commandDisposers = new Set<ChannelCommandDisposer>();
-  /** Per-agent model-selection pins (official waterfall listeners, local mode). */
   private readonly modelSelectionDisposers = new Set<() => void>();
   private commandSetupsDisposed = false;
-  /** Per-agent model selection (created by default when none is supplied). */
+  /** Thin view over Harness's session/default model semantics. */
   private readonly modelSelection: ChannelModelSelectionController;
   /** Normalized command deps handed to every agent setup. */
   private readonly commandDeps: ChannelCommandDependencies;
@@ -297,30 +297,34 @@ export class ChannelHarnessBridge {
   }
 
   /**
-   * One-time Agent-scoped command + model-selection setup. Installed onto an
+   * One-time Agent-scoped command, model-hook and image-policy setup. Installed onto an
    * Agent's scoped context by every create/resolve and by the Session
    * factory's recreate (borrow + create) so a fresh, resumed OR recreated
-   * session gets the channel commands AND /model support before any driving
-   * happens (spec §22).
+   * session gets the channel commands and channel policies before any driving
+   * happens. Harness still resolves the Session model at creation/resume.
    */
   // Bound arrow: passed to create/resolve/borrowIfLive as the official
   // AgentSetup (invoked as a bare setup(agentCtx)), so this must stay the
   // bridge instance.
   private commandSetup = async (agentCtx: Context): Promise<void> => {
     const disposeCommands = await installChannelCommands(agentCtx, this.commandDeps);
-    // Model selection: pin ONE backend per agent and (local mode) couple one
-    // mutable ref to prompt assembly + request routing for this agent scope
-    // (spec §18/§22). The returned disposer removes the pin AND the two
-    // waterfall listeners — required for borrowed agents (never disposed) so
-    // a reloading bridge cannot leave stale listeners behind.
     const disposeModelSelection = this.modelSelection.install(agentCtx);
+    const disposeImageCompatibility = installImageCompatibility(
+      agentCtx,
+      this.options.ctx,
+      this.modelSelection,
+      this.options.logger,
+      this.options.config.imageCompatibility.mode,
+    );
     if (this.commandSetupsDisposed) {
       await disposeCommands();
       disposeModelSelection();
+      disposeImageCompatibility();
       throw new Error('channel-harness command setup continued after bridge disposal');
     }
     this.commandDisposers.add(disposeCommands);
     this.modelSelectionDisposers.add(disposeModelSelection);
+    this.commandDisposers.add(async () => disposeImageCompatibility());
     // M4: Agent-scoped read_channel_attachment tool. Registered on the agent's
     // own scope so it is disposed with the agent. Best-effort: a tool-install
     // failure must never roll back the agent setup.
@@ -342,20 +346,16 @@ export class ChannelHarnessBridge {
     }
   };
 
-  /** Release this bridge's Agent-scoped command + model-selection registrations. */
+  /** Release this bridge's Agent-scoped command and image-policy registrations. */
   async disposeCommandSetups(): Promise<void> {
     this.commandSetupsDisposed = true;
     const commandDisposers = [...this.commandDisposers];
     this.commandDisposers.clear();
-    const modelSelectionDisposers = [...this.modelSelectionDisposers];
+    const modelDisposers = [...this.modelSelectionDisposers];
     this.modelSelectionDisposers.clear();
-    // Model-selection disposers unpin agents and (local mode) remove the two
-    // official waterfall listeners — a reloading bridge must release these
-    // BEFORE a replacement bridge can borrow the same live agents, or the
-    // channel hook would stack listeners on borrowed (never-disposed) agents.
     await Promise.all([
       ...commandDisposers.map((dispose) => dispose()),
-      ...modelSelectionDisposers.map((dispose) => Promise.resolve(dispose())),
+      ...modelDisposers.map((dispose) => Promise.resolve(dispose())),
     ]);
   }
 
@@ -395,6 +395,11 @@ export class ChannelHarnessBridge {
     if (this.options.agentManager.getLiveAgent(binding.sessionId)) return false;
     const probe = await this.options.agentManager.probePersisted(binding.sessionId);
     return probe === 'missing';
+  }
+
+  /** Bindings without the field predate the stable policy; fail closed. */
+  private bindingDurability(binding: SessionBinding): 'ephemeral' | 'durable' {
+    return binding.durability ?? 'durable';
   }
 
   /**
@@ -503,14 +508,12 @@ export class ChannelHarnessBridge {
       //   ① a LIVE agent is borrowed FIRST — persistence is never scanned for
       //      an agent already live in this process (with thousands of sessions
       //      the per-inbound persistence scan would dominate);
-      //   ② one ATOMIC probe decides the rest — no sessionPersistence mounted
-      //      right now -> explicit EPHEMERAL semantics: recreate via the
-      //      Session factory (workspace-aware, binding kept) is allowed;
+      //   ② one ATOMIC probe decides the rest; availability is not durability:
+      //      durable + unavailable -> fail loud (never recreate);
+      //      ephemeral + unavailable -> recreate via the Session factory;
       //   ③ membership hit -> resume;
-      //   ④ membership MISS -> a durable binding pointing at a vanished
-      //      persisted session is a durability inconsistency, not a first
-      //      create: fail loud with session-not-found — NEVER silently
-      //      blank-recreate the same session id.
+      //   ④ membership MISS -> durable binding => session-not-found, while an
+      //      explicitly ephemeral binding may recreate the recorded id.
       const borrowed = await this.options.agentManager.borrowIfLive(
         binding.sessionId,
         route,
@@ -520,29 +523,24 @@ export class ChannelHarnessBridge {
         agentRef = borrowed;
       } else {
         const probe = await this.options.agentManager.probePersisted(binding.sessionId);
-        if (probe === 'unavailable') {
+        if (probe === 'unavailable' && this.bindingDurability(binding) === 'ephemeral') {
           const recreated = await this.sessionFactory.recreate(binding, route);
           binding = recreated.binding;
           agentRef = recreated.agentRef;
         } else if (probe === 'present') {
           agentRef = await this.options.agentManager.resolve(binding.sessionId, route, this.commandSetup);
+        } else if (probe === 'unavailable') {
+          throw new PersistenceUnavailableError(binding.sessionId, key);
+        } else if (this.bindingDurability(binding) === 'ephemeral') {
+          const recreated = await this.sessionFactory.recreate(binding, route);
+          binding = recreated.binding;
+          agentRef = recreated.agentRef;
         } else {
           throw new SessionNotFoundError(binding.sessionId, key);
         }
       }
       this.options.agentManager.registerBinding(binding);
     }
-
-    // --- ModelSelection drive-time readiness ----------------------------------
-    // AFTER create/resume/borrow resolved, BEFORE any command execution or
-    // followup: host mode forces the official Host `selectionFor` install on
-    // this agent via ONE `session.models` RPC (pre-publication parity), so a
-    // fresh/resumed/borrowed session's FIRST request already routes through
-    // the Host's ModelSelection — including a plain-text first message that
-    // never touches any other `session.*` RPC. Local mode is a no-op. A
-    // failed prepare fails the message loudly: the agent is never driven
-    // without an owning ModelSelection backend.
-    await this.modelSelection.prepare(agentRef!.agent);
 
     // --- Command admission (spec §12) ----------------------------------------
     // Registered commands run on the Human Command Plane; UNREGISTERED slash

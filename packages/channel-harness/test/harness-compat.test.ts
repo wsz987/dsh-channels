@@ -308,7 +308,7 @@ describe('sessionPersistence is a LIVE optional capability (no startup snapshot)
     const resolvePersistence = vi.fn(() => holder.current);
     const gateway = new HarnessAgentGateway(ctx, resolvePersistence);
 
-    // Startup WITHOUT persistence: ephemeral semantics (no resume capability).
+    // Startup without a provider: the live capability is unavailable.
     expect(gateway.canResume()).toBe(false);
     expect(await gateway.probePersisted('s1')).toBe('unavailable');
 
@@ -318,7 +318,7 @@ describe('sessionPersistence is a LIVE optional capability (no startup snapshot)
     expect(await gateway.probePersisted('s1')).toBe('present');
     expect(await gateway.probePersisted('s2')).toBe('missing');
 
-    // unmount again (HMR teardown): back to ephemeral, same gateway instance.
+    // Unmount again (HMR teardown): the same gateway observes unavailability.
     holder.current = undefined;
     expect(gateway.canResume()).toBe(false);
     expect(await gateway.probePersisted('s1')).toBe('unavailable');

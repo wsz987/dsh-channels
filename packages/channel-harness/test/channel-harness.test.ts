@@ -786,7 +786,7 @@ describe('ChannelHarnessBridge end-to-end', () => {
     try {
       const file = join(dir, 'bindings.json');
       const seed = new FileBindingStore(file);
-      await seed.put(makeBinding({ conversationId: 'user_123', sessionId: 'seed-session' }));
+      await seed.put(makeBinding({ conversationId: 'user_123', sessionId: 'seed-session', durability: 'ephemeral' }));
 
       const ctx = new Context();
       new ChannelService(ctx);
@@ -860,7 +860,7 @@ describe('ChannelHarnessBridge end-to-end', () => {
     try {
       const file = join(dir, 'bindings.json');
       const seed = new FileBindingStore(file);
-      await seed.put(makeBinding({ conversationId: 'user_123', sessionId: 'seed-session' }) satisfies SessionBinding);
+      await seed.put(makeBinding({ conversationId: 'user_123', sessionId: 'seed-session', durability: 'ephemeral' }) satisfies SessionBinding);
 
       const ctx = new Context();
       new ChannelService(ctx);

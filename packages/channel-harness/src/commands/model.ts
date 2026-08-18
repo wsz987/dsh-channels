@@ -1,24 +1,10 @@
 /**
  * The `/model` command (spec §18–§29).
  *
- * Switching goes through the channel's SINGLE model-selection backend
- * (`ChannelModelSelectionController`): never mutates `agent.options`, never
- * disposes+resumes the agent, never writes `binding.route` (which would be
- * overwritten by the next routing reconciliation — spec §23).
- *
- * - Web Host mounted (`apiProxy`): the controller routes the switch through
- *   the official `session.selectModel` RPC. The Host is the sole
- *   ModelSelection owner — it updates its per-session `selectionFor(...).current`
- *   (the composer model selector's source) and persists the shared default
- *   itself; a Host rejection fails the switch and is surfaced here.
- * - No Host: the controller sets its own `ModelSelectionRef` and persists the
- *   shared default via `agentDefaultModel.saveSelection` (headless parity).
- *
- * Either way the official `installModelSelection` hook applies the selection
- * from the NEXT model step, and Harness persists it through the session
- * `request/header` log so a resume restores it (spec §24). Exactly one
- * backend is ever installed per agent, so the channel hook can never fight
- * the Host's routing decision.
+ * Harness owns model routing. The command validates the requested model and
+ * delegates the current-Session switch to the official Host RPC or the
+ * headless Agent model-selection hook. The same operation updates the shared
+ * default so future Sessions use the selected model as well.
  *
  * Validation: provider must come from `ctx.llm.listProviders()` (spec §28);
  * the exact model is resolved ONCE via `ctx.llm.resolveModelInfo` — catalog
@@ -96,10 +82,8 @@ export function createModelCommand(deps: ChannelCommandDependencies): CommandDef
         reasoningEffort = ReasoningEffortId(effort);
       }
 
-      // 4. Pick the selection through the deployment's ONE model-selection
-      //    backend (host RPC or local ref; the backend also persists the
-      //    switch as the Harness-wide default). Effective from the next model
-      //    step. A host rejection surfaces here instead of half-applying.
+      // 4. Delegate the live Session switch. The controller also persists the
+      // shared default for future Sessions, matching Harness's model command.
       const selection: ModelSelection = {
         provider: providerId,
         model: modelId,
@@ -114,7 +98,7 @@ export function createModelCommand(deps: ChannelCommandDependencies): CommandDef
       // 5. Report success.
       return {
         kind: 'success',
-        text: formatSelection('模型已切换：', selection) + '\n\n从下一次模型执行步骤开始生效。',
+        text: formatSelection('模型已切换：', selection) + '\n\n当前会话从下一次模型执行开始生效；该选择也会成为新会话默认。',
       };
     },
   };

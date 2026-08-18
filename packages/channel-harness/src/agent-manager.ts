@@ -69,6 +69,18 @@ export interface PersistenceProbe {
  */
 export type PersistedProbeResult = 'unavailable' | 'present' | 'missing';
 
+/** Persistence was configured for the binding, but is unavailable right now. */
+export class PersistenceUnavailableError extends Error {
+  constructor(readonly sessionId: string, readonly bindingKey?: string) {
+    super(
+      `persistence is temporarily unavailable for session '${sessionId}'` +
+        (bindingKey ? ` (binding '${bindingKey}')` : '') +
+        '; refusing to recreate a durable channel session',
+    );
+    this.name = 'PersistenceUnavailableError';
+  }
+}
+
 /**
  * A durable binding references a persisted session that no longer exists
  * (session-not-found, aligned with the official Host's
@@ -77,7 +89,7 @@ export type PersistedProbeResult = 'unavailable' | 'present' | 'missing';
  * existing binding is a binding/session durability inconsistency — NEVER a
  * first create — so resolution fails loudly instead of silently
  * blank-recreating the same session id. Deployments WITHOUT persistence
- * (ephemeral semantics) never throw this: they recreate on the recorded id.
+ * explicitly ephemeral bindings never throw this: they recreate on the recorded id.
  */
 export class SessionNotFoundError extends Error {
   constructor(

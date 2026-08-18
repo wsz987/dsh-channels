@@ -1,19 +1,18 @@
-# ADR 0002 — Channel Image-Compatibility Policy at the Provider Boundary
+# ADR 0002 — Channel Image-Compatibility Policy
 
 > Records the decision for handling inbound channel images when the configured
-> model cannot accept images. Implementation:
-> `packages/channel-harness/src/image-model-fallback.ts` (the `llm/stream`
-> waterfall listener), the `imageCompatibility` config in
+> model cannot accept images. The product policy is implemented by
+> `packages/channel-harness/src/image-model-fallback.ts` at agent-scoped
+> `agent/pre-step`, the `imageCompatibility` config in
 > `packages/channel-harness/src/config.ts`, and the `saveImage` attachment path
 > in `packages/channel-harness/src/message-converter.ts`.
 
 ## Status
 
-Accepted — product policy retained; implementation seam superseded by
-[ADR 0003](0003-image-compatibility-pre-step.md) (`agent/pre-step` logged
-surface replace, per the official Model-visible ⇔ durably referenced
-invariant). The `llm/stream` provider-boundary rewrite described below remains
-the SHIPPED implementation until ADR 0003's migration lands.
+Accepted — product policy retained. Its implementation seam is defined by
+[ADR 0003](0003-image-compatibility-pre-step.md): an `agent/pre-step` logged
+surface replace that preserves the official Model-visible ⇔ durably referenced
+invariant. The former `llm/stream` provider-boundary rewrite has been removed.
 
 ## Context
 
@@ -40,23 +39,23 @@ policy — never described as "host parity".
 Every inbound part is delivered to the existing Harness Session. The common
 `channel-harness` converter saves real images (via the `saveImage` hook) and
 preserves the source block order, including mixed messages such as
-`text -> image -> text`. Session history is never rewritten and the channel
-binding is never rolled over for model compatibility.
+`text -> image -> text`. The channel binding is never rolled over for model
+compatibility.
 
-At the provider boundary, a `llm/stream` waterfall listener examines requests
-for channel-bound Sessions that contain images. It queries
-`llm.resolveModelInfo(provider, model)` and, when `inputModalities` explicitly
-omits `image`, applies the configured `imageCompatibility.mode`:
+At `agent/pre-step`, an agent-scoped waterfall examines the entered messages
+for channel-bound Sessions that contain images. It reads the effective
+per-step model selection, queries `llm.resolveModelInfo(provider, model)`, and
+when `inputModalities` explicitly omits `image`, applies the configured
+`imageCompatibility.mode`:
 
 | mode | behavior |
 | --- | --- |
-| `degrade` (default) | Copies the request and replaces each image block in place with `[图片：当前模型不支持查看]`, then streams the copied request. The original request, messages, attachments, and Session log remain intact. A text-only model keeps serving the conversation — no forced `/new`. |
+| `degrade` (default) | Replaces each image block in the entered message with `[图片：当前模型不支持查看]`. The rewritten message is appended to the Session log and is exactly what the model request later derives. A text-only model keeps serving the conversation — no forced `/new`. |
 | `reject` | Refuses the request with `ChannelImageUnsupportedError` instead of sending it — closest to the official Web refusal semantics. The user must start a new Session (`/new`) or switch to an image-capable model. |
 
-Image-capable models receive the original request. Missing capability metadata
-and lookup failures fail open because an absent declaration is not proof that
-the model rejects images. A recursion guard lets the copied request pass
-through the same waterfall exactly once without being transformed again.
+Image-capable models receive the original entered message. Missing capability
+metadata and lookup failures fail open because an absent declaration is not
+proof that the model rejects images.
 
 ## Consequences
 
@@ -64,13 +63,12 @@ through the same waterfall exactly once without being transformed again.
   `reject` / `degrade` switch — the channel never claims to replicate the
   official Web `selectModel` refusal, and `reject` is available to deployments
   that want it.
-- Degradation (or rejection) happens only at the provider boundary; the durable
-  Session history keeps the real image blocks.
+- Degradation happens on the logged surface: a degraded Session records the
+  placeholder rather than an image it did not send to the model.
 - The default (`degrade`) keeps a text-only model serving a channel-bound
   Session without the user having to start a new one; `reject` opts into the
   stricter official-Web-like behavior.
 - The behavior is opt-out: when capability metadata is missing or the lookup
   fails, the original request is streamed unchanged.
-- Tests cover ordered Session conversion, text-only request degradation,
-  image-capable and unknown capabilities, failed lookup, non-channel Sessions,
-  recursive waterfall dispatch, and both policy modes.
+- Tests cover ordered pre-step degradation, image-capable and unknown
+  capabilities, failed lookup, nested image blocks, and both policy modes.

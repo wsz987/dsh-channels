@@ -1,26 +1,15 @@
 import type { Context } from '@deepseek-ai/cordis';
-import type {
-  ContentBlock,
-  GenerateOptions,
-  Message,
-  StreamChunk,
-} from '@deepseek-ai/dsh-llm';
-import { freezeMessage } from '@deepseek-ai/dsh-llm';
+import type { PreStepDecision } from '@deepseek-ai/dsh-agent';
+import type { ContentBlock, UserMessage } from '@deepseek-ai/dsh-llm';
+import { contentHasImage, freezeMessage } from '@deepseek-ai/dsh-llm';
 import type { ChannelLogger } from '@wsz987/channel-core';
-import type { AgentManager } from './agent-manager.js';
 import type { ImageCompatibilityMode } from './config.js';
+import type { ChannelModelSelectionController } from './model-selection.js';
 import { toLoggableError } from './loggable-error.js';
 
 export const UNSUPPORTED_IMAGE_PLACEHOLDER = '[图片：当前模型不支持查看]';
 
-/**
- * Thrown by the `reject` policy (ADR 0002) when a channel-bound Session whose
- * history contains images is about to be sent to a model that explicitly
- * declares no image input. The request is NOT sent — the turn fails and the
- * user must start a new Session (`/new`) or switch to an image-capable model.
- * This mirrors the official Web behavior of refusing a model switch that would
- * orphan existing images (`session.selectModel` -> model-unavailable).
- */
+/** Thrown when a channel image reaches a model that explicitly rejects images. */
 export class ChannelImageUnsupportedError extends Error {
   readonly provider: string;
   readonly model: string;
@@ -38,105 +27,87 @@ export class ChannelImageUnsupportedError extends Error {
 }
 
 /**
- * Keep immutable Session history intact while applying the configured
- * Channel image-compatibility policy at the provider boundary for channel-bound
- * sessions (ADR 0002 — an explicit Channel policy, not host parity):
- *
- * - `degrade` (default): text-only models keep serving the session; each image
- *   block is replaced by `[图片：当前模型不支持查看]` only in the provider-visible
- *   request.
- * - `reject`: the request is refused with a {@link ChannelImageUnsupportedError}.
- *
- * NOTE (ADR 0003): this `llm/stream` rewrite is the LEGACY seam. It rewrites
- * model-visible content that the durable Session log cannot reconstruct
- * (placeholder text never enters the log, and the copied request escapes the
- * official agent-loop reconstruction invariant by object identity). The
- * target implementation is an agent-scoped `agent/pre-step` surface replace
- * (ADR 0003) where the rewritten messages ARE the logged `user/message`
- * events. Keep this listener operational until the migration lands; do not
- * extend it.
+ * Install the Channel image policy on one Agent scope. The listener runs at
+ * `agent/pre-step`, so degraded messages are the exact values appended to the
+ * Session log and subsequently reconstructed for the model request.
  */
-export function installImageModelFallback(
-  ctx: Context,
-  agentManager: AgentManager,
+export function installImageCompatibility(
+  agentCtx: Context,
+  rootCtx: Context,
+  modelSelection: ChannelModelSelectionController,
   logger: ChannelLogger,
   mode: ImageCompatibilityMode = 'degrade',
 ): () => void {
-  const active = new WeakSet<GenerateOptions>();
-  return ctx.on('llm/stream', function imageModelFallback(options, next) {
-    if (!options.sessionId || !agentManager.bindingFor(String(options.sessionId))) return next();
-    if (!containsImage(options.messages) || active.has(options)) return next();
+  return agentCtx.on('agent/pre-step', async (payload, next) => {
+    const decision = await next();
+    if (decision.kind !== 'enter' || !containsImage(decision.messages)) return decision;
 
-    return streamWithFallback(ctx, options, next, active, logger, mode);
+    const selection = await modelSelection.selectionForStep(payload.agent);
+    if (!selection) return decision;
+
+    let info: { inputModalities?: readonly string[] };
+    try {
+      info = await rootCtx.llm.resolveModelInfo(selection.provider, selection.model, payload.signal);
+    } catch (error) {
+      logger.warn('[channel-harness] image model capability lookup failed; continuing', {
+        provider: selection.provider,
+        model: selection.model,
+        sessionId: String(payload.agent.id),
+        error: toLoggableError(error),
+      });
+      return decision;
+    }
+
+    if (info.inputModalities === undefined || info.inputModalities.includes('image')) {
+      return decision;
+    }
+
+    const sessionId = String(payload.agent.id);
+    if (mode === 'reject') {
+      logger.warn('[channel-harness] rejected image request for text-only model', {
+        provider: selection.provider,
+        model: selection.model,
+        sessionId,
+      });
+      throw new ChannelImageUnsupportedError({
+        provider: selection.provider,
+        model: selection.model,
+        sessionId,
+      });
+    }
+
+    logger.info('[channel-harness] degraded channel images for text-only model', {
+      provider: selection.provider,
+      model: selection.model,
+      sessionId,
+    });
+    return {
+      ...decision,
+      messages: decision.messages.map(degradeMessageImages),
+    } satisfies PreStepDecision;
   });
 }
 
-async function* streamWithFallback(
-  ctx: Context,
-  options: GenerateOptions,
-  next: () => AsyncIterable<StreamChunk>,
-  active: WeakSet<GenerateOptions>,
-  logger: ChannelLogger,
-  mode: ImageCompatibilityMode,
-): AsyncIterable<StreamChunk> {
-  try {
-    const info = await ctx.llm.resolveModelInfo(options.provider, options.model, options.signal);
-    if (info.inputModalities === undefined || info.inputModalities.includes('image')) {
-      yield* next();
-      return;
+/** @deprecated Image compatibility is now installed through agent/pre-step. */
+export function installImageModelFallback(): () => void {
+  return () => {};
+}
+
+function containsImage(messages: readonly UserMessage[]): boolean {
+  return messages.some((message) => contentHasImage(message.content));
+}
+
+export function degradeMessageImages(message: UserMessage): UserMessage {
+  if (!contentHasImage(message.content)) return message;
+  return freezeMessage({ ...message, content: degradeContent(message.content) });
+}
+
+function degradeContent(content: readonly ContentBlock[]): ContentBlock[] {
+  return content.map((block): ContentBlock => {
+    if (block.type === 'image') return { type: 'text', text: UNSUPPORTED_IMAGE_PLACEHOLDER };
+    if (block.type === 'tool-result' && contentHasImage(block.content)) {
+      return { ...block, content: degradeContent(block.content) };
     }
-  } catch (error) {
-    logger.warn('[channel-harness] image model capability lookup failed; continuing', {
-      provider: options.provider,
-      model: options.model,
-      sessionId: String(options.sessionId),
-      error: toLoggableError(error),
-    });
-    yield* next();
-    return;
-  }
-
-  const sessionId = String(options.sessionId);
-  if (mode === 'reject') {
-    logger.warn('[channel-harness] rejected image request for text-only model', {
-      provider: options.provider,
-      model: options.model,
-      sessionId,
-    });
-    throw new ChannelImageUnsupportedError({
-      provider: options.provider,
-      model: options.model,
-      sessionId,
-    });
-  }
-
-  const degraded: GenerateOptions = {
-    ...options,
-    messages: options.messages.map(degradeMessageImages),
-  };
-  active.add(degraded);
-  try {
-    logger.info('[channel-harness] degraded channel images for text-only model', {
-      provider: options.provider,
-      model: options.model,
-      sessionId,
-    });
-    yield* ctx.llm.stream(degraded);
-  } finally {
-    active.delete(degraded);
-  }
-}
-
-function containsImage(messages: readonly Message[]): boolean {
-  return messages.some((message) => message.content.some((block) => block.type === 'image'));
-}
-
-export function degradeMessageImages(message: Message): Message {
-  if (!message.content.some((block) => block.type === 'image')) return message;
-  const content: ContentBlock[] = message.content.map((block) =>
-    block.type === 'image'
-      ? { type: 'text', text: UNSUPPORTED_IMAGE_PLACEHOLDER }
-      : block,
-  );
-  return freezeMessage({ ...message, content });
+    return block;
+  });
 }

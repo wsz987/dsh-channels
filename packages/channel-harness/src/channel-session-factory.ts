@@ -39,8 +39,8 @@ interface ChannelSessionFactoryOptions {
  * Owns the Channel Session lifecycle as one rollback-aware transaction:
  *
  * - `create` mints a fresh session id for a conversation without a binding;
- * - `recreate` brings an EXISTING binding's session back for EPHEMERAL
- *   deployments — the only caller is the bridge's no-sessionPersistence
+ * - `recreate` brings an EXISTING binding's session back for explicitly
+ *   EPHEMERAL bindings — the only caller is the bridge's ephemeral policy
  *   branch (re-running the workspaceResolver so the recreated session lands
  *   on the SAME channel Workspace cwd a first creation would have used, then
  *   re-attaching the workspace and keeping the durable binding). A live agent
@@ -89,6 +89,7 @@ export class ChannelSessionFactory {
       ...(conversation.threadId ? { threadId: conversation.threadId } : {}),
       ...(conversation.senderId ? { senderId: conversation.senderId } : {}),
       sessionId,
+      durability: this.options.agentManager.canResume() ? 'durable' : 'ephemeral',
       route,
       schemaVersion: SESSION_BINDING_SCHEMA_VERSION,
       createdAt: now,
@@ -110,9 +111,9 @@ export class ChannelSessionFactory {
   }
 
   /**
-   * Recreate the session behind an EXISTING binding in an EPHEMERAL
-   * deployment (no sessionPersistence mounted) — the "existing binding ->
-   * missing persistence -> recreate" case after a process restart.
+   * Recreate the session behind an EXISTING explicitly EPHEMERAL binding —
+   * the "existing binding -> missing persistence -> recreate" case after a
+   * process restart.
    *
    * A live agent in this process is borrowed as-is (nothing to recreate). On a
    * miss, the SAME session id is recreated exactly like a first creation:

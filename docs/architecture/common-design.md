@@ -677,15 +677,21 @@ binding 存在
   → live?（ctx.agents.get）
       ├─ yes → borrow（不碰 persistence）
       └─ no
-           → sessionPersistence 未挂载 → recreate（明确 ephemeral 语义，允许）
-           → membership 命中           → resume
-           → membership 缺失           → 抛 session-not-found（fail loud）
+           → atomic persistence probe
+                ├─ unavailable + durable binding  → 抛 persistence-unavailable
+                ├─ unavailable + ephemeral binding → recreate
+                ├─ present                         → resume
+                └─ missing + durable binding       → 抛 session-not-found
+                   missing + ephemeral binding     → recreate
 ```
 
-- **无 persistence 的 deployment（ephemeral）**：允许按 recorded id recreate。
-  `ChannelSessionFactory.recreate` 会重跑 `workspaceResolver`（落到 channel
-  workspace cwd，而不是 host cwd）、软 attach workspace、保留 durable binding
-  （仅刷新 `updatedAt` 与 route 快照）。
+- **durability policy 与 capability availability 分离**：新 binding 记录稳定的
+  `durability: ephemeral | durable`；旧 binding 缺失该字段时按 durable fail closed。
+  `unavailable` 只表示 persistence 当前不可用，不能把 deployment 动态改判为
+  ephemeral。
+- **ephemeral binding**：允许按 recorded id recreate。`ChannelSessionFactory.recreate`
+  会重跑 `workspaceResolver`（落到 channel workspace cwd，而不是 host cwd）、软
+  attach workspace、保留 durable binding（仅刷新 `updatedAt` 与 route 快照）。
 - **有 persistence 时，binding 指向的 persisted session 缺失** = binding/session
   durability 不一致（通常不是「第一次创建」），抛 `SessionNotFoundError`
   fail loud，**绝不**静默用同 ID 空 Session 顶替 —— 对齐官方
@@ -1109,7 +1115,8 @@ PDF 解析使用 `unpdf`（PDF.js），DOCX 使用 `mammoth`，XLSX 使用 `xlsx
   格式注册斜杠指令（`/stop` `/new` `/help` `/status` `/models` `/model`），`commandFactories`
   是唯一注册点，随 Agent 自动注册。`/stop` 由 Bridge Fast Path 调度（立即终止、不等渠道
   排队消息），并配合 per-conversation generation barrier 与 stop barrier 覆盖 `/new` 竞态；
-  `/model` 通过官方 `installModelSelection` 切换模型，绝不改写 `binding.route`。
+  `/model` 通过官方 Host `session.selectModel` 或 headless
+  `installModelSelection` 切换模型，绝不改写 `binding.route`。
   **未注册的斜杠指令不再被拦截**：`commands.execute()` 对未知指令返回 `undefined`，
   渠道回退为普通用户输入交给模型；Agent scope 会 shadow 同名 global（同 scope 重名注册直接报错）。
 - **通用控制面 + Web 设置**（`channel-control` + `channel-web`，见上文「通用 Channel
@@ -1136,38 +1143,16 @@ PDF 解析使用 `unpdf`（PDF.js），DOCX 使用 `mammoth`，XLSX 使用 `xlsx
   返回 `undefined`。可选 seam（`sessionPersistence` / `attachments` / `channelFiles` /
   `agentDefaultModel`）一律用 `get`；`agentDefaultModel` 使用官方
   `@deepseek-ai/dsh-agent-default-model` 的 `AgentDefaultModelConfig` 类型（禁止本地结构体 port）。
-- **模型切换只用官方机制**：`installModelSelection(agentCtx, ref)`，`ModelSelectionRef{current, assembled}`
-  由入口点自持；`/model` 绝不改写 `binding.route`；读取优先级 picked →
-  `session.requestHeader()?.config` → `agent.options` → `agentDefaultModel`。
-- **每个 Agent 只有一个 ModelSelection owner**（`ChannelModelSelectionController`，owner:
-  `host` | `local`）：官方 `installModelSelection` 注册的是 `system-prompt/assemble` +
-  `agent/request` 两条 waterfall，最终 routing 由**最外层（先注册）listener 自己的 ref** 决定。
-  `dsh-host-apiproxy` 自己也持有 `WeakMap<Agent, ref>`（`selectionFor`）并会再装一次
-  `installModelSelection`；若 channel 再装自己的 ref，同一个 agent 就有两个独立 routing
-  决策者——Web 选 B、channel hook 仍可能把请求改回 A。因此：
-  - **ownership 是 per-Agent 一次性 pin 的，不是 per-deployment 动态 mode**：`install()` 在
-    agent setup（publication）时按「此刻有没有 apiProxy」决定并**永久记录**；live Agent
-    之后**不会**因 apiProxy 出现而从 local 自动升级（那会装上第二个 waterfall），也**不会**
-    因 apiProxy 消失而从 host 自动降级 local（host-owned 直接 fail-loud，绝不静默降级）。
-    `install()` 返回 disposer（unpin + 移除两条 waterfall listener），bridge teardown 统一
-    释放——borrowed Agent 不能 dispose，必须靠它防止 HMR 后 listener 堆积。
-  - **host（setup 时挂载了 apiProxy）**：channel 的 `install()` 只记录 pin（Host 是唯一
-    owner，首次 `session.*` RPC 时懒装 waterfall）；**`prepare()`**（create/resume/borrow
-    完成后、任何 command/followup 之前调用）通过官方 `session.models` RPC 强制
-    `selectionFor` 先装上——对齐官方 pre-publication `installSelection`，堵住「新会话第一条
-    普通消息没有 Host hook」的窗口；`/model` 走官方 `session.selectModel` RPC（Host 自己
-    更新 `selectionFor(...).current` 并保存默认）；读取走 `session.models` 的 `current`（与
-    composer 同源，不漂移）。RPC 失败 / malformed / apiProxy 被替换 → 抛
-    `ChannelModelSelectionBackendError`。channel 不再自己 `saveSelection`（Host 会做）。
-  - **local（setup 时无 apiProxy，headless）**：channel 自持 ref + `installModelSelection`（对齐官方
-    Headless）；`/model` 设置 `ref.current` 并 `agentDefaultModel.saveSelection(selection)`
-    （写 settings，Web 页面 / 新会话可见）。保存失败 best-effort：官方 catch 后 warn，
-    会话内切换仍生效。pin 缺失 = invariant violation，抛错而不是静默 return。
-- **回归测试走真实 waterfall**：`commands-model.test.ts` 的 ownership 用例直接 dispatch
-  真实的 `system-prompt/assemble` + `agent/request`，断言 host 模式下「channel /model A →
-  Web selectModel B → 下一次真实 assemble/request = B」（双 owner 时会退回 A）；并覆盖
-  prepare 先于 followup、resume 后 header=A 优先于 default=B、host 消失 fail-loud、
-  disposer 移除 waterfall。
+- **模型选择遵循 Harness 的两层语义**：Harness 在创建/恢复 Session 时读取
+  `session.requestHeader`、显式 `agentOptions`，或共享的 `agentDefaultModel`。当前 Session
+  的 `/model` 切换则直接委托官方 Host `session.selectModel` RPC；无 Web Host 的 headless
+  渠道使用官方 `installModelSelection` hook。两条路径都保存 `agentDefaultModel`，因此
+  当前 Session 与未来新 Session 仍由同一套 Harness 语义衔接。
+- **channel 不维护竞争 owner**：不做 per-Agent host/local pin、不缓存 `apiProxy` 身份、
+  不在首条消息前调用 `session.models` 做 `prepare()`。Host/local 只在实际读写时按当前
+  可用的官方入口选择；图片 `agent/pre-step` 读取当前 Session 的同一模型视图。
+- **回归测试验证边界**：`commands-model.test.ts` 覆盖当前 Session 切换、默认保存、
+  reasoning 校验、header/options 优先级，并断言不需要 first-turn RPC。
 - **测试易错**：fake agent 用 `createScope(rootCtx, agent)` 会继承根服务、掩盖真实环境 agent
   作用域未注入的差异；凡 handler 读服务的用例，用无注入的裸 `new Context()` 替换 fake `agent.ctx`
   模拟真实环境，并（改代码前）断言旧写法确实失败。参考
