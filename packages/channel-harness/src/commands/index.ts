@@ -19,7 +19,7 @@
  * like the official compact/goal/plan commands close over their plugin ctx.
  */
 import { type Context } from '@deepseek-ai/cordis';
-import type { Agent, ModelSelection } from '@deepseek-ai/dsh-agent';
+import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { CommandDefinition, CommandDescriptor } from '@deepseek-ai/dsh-commands';
 import type { LlmCallConfig, LlmModelInfo, LlmProviderInfo, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm';
 import { createNewCommand } from './new.js';
@@ -28,7 +28,7 @@ import { createHelpCommand } from './help.js';
 import { createStatusCommand } from './status.js';
 import { createModelsCommand } from './models.js';
 import { createModelCommand } from './model.js';
-import type { ChannelModelSelectionManager } from '../model-selection.js';
+import type { ChannelModelSelectionController } from '../model-selection.js';
 
 /**
  * Narrow LLM seam handed to model commands (discovery + exact resolution).
@@ -50,29 +50,19 @@ export interface ChannelModelCatalog {
 export interface ChannelCommandDependencies {
   /** Start a brand-new Harness session for the current conversation. */
   startNewSession(agent: Agent): Promise<void>;
-  /** Per-agent model selection (install/current/select), backing /status and /model. */
-  modelSelection: ChannelModelSelectionManager;
+  /**
+   * Per-agent model selection with exactly ONE backend per deployment (host
+   * RPC when a Web Host is mounted, a local ref otherwise), backing /status
+   * and /model. `select` also persists the switch as the Harness-wide
+   * default through the owning backend.
+   */
+  modelSelection: ChannelModelSelectionController;
   /** Effective command view for an agent (global + agent-scope shadow). */
   listCommands(agent: Agent): readonly CommandDescriptor[];
   /** Resolve one effective command definition (scoped shadow or global). */
   findCommand(agent: Agent, name: string): CommandDefinition | undefined;
   /** Harness LLM catalog seam (discovery + exact resolution), bridged lazily. */
   llm: ChannelModelCatalog;
-  /**
-   * Persist the selection as the Harness-wide default model (official
-   * `ctx.agentDefaultModel.saveSelection` -> settings), so Web surfaces and
-   * new sessions observe the switch without a refresh. Best-effort: a failure
-   * must not fail the session-level switch (mirrors host-apiproxy).
-   */
-  saveDefaultModelSelection(selection: ModelSelection): Promise<void>;
-  /**
-   * Apply the switch through the HOST's official `session.selectModel` RPC
-   * (when a Web Host / apiProxy is present), so the host's per-session
-   * `selectionFor(...).current` and the composer model selector observe it
-   * without a page refresh. No-op when no Host is mounted. Best-effort: a
-   * failure must not fail the session-level switch already applied.
-   */
-  selectHostSessionModel(agent: Agent, selection: ModelSelection): Promise<void>;
 }
 
 export type ChannelCommandDisposer = () => Promise<void>;

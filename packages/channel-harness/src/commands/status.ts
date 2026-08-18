@@ -13,13 +13,13 @@ export function createStatusCommand(deps: ChannelCommandDependencies): CommandDe
   return {
     name: 'status',
     description: 'Show session / agent / model status',
-    handler(invocation) {
+    async handler(invocation) {
       const lines = [
         'Session',
         'ID: ' + String(invocation.agent.id),
         'Status: ' + invocation.agent.status,
       ];
-      const selection = deps.modelSelection.current(invocation.agent);
+      const selection = await deps.modelSelection.current(invocation.agent);
       if (selection) {
         lines.push('', 'Model', 'Provider: ' + selection.provider, 'Model: ' + selection.model);
         if (selection.reasoningEffort) lines.push('Reasoning: ' + String(selection.reasoningEffort));

@@ -1,19 +1,31 @@
 /*
- * /model + ChannelModelSelectionManager coverage (spec §46, §18-§29).
+ * /model + ChannelModelSelectionController coverage (spec §46, §18-§29).
  *
  * The switch path is exercised through a REAL LlmRuntime with a small fake
  * adapter: provider validation via listProviders, EXACT model resolution via
- * resolveModelInfo (catalog membership is advisory — an unlisted but
+ * resolveModelInfo (catalog membership is advisory - an unlisted but
  * resolvable model must succeed), and reasoning-effort validation via
  * resolveCallConfig (unsupported efforts reject with
- * UNSUPPORTED_REASONING_EFFORT). The selection lands in the manager ref and
- * NEVER touches binding.route.
+ * UNSUPPORTED_REASONING_EFFORT). The selection lands through the controller's
+ * SINGLE backend and NEVER touches binding.route.
+ *
+ * Ownership (the reason /model must not install a second waterfall):
+ * - local mode (no apiProxy): the controller owns the ModelSelectionRef and
+ *   installs the official hook; a /model switch flows through the REAL
+ *   system-prompt/assemble + agent/request waterfalls to the request config.
+ * - host mode (apiProxy mounted): the controller installs NOTHING - the host
+ *   owns the waterfall (a realistic apiProxy shim replicates the official
+ *   selectionFor + installModelSelection). A channel /model switch is routed
+ *   through the host RPC, and a later Web-side switch must WIN the next real
+ *   waterfall dispatch (with two owners, the first-registered channel
+ *   listener would rewrite the request back to the stale channel pick).
  */
 import { describe, expect, it, vi } from 'vitest';
 import { Context } from '@deepseek-ai/cordis';
 import CommandRuntime from '@deepseek-ai/dsh-commands';
 import { LlmAdapter, LlmRuntime, ReasoningEffortId, type StreamChunk } from '@deepseek-ai/dsh-llm';
-import { createScope } from '@deepseek-ai/dsh-scope';
+import { createScope, scopeTarget } from '@deepseek-ai/dsh-scope';
+import { installModelSelection, type ModelSelection } from '@deepseek-ai/dsh-agent';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import type { ChannelTarget, MessageReceived } from '@wsz987/channel-core';
 import {
@@ -27,7 +39,10 @@ import { MemoryBindingStore } from '../src/binding-store.ts';
 import { ChannelHarnessBridge } from '../src/bridge.ts';
 import { Config } from '../src/config.ts';
 import { ReplyContextStore } from '../src/reply-context-store.ts';
-import { ChannelModelSelectionManager } from '../src/model-selection.ts';
+import {
+  ChannelModelSelectionController,
+  type ChannelHostApiProxy,
+} from '../src/model-selection.ts';
 import type { ChannelWorkspaceResolver } from '../src/workspace-resolver.ts';
 
 const defaultRoute: AgentRouteSpec = { preset: 'default' };
@@ -200,15 +215,15 @@ interface Fixture {
   bridge: ChannelHarnessBridge;
   adapter: FakeAdapter;
   bindingStore: MemoryBindingStore;
-  modelSelection: ChannelModelSelectionManager;
+  modelSelection: ChannelModelSelectionController;
 }
 
-function makeBridge(rootCtx: Context, modelSelection?: ChannelModelSelectionManager): Fixture {
+function makeBridge(rootCtx: Context, modelSelection?: ChannelModelSelectionController): Fixture {
   const gateway = new ModelGateway(rootCtx);
   const manager = new AgentManager(gateway, silentLogger, 4);
   const adapter = new FakeAdapter('weixin');
   const bindingStore = new MemoryBindingStore();
-  const selection = modelSelection ?? new ChannelModelSelectionManager();
+  const selection = modelSelection ?? new ChannelModelSelectionController(rootCtx);
   let bridge!: ChannelHarnessBridge;
   bridge = new ChannelHarnessBridge({
     config: baseConfig(),
@@ -234,16 +249,103 @@ function withLlm(rootCtx: Context, table: ProviderTable): void {
   llm.registerAdapter(Object.keys(table), new FakeLlmAdapter(table));
 }
 
+/**
+ * Dispatch the REAL system-prompt/assemble waterfall on an agent scope
+ * (the same event the official installModelSelection hook couples), returning
+ * the final assembly. The final next() yields the seed assembly untouched,
+ * so any injected provider/model variables come from a registered hook.
+ */
+function assembleWaterfall(agent: ModelFakeAgent): Promise<{ variables: Record<string, string> }> {
+  const carrier = scopeTarget(agent, agent);
+  const assembly = { sections: [], contexts: [], tools: [], variables: {} as Record<string, string> };
+  const context = { agent, scope: agent };
+  return agent.ctx.waterfall(carrier, 'system-prompt/assemble', assembly, context, () => Promise.resolve(assembly));
+}
+
+/**
+ * Dispatch the REAL agent/request waterfall (as dsh-agent-loop's
+ * buildRequest does), starting from a seed call config. The final next()
+ * yields the seed; any provider/model override comes from a registered hook's
+ * assembled snapshot.
+ */
+function requestWaterfall(
+  agent: ModelFakeAgent,
+  seed: { provider: string; model: string } = { provider: 'base-prov', model: 'base-model' },
+): Promise<{ provider: string; model: string }> {
+  const carrier = scopeTarget(agent, agent);
+  return agent.ctx.waterfall(
+    carrier,
+    'agent/request',
+    { agent, turn: 1, step: 1, signal: new AbortController().signal },
+    () => Promise.resolve(seed),
+  );
+}
+
+/**
+ * Realistic Web Host shim: replicates the official dsh-host-apiproxy
+ * selectionFor - a WeakMap<Agent, ref> whose ref is coupled to the agent
+ * scope via installModelSelection on first RPC access - plus the official
+ * session.selectModel semantics (sets selectionFor(agent).current AND saves
+ * the shared default) and session.models (returns the host's current).
+ */
+function makeHostApiProxy(agents: Map<string, ModelFakeAgent>, saveSelection: (selection: ModelSelection) => Promise<void> | void) {
+  const selections = new WeakMap<object, { current: ModelSelection | undefined; assembled: ModelSelection | undefined }>();
+  function selectionFor(agent: ModelFakeAgent) {
+    let ref = selections.get(agent);
+    if (ref) return ref;
+    ref = { current: undefined, assembled: undefined };
+    installModelSelection(agent.ctx, ref);
+    selections.set(agent, ref);
+    return ref;
+  }
+  const selectModel = vi.fn(async (request: {
+    payload: { sessionId: string; provider: string; model: string; reasoningEffort?: string };
+  }) => {
+    const agent = agents.get(request.payload.sessionId);
+    if (!agent) return { result: { ok: false, error: { code: 'internal', message: 'agent not found' } } };
+    const selected: ModelSelection = {
+      provider: request.payload.provider,
+      model: request.payload.model,
+      ...(request.payload.reasoningEffort
+        ? { reasoningEffort: ReasoningEffortId(request.payload.reasoningEffort) }
+        : {}),
+    };
+    selectionFor(agent).current = selected;
+    await saveSelection(selected);
+    return { result: { ok: true, value: { selected } } };
+  });
+  const models = vi.fn(async (request: { payload: { sessionId: string } }) => {
+    const agent = agents.get(request.payload.sessionId);
+    if (!agent) return { result: { ok: false, error: { code: 'internal', message: 'agent not found' } } };
+    const current = selectionFor(agent).current;
+    if (!current) return { result: { ok: false, error: { code: 'internal', message: 'no selection' } } };
+    return {
+      result: {
+        ok: true,
+        value: {
+          current: {
+            provider: current.provider,
+            model: current.model,
+            ...(current.reasoningEffort ? { reasoningEffort: String(current.reasoningEffort) } : {}),
+          },
+        },
+      },
+    };
+  });
+  const apiProxy: ChannelHostApiProxy = { sessions: { selectModel, models } };
+  return { apiProxy, selectionFor, selectModel, models };
+}
+
 describe('/model (spec §46)', () => {
   it('shows the current model with no arguments, or a not-resolved fallback', async () => {
     const rootCtx = new Context();
     new CommandRuntime(rootCtx);
     withLlm(rootCtx, { openai: { models: [{ id: 'gpt-5.6', name: 'GPT 5.6' }] } });
-    const { gateway, bridge, adapter, modelSelection } = makeBridge(rootCtx, new ChannelModelSelectionManager());
+    const { gateway, bridge, adapter, modelSelection } = makeBridge(rootCtx, new ChannelModelSelectionController(rootCtx));
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', '/model')));
     expect(lastSent(adapter)).toContain('当前模型');
     const agent = gateway.agents.get(gateway.createCalls[0]!)!;
-    modelSelection.select(agent as never, { provider: 'openai', model: 'gpt-5.6' });
+    await modelSelection.select(agent as never, { provider: 'openai', model: 'gpt-5.6' });
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', '/model')));
     const out = lastSent(adapter);
     expect(out).toContain('Provider: openai');
@@ -254,7 +356,7 @@ describe('/model (spec §46)', () => {
     const rootCtx = new Context();
     new CommandRuntime(rootCtx);
     withLlm(rootCtx, { openai: { models: [{ id: 'gpt-5.6', name: 'GPT 5.6' }] } });
-    const { gateway, bridge, adapter, bindingStore, modelSelection } = makeBridge(rootCtx, new ChannelModelSelectionManager());
+    const { gateway, bridge, adapter, bindingStore, modelSelection } = makeBridge(rootCtx, new ChannelModelSelectionController(rootCtx));
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
     const sessionId = gateway.createCalls[0]!;
     const agent = gateway.agents.get(sessionId)!;
@@ -265,7 +367,7 @@ describe('/model (spec §46)', () => {
     expect(out).toContain('模型已切换：');
     expect(out).toContain('Provider: openai');
     expect(out).toContain('从下一次模型执行步骤开始生效。');
-    expect(modelSelection.current(agent as never)).toEqual({ provider: 'openai', model: 'gpt-5.6' });
+    expect(await modelSelection.current(agent as never)).toEqual({ provider: 'openai', model: 'gpt-5.6' });
     const routeAfter = (await bindingStore.get('weixin:main:user_123'))?.route;
     expect(routeAfter).toEqual(routeBefore);
   });
@@ -274,26 +376,26 @@ describe('/model (spec §46)', () => {
     const rootCtx = new Context();
     new CommandRuntime(rootCtx);
     withLlm(rootCtx, { openai: { models: [{ id: 'gpt-5.6', name: 'GPT 5.6' }], reasoningEfforts: ['low', 'high'] } });
-    const { gateway, bridge, adapter, modelSelection } = makeBridge(rootCtx, new ChannelModelSelectionManager());
+    const { gateway, bridge, adapter, modelSelection } = makeBridge(rootCtx, new ChannelModelSelectionController(rootCtx));
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
     const agent = gateway.agents.get(gateway.createCalls[0]!)!;
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', '/model openai gpt-5.6 high')));
     expect(lastSent(adapter)).toContain('Reasoning: high');
-    expect(modelSelection.current(agent as never)?.reasoningEffort).toBe('high');
+    expect((await modelSelection.current(agent as never))?.reasoningEffort).toBe('high');
   });
 
   it('rejects an unsupported reasoning effort and leaves the selection unchanged', async () => {
     const rootCtx = new Context();
     new CommandRuntime(rootCtx);
     withLlm(rootCtx, { openai: { models: [{ id: 'gpt-5.6', name: 'GPT 5.6' }], reasoningEfforts: ['low', 'high'] } });
-    const { gateway, bridge, adapter, modelSelection } = makeBridge(rootCtx, new ChannelModelSelectionManager());
+    const { gateway, bridge, adapter, modelSelection } = makeBridge(rootCtx, new ChannelModelSelectionController(rootCtx));
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
     const agent = gateway.agents.get(gateway.createCalls[0]!)!;
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', '/model openai gpt-5.6 ultra')));
     const out = lastSent(adapter);
     expect(out).toContain('Reasoning effort 不被支持');
     expect(out).toContain('low');
-    expect(modelSelection.current(agent as never)).toBeUndefined();
+    expect(await modelSelection.current(agent as never)).toBeUndefined();
   });
 
   it('rejects an unknown provider', async () => {
@@ -312,12 +414,12 @@ describe('/model (spec §46)', () => {
     new CommandRuntime(rootCtx);
     // Catalog advertises gpt-5.6 only; exact resolution accepts any id.
     withLlm(rootCtx, { openai: { models: [{ id: 'gpt-5.6', name: 'GPT 5.6' }] } });
-    const { bridge, adapter, modelSelection, gateway } = makeBridge(rootCtx, new ChannelModelSelectionManager());
+    const { bridge, adapter, modelSelection, gateway } = makeBridge(rootCtx, new ChannelModelSelectionController(rootCtx));
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
     const agent = gateway.agents.get(gateway.createCalls[0]!)!;
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', '/model openai ghost-model')));
     expect(lastSent(adapter)).toContain('模型已切换：');
-    expect(modelSelection.current(agent as never)).toEqual({ provider: 'openai', model: 'ghost-model' });
+    expect(await modelSelection.current(agent as never)).toEqual({ provider: 'openai', model: 'ghost-model' });
   });
 
   it('rejects malformed arity with the usage line', async () => {
@@ -329,7 +431,7 @@ describe('/model (spec §46)', () => {
     expect(lastSent(adapter)).toContain('用法：/model');
   });
 
-  it('persists the switch as the Harness-wide default via agentDefaultModel.saveSelection', async () => {
+  it('persists the switch as the Harness-wide default via agentDefaultModel.saveSelection (local mode)', async () => {
     const rootCtx = new Context();
     new CommandRuntime(rootCtx);
     const saveSelection = vi.fn(async () => {});
@@ -341,52 +443,174 @@ describe('/model (spec §46)', () => {
     const { bridge, adapter } = makeBridge(rootCtx);
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', '/model openai gpt-5.6')));
     expect(adapter.sent[adapter.sent.length - 1]?.text).toContain('模型已切换');
-    // Official host-apiproxy parity: the switch also lands in agentDefaultModel
-    // (-> settings) so Web surfaces and new sessions observe it without refresh.
+    // Official headless parity: in local mode the controller also persists the
+    // switch to agentDefaultModel (-> settings) so new sessions observe it.
     expect(saveSelection).toHaveBeenCalledWith({ provider: 'openai', model: 'gpt-5.6' });
   });
 
-  it('routes the switch through the host session.selectModel RPC when an apiProxy is mounted', async () => {
+  it('routes the switch through the host session.selectModel RPC when an apiProxy is mounted (host mode)', async () => {
     const rootCtx = new Context();
     new CommandRuntime(rootCtx);
     const selectModel = vi.fn(async () => ({ result: { ok: true } }));
+    const saveSelection = vi.fn(async () => {});
     rootCtx.provide('apiProxy', { sessions: { selectModel } });
+    rootCtx.provide('agentDefaultModel', {
+      currentSelection: () => ({ provider: 'openai', model: 'gpt-5.6' }),
+      saveSelection,
+    });
     withLlm(rootCtx, { openai: { models: [{ id: 'gpt-5.6', name: 'GPT 5.6' }], reasoningEfforts: ['low', 'high'] } });
     const { gateway, bridge, adapter } = makeBridge(rootCtx);
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
     const sessionId = gateway.createCalls[0]!;
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', '/model openai gpt-5.6 high')));
     expect(adapter.sent[adapter.sent.length - 1]?.text).toContain('模型已切换');
-    // The composer model selector renders the HOST's selectionFor(...).current;
-    // routing the switch through the official RPC keeps it live without a refresh.
+    // The host is the sole owner: the switch goes through the official RPC
+    // (updates the host's selectionFor(...).current + composer selector)...
     expect(selectModel).toHaveBeenCalledWith({
       payload: { sessionId, provider: 'openai', model: 'gpt-5.6', reasoningEffort: 'high' },
     });
+    // ...and the channel must NOT save the default again - the host does it.
+    expect(saveSelection).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a host session.selectModel rejection instead of half-applying', async () => {
+    const rootCtx = new Context();
+    new CommandRuntime(rootCtx);
+    rootCtx.provide('apiProxy', {
+      sessions: {
+        selectModel: vi.fn(async () => ({
+          result: { ok: false, error: { code: 'model-unavailable', message: 'no adapter serves provider "bogus"' } },
+        })),
+      },
+    });
+    withLlm(rootCtx, { openai: { models: [{ id: 'gpt-5.6', name: 'GPT 5.6' }] } });
+    const { bridge, adapter } = makeBridge(rootCtx);
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', '/model openai gpt-5.6')));
+    const out = lastSent(adapter);
+    expect(out).toContain('模型切换失败');
+    expect(out).toContain('no adapter serves provider "bogus"');
   });
 });
 
-describe('ChannelModelSelectionManager reading priority (spec §21)', () => {
+describe('model-selection ownership: exactly ONE backend per agent (spec §18-§24)', () => {
+  it('local mode: a /model switch flows through the REAL assemble + request waterfalls', async () => {
+    const rootCtx = new Context();
+    new CommandRuntime(rootCtx);
+    withLlm(rootCtx, { openai: { models: [{ id: 'gpt-5.6', name: 'GPT 5.6' }] } });
+    const { gateway, bridge, modelSelection } = makeBridge(rootCtx, new ChannelModelSelectionController(rootCtx));
+    expect(modelSelection.mode).toBe('local');
+
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
+    const agent = gateway.agents.get(gateway.createCalls[0]!)!;
+
+    // Seed baseline: with an empty ref the hook leaves the surfaces untouched.
+    let assembled = await assembleWaterfall(agent);
+    expect(assembled.variables.provider).toBeUndefined();
+    let config = await requestWaterfall(agent);
+    expect(config).toEqual({ provider: 'base-prov', model: 'base-model' });
+
+    // /model switch through the LOCAL backend (ref + installModelSelection).
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', '/model openai gpt-5.6')));
+    expect(await modelSelection.current(agent as never)).toEqual({ provider: 'openai', model: 'gpt-5.6' });
+
+    // The NEXT real assemble snapshots the pick into prompt variables...
+    assembled = await assembleWaterfall(agent);
+    expect(assembled.variables).toMatchObject({ provider: 'openai', model: 'gpt-5.6' });
+    // ...and the NEXT real request routes through it.
+    config = await requestWaterfall(agent);
+    expect(config).toEqual({ provider: 'openai', model: 'gpt-5.6' });
+  });
+
+  it('host mode: the channel installs NO waterfall; a Web-side switch wins the next real dispatch', async () => {
+    const rootCtx = new Context();
+    new CommandRuntime(rootCtx);
+    const saveSelection = vi.fn(async () => {});
+    withLlm(rootCtx, { openai: { models: [{ id: 'gpt-5.6', name: 'GPT 5.6' }] } });
+    const { gateway, bridge, adapter, modelSelection } = makeBridge(rootCtx, new ChannelModelSelectionController(rootCtx));
+    const host = makeHostApiProxy(gateway.agents, saveSelection);
+    rootCtx.provide('apiProxy', host.apiProxy);
+    rootCtx.provide('agentDefaultModel', {
+      currentSelection: () => ({ provider: 'openai', model: 'gpt-5.6' }),
+      saveSelection,
+    });
+    expect(modelSelection.mode).toBe('host');
+
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
+    const sessionId = gateway.createCalls[0]!;
+    const agent = gateway.agents.get(sessionId)!;
+
+    // Channel /model A: routed through the host RPC (the host owns the ref).
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', '/model openai gpt-5.6')));
+    expect(host.selectModel).toHaveBeenCalled();
+    expect(host.selectionFor(agent).current).toEqual({ provider: 'openai', model: 'gpt-5.6' });
+    // The host (not the channel) persisted the shared default.
+    expect(saveSelection).toHaveBeenCalledWith({ provider: 'openai', model: 'gpt-5.6' });
+
+    // The channel installed NOTHING on this agent: with only the host's hook
+    // registered, the first real assemble reflects the host's current.
+    let assembled = await assembleWaterfall(agent);
+    expect(assembled.variables).toMatchObject({ provider: 'openai', model: 'gpt-5.6' });
+    let config = await requestWaterfall(agent);
+    expect(config).toEqual({ provider: 'openai', model: 'gpt-5.6' });
+
+    // The user switches in Harness Web: B via the same host RPC.
+    await host.apiProxy.sessions!.selectModel!({
+      payload: { sessionId, provider: 'anthropic', model: 'claude-4.7' },
+    });
+    expect(host.selectionFor(agent).current).toEqual({ provider: 'anthropic', model: 'claude-4.7' });
+
+    // The NEXT real assemble + request MUST route B. With a competing channel
+    // ref still holding A (the pre-fix behavior), the first-registered channel
+    // listener would rewrite the request back to A here.
+    assembled = await assembleWaterfall(agent);
+    expect(assembled.variables).toMatchObject({ provider: 'anthropic', model: 'claude-4.7' });
+    config = await requestWaterfall(agent);
+    expect(config).toEqual({ provider: 'anthropic', model: 'claude-4.7' });
+
+    // The channel reads the host's authoritative current (same source as the
+    // composer model selector), so /model cannot drift from the Web UI.
+    expect(await modelSelection.current(agent as never)).toEqual({ provider: 'anthropic', model: 'claude-4.7' });
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m3', '/model')));
+    expect(lastSent(adapter)).toContain('Provider: anthropic');
+    expect(lastSent(adapter)).toContain('Model: claude-4.7');
+  });
+
+  it('host mode: install() is a no-op until the host touches the agent', async () => {
+    const rootCtx = new Context();
+    rootCtx.provide('apiProxy', { sessions: {} });
+    const controller = new ChannelModelSelectionController(rootCtx);
+    const agent = fakeScopedAgent(rootCtx, 's-host-noop');
+    controller.install(agent.ctx);
+    // No local hook installed: a real assemble passes through untouched.
+    const assembled = await assembleWaterfall(agent);
+    expect(assembled.variables.provider).toBeUndefined();
+    const config = await requestWaterfall(agent);
+    expect(config).toEqual({ provider: 'base-prov', model: 'base-model' });
+  });
+});
+
+describe('ChannelModelSelectionController reading priority (spec §21)', () => {
   it('picked > request header > agent options', async () => {
     const rootCtx = new Context();
-    const manager = new ChannelModelSelectionManager();
+    const controller = new ChannelModelSelectionController(rootCtx);
     const agent = fakeScopedAgent(rootCtx, 's-priority');
-    manager.install(agent.ctx);
+    controller.install(agent.ctx);
 
     // ③ options only.
     agent.options = { provider: 'route-prov', model: 'route-model' };
-    expect(manager.current(agent as never)).toEqual({ provider: 'route-prov', model: 'route-model' });
+    expect(await controller.current(agent as never)).toEqual({ provider: 'route-prov', model: 'route-model' });
 
     // ② header beats options.
     agent.session.requestHeader = () => ({ config: { provider: 'hdr', model: 'hdr-model' } });
-    expect(manager.current(agent as never)).toEqual({ provider: 'hdr', model: 'hdr-model' });
+    expect(await controller.current(agent as never)).toEqual({ provider: 'hdr', model: 'hdr-model' });
 
     // ① picked beats header.
-    manager.select(agent as never, { provider: 'picked', model: 'picked-model' });
-    expect(manager.current(agent as never)).toEqual({ provider: 'picked', model: 'picked-model' });
+    await controller.select(agent as never, { provider: 'picked', model: 'picked-model' });
+    expect(await controller.current(agent as never)).toEqual({ provider: 'picked', model: 'picked-model' });
 
     // Re-picking clears the header fallback.
-    manager.select(agent as never, { provider: 'picked2', model: 'picked2-model', reasoningEffort: ReasoningEffortId('high') });
-    expect(manager.current(agent as never)).toEqual({ provider: 'picked2', model: 'picked2-model', reasoningEffort: ReasoningEffortId('high') });
+    await controller.select(agent as never, { provider: 'picked2', model: 'picked2-model', reasoningEffort: ReasoningEffortId('high') });
+    expect(await controller.current(agent as never)).toEqual({ provider: 'picked2', model: 'picked2-model', reasoningEffort: ReasoningEffortId('high') });
   });
 
   it('falls back to the Harness-wide default model selection as the last resort', async () => {
@@ -394,22 +618,22 @@ describe('ChannelModelSelectionManager reading priority (spec §21)', () => {
     rootCtx.provide('agentDefaultModel', {
       currentSelection: () => ({ provider: 'def', model: 'def-model', reasoningEffort: ReasoningEffortId('high') }),
     });
-    const manager = new ChannelModelSelectionManager();
+    const controller = new ChannelModelSelectionController(rootCtx);
     const agent = fakeScopedAgent(rootCtx, 's-default');
-    manager.install(agent.ctx);
+    controller.install(agent.ctx);
     // options empty + no header -> the root-provided default wins.
-    expect(manager.current(agent as never)).toEqual({ provider: 'def', model: 'def-model', reasoningEffort: ReasoningEffortId('high') });
+    expect(await controller.current(agent as never)).toEqual({ provider: 'def', model: 'def-model', reasoningEffort: ReasoningEffortId('high') });
 
     // options still win over the default (routing snapshot is nearer).
     agent.options = { provider: 'route-prov', model: 'route-model' };
-    expect(manager.current(agent as never)).toEqual({ provider: 'route-prov', model: 'route-model' });
+    expect(await controller.current(agent as never)).toEqual({ provider: 'route-prov', model: 'route-model' });
   });
 
   it('returns undefined when nothing is resolvable', async () => {
     const rootCtx = new Context();
-    const manager = new ChannelModelSelectionManager();
+    const controller = new ChannelModelSelectionController(rootCtx);
     const agent = fakeScopedAgent(rootCtx, 's-empty');
-    manager.install(agent.ctx);
-    expect(manager.current(agent as never)).toBeUndefined();
+    controller.install(agent.ctx);
+    expect(await controller.current(agent as never)).toBeUndefined();
   });
 });

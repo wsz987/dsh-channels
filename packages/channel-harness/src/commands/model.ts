@@ -1,13 +1,24 @@
 /**
  * The `/model` command (spec §18–§29).
  *
- * Switching uses the official ModelSelection seam ONLY: never mutates
- * `agent.options`, never disposes+resumes the agent, never writes
- * `binding.route` (which would be overwritten by the next routing
- * reconciliation — spec §23). The switch sets the manager ref's `current`;
- * the official `installModelSelection` hook applies it from the NEXT model
- * step, and Harness persists it through the session `request/header` log so a
- * resume restores it (spec §24).
+ * Switching goes through the channel's SINGLE model-selection backend
+ * (`ChannelModelSelectionController`): never mutates `agent.options`, never
+ * disposes+resumes the agent, never writes `binding.route` (which would be
+ * overwritten by the next routing reconciliation — spec §23).
+ *
+ * - Web Host mounted (`apiProxy`): the controller routes the switch through
+ *   the official `session.selectModel` RPC. The Host is the sole
+ *   ModelSelection owner — it updates its per-session `selectionFor(...).current`
+ *   (the composer model selector's source) and persists the shared default
+ *   itself; a Host rejection fails the switch and is surfaced here.
+ * - No Host: the controller sets its own `ModelSelectionRef` and persists the
+ *   shared default via `agentDefaultModel.saveSelection` (headless parity).
+ *
+ * Either way the official `installModelSelection` hook applies the selection
+ * from the NEXT model step, and Harness persists it through the session
+ * `request/header` log so a resume restores it (spec §24). Exactly one
+ * backend is ever installed per agent, so the channel hook can never fight
+ * the Host's routing decision.
  *
  * Validation: provider must come from `ctx.llm.listProviders()` (spec §28);
  * the exact model is resolved ONCE via `ctx.llm.resolveModelInfo` — catalog
@@ -37,7 +48,7 @@ export function createModelCommand(deps: ChannelCommandDependencies): CommandDef
         .filter((token) => token.length > 0);
 
       if (args.length === 0) {
-        const selection = deps.modelSelection.current(invocation.agent);
+        const selection = await deps.modelSelection.current(invocation.agent);
         if (!selection) {
           return { kind: 'success', text: ['当前模型', '', '（未解析到模型选择）'].join('\n') };
         }
@@ -85,37 +96,22 @@ export function createModelCommand(deps: ChannelCommandDependencies): CommandDef
         reasoningEffort = ReasoningEffortId(effort);
       }
 
-      // 4. Pick the selection (effective from the next model step).
+      // 4. Pick the selection through the deployment's ONE model-selection
+      //    backend (host RPC or local ref; the backend also persists the
+      //    switch as the Harness-wide default). Effective from the next model
+      //    step. A host rejection surfaces here instead of half-applying.
       const selection: ModelSelection = {
         provider: providerId,
         model: modelId,
         ...(reasoningEffort ? { reasoningEffort } : {}),
       };
-      deps.modelSelection.select(invocation.agent, selection);
-
-      // 5. Persist as the Harness-wide default (official host-apiproxy
-      //    saveDefaultModelSelection -> agentDefaultModel -> settings), so Web
-      //    surfaces and new sessions observe the switch without a refresh.
-      //    Best-effort: a failure must not fail the session-level switch
-      //    (official logs a warn and keeps the session switch).
       try {
-        await deps.saveDefaultModelSelection(selection);
-      } catch {
-        // mirrors official host-apiproxy behavior
+        await deps.modelSelection.select(invocation.agent, selection);
+      } catch (error) {
+        return { kind: 'error', text: '模型切换失败：' + errorMessage(error) };
       }
 
-      // 6. Apply the switch through the HOST's official session.selectModel RPC
-      //    when a Web Host is mounted: updates the host's per-session
-      //    selectionFor(...).current (the composer model selector's source) and
-      //    triggers settings/document-updated for a live UI refresh — no page
-      //    reload needed. Best-effort; the session-level switch already applied.
-      try {
-        await deps.selectHostSessionModel(invocation.agent, selection);
-      } catch {
-        // mirrors official best-effort: the host UI may lag, the switch holds
-      }
-
-      // 7. Report success.
+      // 5. Report success.
       return {
         kind: 'success',
         text: formatSelection('模型已切换：', selection) + '\n\n从下一次模型执行步骤开始生效。',

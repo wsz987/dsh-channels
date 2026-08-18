@@ -25,7 +25,7 @@ import { MemoryBindingStore } from '../src/binding-store.ts';
 import { ChannelHarnessBridge } from '../src/bridge.ts';
 import { Config } from '../src/config.ts';
 import { ReplyContextStore } from '../src/reply-context-store.ts';
-import { ChannelModelSelectionManager } from '../src/model-selection.ts';
+import { ChannelModelSelectionController } from '../src/model-selection.ts';
 import type { ChannelWorkspaceResolver } from '../src/workspace-resolver.ts';
 
 const defaultRoute: AgentRouteSpec = { preset: 'default' };
@@ -204,15 +204,15 @@ interface Fixture {
   bridge: ChannelHarnessBridge;
   adapter: FakeAdapter;
   bindingStore: MemoryBindingStore;
-  modelSelection: ChannelModelSelectionManager;
+  modelSelection: ChannelModelSelectionController;
 }
 
-function makeBridge(rootCtx: Context, modelSelection?: ChannelModelSelectionManager): Fixture {
+function makeBridge(rootCtx: Context, modelSelection?: ChannelModelSelectionController): Fixture {
   const gateway = new HsmGateway(rootCtx);
   const manager = new AgentManager(gateway, silentLogger, 4);
   const adapter = new FakeAdapter('weixin');
   const bindingStore = new MemoryBindingStore();
-  const selection = modelSelection ?? new ChannelModelSelectionManager();
+  const selection = modelSelection ?? new ChannelModelSelectionController(rootCtx);
   let bridge!: ChannelHarnessBridge;
   bridge = new ChannelHarnessBridge({
     config: baseConfig(),
@@ -298,10 +298,10 @@ describe('/status (spec §14)', () => {
   it('shows the picked model selection in the model block', async () => {
     const rootCtx = new Context();
     new CommandRuntime(rootCtx);
-    const { gateway, bridge, adapter, modelSelection } = makeBridge(rootCtx, new ChannelModelSelectionManager());
+    const { gateway, bridge, adapter, modelSelection } = makeBridge(rootCtx, new ChannelModelSelectionController(rootCtx));
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
     const agent = gateway.agents.get(gateway.createCalls[0]!)!;
-    modelSelection.select(agent as never, { provider: 'openai', model: 'gpt-5.6' });
+    await modelSelection.select(agent as never, { provider: 'openai', model: 'gpt-5.6' });
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', '/status')));
     const out = lastSent(adapter);
     expect(out).toContain('Provider: openai');

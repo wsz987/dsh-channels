@@ -1099,10 +1099,23 @@ PDF 解析使用 `unpdf`（PDF.js），DOCX 使用 `mammoth`，XLSX 使用 `xlsx
 - **模型切换只用官方机制**：`installModelSelection(agentCtx, ref)`，`ModelSelectionRef{current, assembled}`
   由入口点自持；`/model` 绝不改写 `binding.route`；读取优先级 picked →
   `session.requestHeader()?.config` → `agent.options` → `agentDefaultModel`。
-- **切换后必须同步默认模型**（对齐官方 host-apiproxy 的模型切换 handler）：除设置会话内
-  selection 外，还要 `ctx.agentDefaultModel.saveSelection(selection)`（写 settings）——Web
-  页面与后续新会话读取的正是 `agentDefaultModel.currentSelection()`，不同步会导致「切换
-  后页面不更新 / 要刷新才生效」。保存失败为 best-effort：官方 catch 后 warn，会话内切换仍生效。
+- **每个 Agent 只有一个 ModelSelection owner**（`ChannelModelSelectionController`，mode:
+  `host` | `local`）：官方 `installModelSelection` 注册的是 `system-prompt/assemble` +
+  `agent/request` 两条 waterfall，最终 routing 由**最外层（先注册）listener 自己的 ref** 决定。
+  `dsh-host-apiproxy` 自己也持有 `WeakMap<Agent, ref>`（`selectionFor`）并会再装一次
+  `installModelSelection`；若 channel 再装自己的 ref，同一个 agent 就有两个独立 routing
+  决策者——Web 选 B、channel hook 仍可能把请求改回 A。因此：
+  - **host（挂载了 apiProxy）**：channel 的 `install()` 是 no-op（Host 是唯一 owner，首次
+    `session.*` RPC 时懒装 waterfall）；`/model` 走官方 `session.selectModel` RPC（Host 自己
+    更新 `selectionFor(...).current` 并保存默认）；读取走 `session.models` 的 `current`（与
+    composer 同源，不漂移）。channel 不再自己 `saveSelection`（Host 会做）。
+  - **local（无 apiProxy，headless）**：channel 自持 ref + `installModelSelection`（对齐官方
+    Headless）；`/model` 设置 `ref.current` 并 `agentDefaultModel.saveSelection(selection)`
+    （写 settings，Web 页面 / 新会话可见）。保存失败 best-effort：官方 catch 后 warn，
+    会话内切换仍生效。
+- **回归测试走真实 waterfall**：`commands-model.test.ts` 的 ownership 用例直接 dispatch
+  真实的 `system-prompt/assemble` + `agent/request`，断言 host 模式下「channel /model A →
+  Web selectModel B → 下一次真实 assemble/request = B」（双 owner 时会退回 A）。
 - **测试易错**：fake agent 用 `createScope(rootCtx, agent)` 会继承根服务、掩盖真实环境 agent
   作用域未注入的差异；凡 handler 读服务的用例，用无注入的裸 `new Context()` 替换 fake `agent.ctx`
   模拟真实环境，并（改代码前）断言旧写法确实失败。参考

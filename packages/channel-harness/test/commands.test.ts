@@ -39,7 +39,7 @@ import { MemoryBindingStore } from '../src/binding-store.ts';
 import { ChannelHarnessBridge } from '../src/bridge.ts';
 import { Config } from '../src/config.ts';
 import { installChannelCommands, type ChannelCommandDependencies } from '../src/commands/index.ts';
-import { ChannelModelSelectionManager } from '../src/model-selection.ts';
+import { ChannelModelSelectionController } from '../src/model-selection.ts';
 import { ReplyContextStore } from '../src/reply-context-store.ts';
 import type { ChannelWorkspaceResolver } from '../src/workspace-resolver.ts';
 
@@ -64,10 +64,10 @@ function baseConfig(overrides: Partial<Config> = {}): Config {
 const silentLogger = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
 
 /** Minimal command deps for registration-only tests (handlers never run). */
-function channelTestDeps(): ChannelCommandDependencies {
+function channelTestDeps(rootCtx: Context): ChannelCommandDependencies {
   return {
     startNewSession: async () => {},
-    modelSelection: new ChannelModelSelectionManager(),
+    modelSelection: new ChannelModelSelectionController(rootCtx),
     listCommands: () => [],
     findCommand: () => undefined,
     llm: {
@@ -76,8 +76,6 @@ function channelTestDeps(): ChannelCommandDependencies {
       resolveModelInfo: async () => ({ provider: '', id: '', name: '' }),
       resolveCallConfig: async (config) => config,
     },
-    saveDefaultModelSelection: async () => {},
-    selectHostSessionModel: async () => {},
   };
 }
 
@@ -357,7 +355,7 @@ describe('A. official dsh-commands compatibility', () => {
     new CommandRuntime(ctx);
     const agent = fakeScopedAgent(ctx, 's-injected');
     const caller = ctx.plugin(async function uninjectedCaller() {
-      await installChannelCommands(agent.ctx, channelTestDeps());
+      await installChannelCommands(agent.ctx, channelTestDeps(ctx));
     });
 
     await caller.await();
@@ -372,7 +370,7 @@ describe('A. official dsh-commands compatibility', () => {
     const agent = fakeScopedAgent(ctx, 's-exact-context');
     const inject = vi.spyOn(agent.ctx, 'inject');
 
-    const dispose = await installChannelCommands(agent.ctx, channelTestDeps());
+    const dispose = await installChannelCommands(agent.ctx, channelTestDeps(ctx));
 
     expect(inject).toHaveBeenCalledWith(['commands'], expect.any(Function));
     expect(ctx.commands.find(agent as never, 'new')).toBeDefined();
@@ -384,13 +382,13 @@ describe('A. official dsh-commands compatibility', () => {
     new CommandRuntime(ctx);
     const agent = fakeScopedAgent(ctx, 's-reload');
 
-    const firstDispose = await installChannelCommands(agent.ctx, channelTestDeps());
+    const firstDispose = await installChannelCommands(agent.ctx, channelTestDeps(ctx));
     expect(ctx.commands.find(agent as never, 'new')).toBeDefined();
 
     await firstDispose();
     expect(ctx.commands.find(agent as never, 'new')).toBeUndefined();
 
-    const secondDispose = await installChannelCommands(agent.ctx, channelTestDeps());
+    const secondDispose = await installChannelCommands(agent.ctx, channelTestDeps(ctx));
     expect(ctx.commands.find(agent as never, 'new')).toBeDefined();
     await secondDispose();
   });
@@ -948,7 +946,7 @@ describe('M. command scope (spec §43)', () => {
     const ctx = new Context();
     new CommandRuntime(ctx);
     const agent = fakeScopedAgent(ctx, 's-dup');
-    await installChannelCommands(agent.ctx, channelTestDeps());
+    await installChannelCommands(agent.ctx, channelTestDeps(ctx));
     expect(() =>
       agent.ctx.commands.register({
         name: 'stop',

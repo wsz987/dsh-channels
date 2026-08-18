@@ -70,8 +70,8 @@ import {
   type ChannelCommandDisposer,
   type ChannelCommandDependencies,
 } from './commands/index.js';
-import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model';
-import { ChannelModelSelectionManager } from './model-selection.js';
+
+import { ChannelModelSelectionController } from './model-selection.js';
 import { toLoggableError } from './loggable-error.js';
 import { ChannelSessionFactory } from './channel-session-factory.js';
 
@@ -94,18 +94,18 @@ export interface ChannelHarnessBridgeOptions {
   ctx: Context;
   /**
    * Bridge hook the channel commands need (`startNewSession` + optional
-   * model-selection manager; absent -> the bridge owns a default instance).
+   * model-selection controller; absent -> the bridge owns a default instance).
    */
   commandDeps: Omit<
     ChannelCommandDependencies,
-    'modelSelection' | 'listCommands' | 'findCommand' | 'llm' | 'saveDefaultModelSelection' | 'selectHostSessionModel'
+    'modelSelection' | 'listCommands' | 'findCommand' | 'llm'
   > & {
-    modelSelection?: ChannelModelSelectionManager;
+    modelSelection?: ChannelModelSelectionController;
     listCommands?: ChannelCommandDependencies['listCommands'];
     findCommand?: ChannelCommandDependencies['findCommand'];
     llm?: ChannelCommandDependencies['llm'];
-    saveDefaultModelSelection?: ChannelCommandDependencies['saveDefaultModelSelection'];
-    selectHostSessionModel?: ChannelCommandDependencies['selectHostSessionModel'];
+
+
   };
   /**
    * Resolves a channel conversation to a Session working directory and (when
@@ -157,7 +157,7 @@ export class ChannelHarnessBridge {
   private readonly commandDisposers = new Set<ChannelCommandDisposer>();
   private commandSetupsDisposed = false;
   /** Per-agent model selection (created by default when none is supplied). */
-  private readonly modelSelection: ChannelModelSelectionManager;
+  private readonly modelSelection: ChannelModelSelectionController;
   /** Normalized command deps handed to every agent setup. */
   private readonly commandDeps: ChannelCommandDependencies;
   /** Per-conversation generation counters, invalidated by /stop (spec §6). */
@@ -165,7 +165,7 @@ export class ChannelHarnessBridge {
 
   constructor(private readonly options: ChannelHarnessBridgeOptions) {
     this.modelSelection =
-      options.commandDeps.modelSelection ?? new ChannelModelSelectionManager();
+      options.commandDeps.modelSelection ?? new ChannelModelSelectionController(options.ctx);
     // Every Harness service reach is bridged LAZILY from the plugin context
     // (options.ctx): command handlers must never read services through
     // invocation.agent.ctx — the agent-loop scoped context does not inject
@@ -184,47 +184,6 @@ export class ChannelHarnessBridge {
           this.options.ctx.llm.resolveModelInfo(provider, model, signal),
         resolveCallConfig: (config, signal) =>
           this.options.ctx.llm.resolveCallConfig(config, signal),
-      },
-      // Official model-switch persistence (host-apiproxy saveDefaultModelSelection
-      // -> agentDefaultModel -> settings): Web surfaces and new sessions observe
-      // the switch without a refresh. Best-effort; failures are swallowed by the
-      // /model command (the session-level switch already applied).
-      saveDefaultModelSelection: async (selection) => {
-        const svc = this.options.ctx.get('agentDefaultModel') as AgentDefaultModelConfig | undefined;
-        await svc?.saveSelection(selection);
-      },
-      // Official host-parity (no hard dependency): when a Web Host (apiProxy)
-      // is mounted, route the switch through its `session.selectModel` RPC so
-      // the HOST's per-session selectionFor(...).current — the source the
-      // composer model selector renders — updates, and its saveSelection
-      // triggers settings/document-updated for a live UI refresh.
-      selectHostSessionModel: async (agent, selection) => {
-        const apiProxy = this.options.ctx.get('apiProxy') as
-          | {
-              sessions?: {
-                selectModel?: (request: {
-                  payload: {
-                    sessionId: string;
-                    provider: string;
-                    model: string;
-                    reasoningEffort?: string;
-                  };
-                }) => Promise<{ result?: { ok: boolean } }>;
-              };
-            }
-          | undefined;
-        const selectModel = apiProxy?.sessions?.selectModel;
-        if (!selectModel) return;
-        await selectModel({
-          payload: {
-            sessionId: String(agent.id),
-            provider: selection.provider,
-            model: selection.model,
-            ...(selection.reasoningEffort
-              ? { reasoningEffort: String(selection.reasoningEffort) }
-              : {}),
-          },
-        });
       },
     };
     this.sessionFactory = new ChannelSessionFactory({
