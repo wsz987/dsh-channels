@@ -124,6 +124,8 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 /model openai gpt-5.6 high   # 指定 reasoning effort
 ```
 
+> `/model` 会同时设为全局默认模型（Web 页面 / 新会话可见，无需刷新）。
+
 ### 主动外发
 
 在渠道会话中让 Agent 调用 `send_channel_message`，可以主动向当前渠道发送文本、图片或支持的文件。Harness Web 直接创建的普通会话没有渠道绑定，不能执行渠道外发。

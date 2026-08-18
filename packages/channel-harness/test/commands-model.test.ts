@@ -328,6 +328,41 @@ describe('/model (spec §46)', () => {
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', '/model openai gpt-5.6 high extra')));
     expect(lastSent(adapter)).toContain('用法：/model');
   });
+
+  it('persists the switch as the Harness-wide default via agentDefaultModel.saveSelection', async () => {
+    const rootCtx = new Context();
+    new CommandRuntime(rootCtx);
+    const saveSelection = vi.fn(async () => {});
+    rootCtx.provide('agentDefaultModel', {
+      currentSelection: () => ({ provider: 'openai', model: 'gpt-5.6' }),
+      saveSelection,
+    });
+    withLlm(rootCtx, { openai: { models: [{ id: 'gpt-5.6', name: 'GPT 5.6' }] } });
+    const { bridge, adapter } = makeBridge(rootCtx);
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', '/model openai gpt-5.6')));
+    expect(adapter.sent[adapter.sent.length - 1]?.text).toContain('模型已切换');
+    // Official host-apiproxy parity: the switch also lands in agentDefaultModel
+    // (-> settings) so Web surfaces and new sessions observe it without refresh.
+    expect(saveSelection).toHaveBeenCalledWith({ provider: 'openai', model: 'gpt-5.6' });
+  });
+
+  it('routes the switch through the host session.selectModel RPC when an apiProxy is mounted', async () => {
+    const rootCtx = new Context();
+    new CommandRuntime(rootCtx);
+    const selectModel = vi.fn(async () => ({ result: { ok: true } }));
+    rootCtx.provide('apiProxy', { sessions: { selectModel } });
+    withLlm(rootCtx, { openai: { models: [{ id: 'gpt-5.6', name: 'GPT 5.6' }], reasoningEfforts: ['low', 'high'] } });
+    const { gateway, bridge, adapter } = makeBridge(rootCtx);
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
+    const sessionId = gateway.createCalls[0]!;
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', '/model openai gpt-5.6 high')));
+    expect(adapter.sent[adapter.sent.length - 1]?.text).toContain('模型已切换');
+    // The composer model selector renders the HOST's selectionFor(...).current;
+    // routing the switch through the official RPC keeps it live without a refresh.
+    expect(selectModel).toHaveBeenCalledWith({
+      payload: { sessionId, provider: 'openai', model: 'gpt-5.6', reasoningEffort: 'high' },
+    });
+  });
 });
 
 describe('ChannelModelSelectionManager reading priority (spec §21)', () => {

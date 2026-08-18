@@ -126,6 +126,8 @@ If the host loads official plugins (`/compact`, `/goal`, `/plan`, `/feedback`, .
 /model openai gpt-5.6 high   # specify a reasoning effort
 ```
 
+> `/model` also sets the global default model at the same time (visible in the Web UI / new sessions, no refresh needed).
+
 ### Proactive send
 
 Have the Agent call `send_channel_message` inside a channel session to proactively send text, images or supported files to the current channel. Plain sessions created directly in Harness Web have no channel binding and cannot send out of band.

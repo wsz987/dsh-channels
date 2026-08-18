@@ -93,7 +93,29 @@ export function createModelCommand(deps: ChannelCommandDependencies): CommandDef
       };
       deps.modelSelection.select(invocation.agent, selection);
 
-      // 5. Report success.
+      // 5. Persist as the Harness-wide default (official host-apiproxy
+      //    saveDefaultModelSelection -> agentDefaultModel -> settings), so Web
+      //    surfaces and new sessions observe the switch without a refresh.
+      //    Best-effort: a failure must not fail the session-level switch
+      //    (official logs a warn and keeps the session switch).
+      try {
+        await deps.saveDefaultModelSelection(selection);
+      } catch {
+        // mirrors official host-apiproxy behavior
+      }
+
+      // 6. Apply the switch through the HOST's official session.selectModel RPC
+      //    when a Web Host is mounted: updates the host's per-session
+      //    selectionFor(...).current (the composer model selector's source) and
+      //    triggers settings/document-updated for a live UI refresh — no page
+      //    reload needed. Best-effort; the session-level switch already applied.
+      try {
+        await deps.selectHostSessionModel(invocation.agent, selection);
+      } catch {
+        // mirrors official best-effort: the host UI may lag, the switch holds
+      }
+
+      // 7. Report success.
       return {
         kind: 'success',
         text: formatSelection('模型已切换：', selection) + '\n\n从下一次模型执行步骤开始生效。',

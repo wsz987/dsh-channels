@@ -1097,6 +1097,10 @@ PDF 解析使用 `unpdf`（PDF.js），DOCX 使用 `mammoth`，XLSX 使用 `xlsx
 - **模型切换只用官方机制**：`installModelSelection(agentCtx, ref)`，`ModelSelectionRef{current, assembled}`
   由入口点自持；`/model` 绝不改写 `binding.route`；读取优先级 picked →
   `session.requestHeader()?.config` → `agent.options` → `agentDefaultModel`。
+- **切换后必须同步默认模型**（对齐官方 host-apiproxy 的模型切换 handler）：除设置会话内
+  selection 外，还要 `ctx.agentDefaultModel.saveSelection(selection)`（写 settings）——Web
+  页面与后续新会话读取的正是 `agentDefaultModel.currentSelection()`，不同步会导致「切换
+  后页面不更新 / 要刷新才生效」。保存失败为 best-effort：官方 catch 后 warn，会话内切换仍生效。
 - **测试易错**：fake agent 用 `createScope(rootCtx, agent)` 会继承根服务、掩盖真实环境 agent
   作用域未注入的差异；凡 handler 读服务的用例，用无注入的裸 `new Context()` 替换 fake `agent.ctx`
   模拟真实环境，并（改代码前）断言旧写法确实失败。参考

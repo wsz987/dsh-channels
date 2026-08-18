@@ -19,7 +19,7 @@
  * like the official compact/goal/plan commands close over their plugin ctx.
  */
 import { type Context } from '@deepseek-ai/cordis';
-import type { Agent } from '@deepseek-ai/dsh-agent';
+import type { Agent, ModelSelection } from '@deepseek-ai/dsh-agent';
 import type { CommandDefinition, CommandDescriptor } from '@deepseek-ai/dsh-commands';
 import type { LlmCallConfig, LlmModelInfo, LlmProviderInfo, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm';
 import { createNewCommand } from './new.js';
@@ -58,6 +58,21 @@ export interface ChannelCommandDependencies {
   findCommand(agent: Agent, name: string): CommandDefinition | undefined;
   /** Harness LLM catalog seam (discovery + exact resolution), bridged lazily. */
   llm: ChannelModelCatalog;
+  /**
+   * Persist the selection as the Harness-wide default model (official
+   * `ctx.agentDefaultModel.saveSelection` -> settings), so Web surfaces and
+   * new sessions observe the switch without a refresh. Best-effort: a failure
+   * must not fail the session-level switch (mirrors host-apiproxy).
+   */
+  saveDefaultModelSelection(selection: ModelSelection): Promise<void>;
+  /**
+   * Apply the switch through the HOST's official `session.selectModel` RPC
+   * (when a Web Host / apiProxy is present), so the host's per-session
+   * `selectionFor(...).current` and the composer model selector observe it
+   * without a page refresh. No-op when no Host is mounted. Best-effort: a
+   * failure must not fail the session-level switch already applied.
+   */
+  selectHostSessionModel(agent: Agent, selection: ModelSelection): Promise<void>;
 }
 
 export type ChannelCommandDisposer = () => Promise<void>;

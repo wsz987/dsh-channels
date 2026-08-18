@@ -76,6 +76,8 @@ function channelTestDeps(): ChannelCommandDependencies {
       resolveModelInfo: async () => ({ provider: '', id: '', name: '' }),
       resolveCallConfig: async (config) => config,
     },
+    saveDefaultModelSelection: async () => {},
+    selectHostSessionModel: async () => {},
   };
 }
 
