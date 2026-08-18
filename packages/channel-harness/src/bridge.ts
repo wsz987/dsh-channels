@@ -367,11 +367,11 @@ export class ChannelHarnessBridge {
 
   /**
    * Whether the durable session behind an existing binding is MISSING — the
-   * stale condition that makes ordinary resolution fail loud with
-   * SessionNotFoundError (a binding/session durability inconsistency, never
-   * auto-repaired). A live agent is never stale (live-first: no persistence
-   * probe), and without sessionPersistence there is no durable identity to
-   * lose (ephemeral deployments recreate instead).
+   * stale condition behind both the EXPLICIT stale-binding repair (/new) and
+   * the loud SessionNotFoundError for every other request. A live agent is
+   * never stale (live-first: no persistence probe), and without
+   * sessionPersistence there is no durable identity to lose (ephemeral
+   * deployments recreate instead).
    */
   private async isDurableSessionMissing(binding: SessionBinding): Promise<boolean> {
     if (this.options.agentManager.getLiveAgent(binding.sessionId)) return false;
@@ -415,12 +415,12 @@ export class ChannelHarnessBridge {
       // commits its replacement, preserving rollback semantics on failure.
       binding = undefined;
     }
-    // /new is the ONE repair escape hatch for a STALE durable binding (the
-    // persisted session behind a durable binding is missing): the user is
-    // explicitly abandoning the old session, so skip recovery — which would
-    // otherwise throw SessionNotFoundError — and bootstrap a fresh session
-    // that replaces the binding. Every other request on the stale binding
-    // still fails loud: the inconsistency is never auto-repaired.
+    // /new is the ONE EXPLICIT stale-binding repair path — NOT a
+    // session-recovery branch: the user is explicitly authorizing abandonment
+    // of the old session (its persisted data is gone, so ordinary recovery
+    // would throw session-not-found) and creation of a fresh one that replaces
+    // the binding. Every other request on the stale binding still fails loud:
+    // the inconsistency is never auto-repaired.
     if (
       binding &&
       parsed &&

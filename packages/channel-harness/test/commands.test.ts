@@ -575,8 +575,8 @@ describe('C2. archived binding rollover', () => {
   });
 });
 
-describe('C3. /new is the repair escape hatch for a STALE durable binding', () => {
-  it('lets /new bootstrap a fresh session and replace the binding when the persisted session is missing', async () => {
+describe('C3. /new = explicit stale-binding repair (never part of ordinary session recovery)', () => {
+  it('repairs: a user-authorized /new replaces a stale binding with a fresh session when the persisted session is missing', async () => {
     const rootCtx = new Context();
     new CommandRuntime(rootCtx);
     const { gateway, bridge, adapter, bindingStore } = makeBridge(rootCtx);
@@ -604,7 +604,7 @@ describe('C3. /new is the repair escape hatch for a STALE durable binding', () =
     expect(gateway.existsCalls).toBe(1);
   });
 
-  it('keeps ordinary requests failing loud on a stale durable binding (only /new bypasses)', async () => {
+  it('ordinary requests still fail loud on a stale durable binding (only the explicit /new repair bypasses)', async () => {
     const rootCtx = new Context();
     new CommandRuntime(rootCtx);
     const { gateway, bridge } = makeBridge(rootCtx);
@@ -619,7 +619,7 @@ describe('C3. /new is the repair escape hatch for a STALE durable binding', () =
     expect(gateway.existsCalls).toBe(1);
   });
 
-  it('keeps /new on a LIVE agent on the normal path (repair probe never runs)', async () => {
+  it('a live agent keeps the normal /new flow (no repair probe runs)', async () => {
     const rootCtx = new Context();
     new CommandRuntime(rootCtx);
     const { gateway, bridge, adapter, bindingStore } = makeBridge(rootCtx);
@@ -641,7 +641,7 @@ describe('C3. /new is the repair escape hatch for a STALE durable binding', () =
     expect(gateway.existsCalls).toBe(0);
   });
 
-  it('shows the usage line for a malformed /new on a stale binding (no repair)', async () => {
+  it('malformed /new on a stale binding shows the usage line and repairs nothing', async () => {
     const rootCtx = new Context();
     new CommandRuntime(rootCtx);
     const { gateway, bridge, adapter, bindingStore } = makeBridge(rootCtx);

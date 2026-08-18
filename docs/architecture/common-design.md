@@ -690,11 +690,13 @@ binding 存在
   durability 不一致（通常不是「第一次创建」），抛 `SessionNotFoundError`
   fail loud，**绝不**静默用同 ID 空 Session 顶替 —— 对齐官方
   「persisted identity missing → session-not-found」。
-- **`/new` 是唯一的 stale-binding repair escape hatch**：只有 `/new` 允许绕过
-  旧 Session 恢复 —— 用户显式声明「旧会话不要了」，直接 bootstrap 新 Session
-  并覆盖 binding（复用 `ChannelSessionFactory.create` 事务，失败仍回滚）。普通
-  消息 / `/model` / `/status` / 其他命令一律 fail loud，不一致**绝不**自动修复；
-  `/new` 与 `session-not-found` 语义不冲突（一个是显式放弃，一个是自动恢复失败）。
+- **`/new` = 显式 stale-binding repair，不是普通 session recovery**：旧 Session 已
+  不可恢复（持久化数据缺失）时，只有 `/new` 允许用户**显式授权**废弃旧引用并创建
+  新会话 —— 直接 bootstrap 新 Session 并覆盖 binding（复用
+  `ChannelSessionFactory.create` 事务，失败仍回滚）。普通消息 / `/model` /
+  `/status` / 其他命令一律 fail loud，不一致**绝不**自动修复；`/new` 与
+  `session-not-found` 语义不冲突（一个是用户授权重建，一个是自动恢复失败），
+  未来维护者不应把它理解成普通恢复规则的组成部分。
 - 恢复路径集中在 `channel-harness`：`AgentManager.borrowIfLive` /
   `resolve` + `ChannelSessionFactory.recreate`，bridge 只编排顺序，不引入
   error-regex 兜底。
