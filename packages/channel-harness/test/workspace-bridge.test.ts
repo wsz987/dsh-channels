@@ -455,6 +455,71 @@ describe('M5 workspace integration (plan §21)', () => {
     expect(fields.error).toMatchObject({ name: 'Error', message: 'attach exploded' });
   });
 
+  it('Test 5 — existing binding + missing persistence recreates the SAME session at the channel workspace cwd, re-attaches, and keeps the binding', async () => {
+    const resolver = new FakeWorkspaceResolver();
+    const logger = capturingLogger();
+    const { gateway, bridge, bindingStore } = makeBridge({ resolver, logger });
+
+    // First message -> fresh session on the channel workspace.
+    await bridge.handleChannelEvent(makeMessageEvent({ message: { id: 'm1', content: [{ type: 'text', text: 'hello' }] } }));
+    const first = gateway.createCalls[0]!;
+    expect(gateway.createMetas[first]?.cwd).toBe(resolver.cwd);
+    expect(resolver.attachCalls).toEqual([first]);
+
+    // Process restart: the agent is gone from this process and the persisted
+    // session is gone too (no sessionPersistence mounted) — only the binding
+    // survives.
+    gateway.live.clear();
+    gateway.canResumeValue = false;
+
+    await bridge.handleChannelEvent(makeMessageEvent({ message: { id: 'm2', content: [{ type: 'text', text: 'again' }] } }));
+
+    // The recreate re-runs the workspace resolver: SAME session id (binding
+    // kept, never a fresh id) recreated at the channel workspace cwd, and the
+    // workspace re-attached.
+    expect(gateway.createCalls).toHaveLength(2);
+    const second = gateway.createCalls[1]!;
+    expect(second).toBe(first);
+    expect(gateway.createMetas[second]?.cwd).toBe(resolver.cwd);
+    expect(resolver.attachCalls).toEqual([first, second]);
+
+    // Binding kept pointing at the same session; followup ran.
+    const binding = await bindingStore.get('weixin:main:user_123');
+    expect(binding?.sessionId).toBe(first);
+    expect(gateway.followups).toHaveLength(2);
+
+    // Structured success log carries the workspace/cwd identity.
+    const recreatedLog = logger.info.mock.calls.find(
+      (c) => c[0] === '[channel-harness] channel session recreated (binding kept)',
+    );
+    expect(recreatedLog).toBeDefined();
+    expect(recreatedLog![1]).toMatchObject({
+      sessionId: second,
+      channelId: 'weixin',
+      workspaceId: resolver.workspace.id,
+      cwd: resolver.cwd,
+      bindingKey: 'weixin:main:user_123',
+    });
+  });
+
+  it('Test 6 — existing binding + missing persistence borrows a LIVE session without recreating', async () => {
+    const resolver = new FakeWorkspaceResolver();
+    const { gateway, bridge } = makeBridge({ resolver });
+
+    await bridge.handleChannelEvent(makeMessageEvent({ message: { id: 'm1', content: [{ type: 'text', text: 'hello' }] } }));
+    const first = gateway.createCalls[0]!;
+    const followupsBefore = gateway.followups.length;
+
+    // Persistence is missing but the agent is STILL LIVE in this process: the
+    // second message must borrow it — no second create, no attach churn.
+    gateway.canResumeValue = false;
+    await bridge.handleChannelEvent(makeMessageEvent({ message: { id: 'm2', content: [{ type: 'text', text: 'again' }] } }));
+
+    expect(gateway.createCalls).toHaveLength(1);
+    expect(resolver.attachCalls).toEqual([first]);
+    expect(gateway.followups.length).toBe(followupsBefore + 1);
+  });
+
   it('logs an agent creation failure with enumerable Error fields and cause', async () => {
     const logger = capturingLogger();
     const { gateway, bridge } = makeBridge({ logger });

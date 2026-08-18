@@ -336,11 +336,12 @@ export class ChannelHarnessBridge {
 
   /**
    * One-time Agent-scoped command + model-selection setup. Installed onto an
-   * Agent's scoped context by every create/resolve/resolveOrCreate so a fresh
-   * OR resumed session gets the channel commands AND /model support before any
-   * driving happens (spec §22).
+   * Agent's scoped context by every create/resolve and by the Session
+   * factory's recreate (borrow + create) so a fresh, resumed OR recreated
+   * session gets the channel commands AND /model support before any driving
+   * happens (spec §22).
    */
-  // Bound arrow: passed to create/resolve/resolveOrCreate as the official
+  // Bound arrow: passed to create/resolve/borrowIfLive as the official
   // AgentSetup (invoked as a bare setup(agentCtx)), so this must stay the
   // bridge instance.
   private commandSetup = async (agentCtx: Context): Promise<void> => {
@@ -477,11 +478,16 @@ export class ChannelHarnessBridge {
       }
       // Decide create vs resume. Live agent -> borrow (both paths). Otherwise
       // resume when persistence is present and the persisted session exists; a
-      // missing persistence (or missing persisted session) recreates.
+      // missing persistence (or missing persisted session) is handed to the
+      // Session factory's `recreate` — it re-runs the workspaceResolver so the
+      // recreated session lands back on the channel Workspace cwd (never the
+      // host cwd) and re-attaches the workspace, keeping the durable binding.
       if (this.options.agentManager.canResume() && (await this.options.agentManager.exists(binding.sessionId))) {
         agentRef = await this.options.agentManager.resolve(binding.sessionId, route, this.commandSetup);
       } else {
-        agentRef = await this.options.agentManager.resolveOrCreate(binding.sessionId, route, this.commandSetup);
+        const recreated = await this.sessionFactory.recreate(binding, route);
+        binding = recreated.binding;
+        agentRef = recreated.agentRef;
       }
       this.options.agentManager.registerBinding(binding);
     }

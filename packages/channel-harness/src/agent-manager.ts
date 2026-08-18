@@ -333,27 +333,18 @@ export class AgentManager {
   }
 
   /**
-   * Live `get` first; on a miss, `gateway.create(route)`. Used by the bridge
-   * when resume is not possible (no persistence): borrow the live agent when
-   * present, otherwise open a fresh agent on the recorded session id.
+   * Borrow the LIVE agent for a session, when one is loaded in this process.
+   * Returns `undefined` when there is no live agent — the caller (the Session
+   * factory, for channel-session lifecycle decisions) decides what to do next
+   * (resume, or a cwd/workspace-aware recreate). Never creates or resumes and
+   * never takes ownership (the borrowed agent is never disposed here). Runs
+   * the one-time setup against a borrowed agent, exactly once.
    */
-  resolveOrCreate(sessionId: string, route: AgentRouteSpec, setup?: AgentSetup): Promise<AgentRef> {
+  borrowIfLive(sessionId: string, route: AgentRouteSpec, setup?: AgentSetup): Promise<AgentRef | undefined> {
     if (this.closed) {
-      return Promise.reject(new Error(`AgentManager is closed; cannot resolve '${sessionId}'`));
+      return Promise.reject(new Error(`AgentManager is closed; cannot borrow '${sessionId}'`));
     }
-    const pending = this.inFlight.get(sessionId);
-    if (pending) return pending;
-    const run = this.doResolveOrCreate(sessionId, route, setup);
-    this.inFlight.set(sessionId, run);
-    void run.then(
-      () => {
-        this.inFlight.delete(sessionId);
-      },
-      () => {
-        this.inFlight.delete(sessionId);
-      },
-    );
-    return run;
+    return this.doBorrowIfLive(sessionId, route, setup);
   }
 
   /** Register the binding associated with a session (reverse reply routing). */
@@ -484,18 +475,15 @@ export class AgentManager {
     });
   }
 
-  private async doResolveOrCreate(sessionId: string, route: AgentRouteSpec, setup?: AgentSetup): Promise<AgentRef> {
+  private async doBorrowIfLive(
+    sessionId: string,
+    route: AgentRouteSpec,
+    setup?: AgentSetup,
+  ): Promise<AgentRef | undefined> {
     const live = this.gateway.get(sessionId);
-    if (live) {
-      await this.ensureBorrowedSetup(live, setup);
-      return this.makeRef(sessionId, route, live);
-    }
-    return this.withSlot(async () => {
-      const handle = await this.gateway.create(sessionId, route, setup);
-      this.owned.set(sessionId, handle);
-      if (setup) this.configuredAgents.add(handle.agent);
-      return this.makeRef(sessionId, route, handle);
-    });
+    if (!live) return undefined;
+    await this.ensureBorrowedSetup(live, setup);
+    return this.makeRef(sessionId, route, live);
   }
 
   private async withSlot<T>(fn: () => Promise<T>): Promise<T> {
