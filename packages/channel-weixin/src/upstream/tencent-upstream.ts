@@ -23,6 +23,7 @@ import {
 } from '@wsz987/channel-core';
 import type { FetchLike } from '@wsz987/channel-core';
 import type { MessagePart } from '@wsz987/channel-core';
+import pkg from '../../package.json' with { type: 'json' };
 import type { WeixinConfig } from '../config.js';
 import { ILinkClient, type ILinkClientOptions } from '../ilink/client.js';
 import type { HttpTransport } from '../transport.js';
@@ -128,7 +129,7 @@ export class TencentWeixinUpstream implements WeixinUpstream {
       cdnBaseUrl: ilink.cdnBaseUrl,
       timeoutMs: this.config.network?.timeoutMs ?? 15000,
       longPollTimeoutMs: this.config.network?.longPollTimeoutMs ?? 35000,
-      botAgent: ilink.botAgent ?? 'DeepSeekHarness/0.8.1',
+      botAgent: ilink.botAgent ?? 'DeepSeekHarness/' + pkg.version,
       transport: this.transport,
       now: this.now,
       rand: this.rand,

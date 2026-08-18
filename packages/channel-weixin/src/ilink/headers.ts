@@ -13,6 +13,7 @@
  * Every endpoint shares the same header set; building them here avoids
  * duplicating header logic per request.
  */
+import pkg from '../../package.json' with { type: 'json' };
 import {
   AUTHORIZATION_TYPE,
   HEADER_AUTHORIZATION,
@@ -86,7 +87,7 @@ export function buildHeaders(opts: BuildHeadersOptions = {}): Record<string, str
     [HEADER_X_WECHAT_UIN]: buildWechatUin(opts.uin, opts.rand),
     [HEADER_ILINK_APP_ID]: ILINK_APP_ID,
     [HEADER_ILINK_APP_CLIENT_VERSION]: String(
-      opts.clientVersion ?? clientVersionFromString('0.8.1'),
+      opts.clientVersion ?? clientVersionFromString(pkg.version),
     ),
   };
   if (opts.token?.trim()) {

@@ -18,6 +18,7 @@
  * confirmed `baseurl` can update all later calls (getUpdates / sendMessage /
  * QR status).
  */
+import pkg from '../../package.json' with { type: 'json' };
 import { FetchTransport, type HttpTransport } from '../transport.js';
 import { buildHeaders } from './headers.js';
 import { buildBaseInfo } from './base-info.js';
@@ -117,7 +118,7 @@ export class ILinkClient {
     this._token = options.token;
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.longPollTimeoutMs = options.longPollTimeoutMs ?? DEFAULT_LONG_POLL_TIMEOUT_MS;
-    this.botAgent = options.botAgent ?? 'DeepSeekHarness/0.8.1';
+    this.botAgent = options.botAgent ?? 'DeepSeekHarness/' + pkg.version;
     this.rand = options.rand ?? Math.random;
     this.now = options.now ?? Date.now;
     this.routeTag = options.routeTag;
