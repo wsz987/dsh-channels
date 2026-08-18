@@ -7,7 +7,9 @@ import {
   type StreamChunk,
 } from '@deepseek-ai/dsh-llm';
 import type { AgentManager } from '../src/agent-manager.ts';
+import type { ImageCompatibilityMode } from '../src/config.ts';
 import {
+  ChannelImageUnsupportedError,
   degradeMessageImages,
   installImageModelFallback,
   UNSUPPORTED_IMAGE_PLACEHOLDER,
@@ -42,7 +44,11 @@ async function consume(stream: AsyncIterable<StreamChunk>): Promise<void> {
   }
 }
 
-function fallbackHarness(inputModalities: readonly string[] | undefined, lookupError?: Error) {
+function fallbackHarness(
+  inputModalities: readonly string[] | undefined,
+  lookupError?: Error,
+  mode: ImageCompatibilityMode = 'degrade',
+) {
   let listener: StreamListener | undefined;
   const providerRequests: GenerateOptions[] = [];
   const resolveModelInfo = vi.fn(async () => {
@@ -78,7 +84,7 @@ function fallbackHarness(inputModalities: readonly string[] | undefined, lookupE
     error: vi.fn(),
   };
 
-  const dispose = installImageModelFallback(ctx, agentManager, logger);
+  const dispose = installImageModelFallback(ctx, agentManager, logger, mode);
   return { llm, providerRequests, resolveModelInfo, logger, dispose };
 }
 
@@ -156,5 +162,62 @@ describe('image model fallback', () => {
 
     expect(harness.resolveModelInfo).not.toHaveBeenCalled();
     expect(harness.providerRequests).toEqual([original]);
+  });
+});
+
+describe('image compatibility policy (degrade | reject)', () => {
+  it('defaults to degrade: a text-only model gets the placeholder, never an error', async () => {
+    const harness = fallbackHarness(['text']);
+    const original = imageRequest();
+
+    await consume(harness.llm.stream(original));
+
+    expect(harness.providerRequests).toHaveLength(1);
+    expect(harness.providerRequests[0]!.messages[0]!.content[1]).toEqual({
+      type: 'text',
+      text: UNSUPPORTED_IMAGE_PLACEHOLDER,
+    });
+  });
+
+  it('reject: a text-only model gets a ChannelImageUnsupportedError and the request is never sent', async () => {
+    const harness = fallbackHarness(['text'], undefined, 'reject');
+    const original = imageRequest();
+
+    await expect(consume(harness.llm.stream(original))).rejects.toThrow(
+      ChannelImageUnsupportedError,
+    );
+
+    expect(harness.providerRequests).toHaveLength(0);
+    expect(original.messages[0]!.content[1]!.type).toBe('image');
+    expect(harness.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('rejected image request'),
+      expect.objectContaining({ provider: 'test-provider', model: 'test-model' }),
+    );
+  });
+
+  it('reject: image-capable models and non-channel sessions still pass through untouched', async () => {
+    const harness = fallbackHarness(['text', 'image'], undefined, 'reject');
+    const original = imageRequest();
+    await consume(harness.llm.stream(original));
+    expect(harness.providerRequests).toEqual([original]);
+
+    const harnessOutside = fallbackHarness(['text'], undefined, 'reject');
+    const web = imageRequest('web-session');
+    await consume(harnessOutside.llm.stream(web));
+    expect(harnessOutside.resolveModelInfo).not.toHaveBeenCalled();
+    expect(harnessOutside.providerRequests).toEqual([web]);
+  });
+
+  it('reject: unknown capabilities and failed lookups still fail open', async () => {
+    const unknown = fallbackHarness(undefined, undefined, 'reject');
+    const req = imageRequest();
+    await consume(unknown.llm.stream(req));
+    expect(unknown.providerRequests).toEqual([req]);
+
+    const failed = fallbackHarness(undefined, new Error('metadata unavailable'), 'reject');
+    const req2 = imageRequest();
+    await consume(failed.llm.stream(req2));
+    expect(failed.providerRequests).toEqual([req2]);
+    expect(failed.logger.warn).toHaveBeenCalledTimes(1);
   });
 });

@@ -57,7 +57,7 @@ export function startBridge(
   const bindingStore = createBindingStore(config.bindingStore);
   const agentGateway = new HarnessAgentGateway(ctx, persistence);
   const agentManager = new AgentManager(agentGateway, logger, config.maxConcurrency);
-  const stopImageFallback = installImageModelFallback(ctx, agentManager, logger);
+  const stopImageFallback = installImageModelFallback(ctx, agentManager, logger, config.imageCompatibility.mode);
   const agentRouter = new AgentRouter(config);
   const workspaceResolver = new HarnessChannelWorkspaceResolver(ctx, config.workspace, logger);
   const getAdapter = (channelId: string): ChannelAdapter | undefined =>

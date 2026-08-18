@@ -84,6 +84,31 @@ export interface WorkspaceConfig {
   autoCreate: boolean;
 }
 
+export type ImageCompatibilityMode = 'degrade' | 'reject';
+
+/**
+ * Channel image-compatibility policy (ADR 0002) — an explicit CHANNEL policy,
+ * NOT an attempt at Web host parity.
+ *
+ * Official Harness Web refuses to switch a session to a model that cannot
+ * accept images once the session already contains an image
+ * (`session.selectModel` -> model-unavailable). Channels keep serving the same
+ * conversation without forcing the user to `/new`, so the default here is a
+ * deliberately bounded divergence from that Web semantics.
+ */
+export interface ImageCompatibilityConfig {
+  /**
+   * `degrade` (default): a text-only model keeps serving the Session — every
+   * image block is replaced by `[图片：当前模型不支持查看]` only in the
+   * provider-visible request, while Session history keeps the real
+   * `ImageBlock`s.
+   * `reject`: the request is refused with an error instead (closest to the
+   * official Web behavior) — the user must start a new Session (`/new`) or
+   * switch to an image-capable model.
+   */
+  mode: ImageCompatibilityMode;
+}
+
 export interface Config {
   /** Default route (and explicit per-level override dictionary). */
   agent: AgentConfig;
@@ -98,6 +123,12 @@ export interface Config {
   bindingStore: BindingStoreConfig;
   /** Channel Workspace policy; defaults to { mode: 'channel-account', autoCreate: true }. */
   workspace: WorkspaceConfig;
+  /**
+   * Channel image-compatibility policy (ADR 0002): how a text-only model
+   * handles channel-bound Sessions whose history contains images. Defaults to
+   * `{ mode: 'degrade' }`.
+   */
+  imageCompatibility: ImageCompatibilityConfig;
   reply: ReplyConfig;
   /**
    * Upper bound on concurrently live agents the bridge owns (per-session
@@ -146,6 +177,9 @@ export const Config: Schema<Config> = Schema.object({
     root: Schema.string(),
     autoCreate: Schema.boolean().default(true),
   }),
+  imageCompatibility: Schema.object({
+    mode: Schema.union(['degrade', 'reject']).default('degrade'),
+  }).default({ mode: 'degrade' }),
   reply: Schema.object({
     updateIntervalMs: Schema.natural().default(200),
     maxTextLength: Schema.natural(),

@@ -983,7 +983,9 @@ workspace:
 ```
 
 适配器负责各平台的下载/解密和上传，`channel-harness` 不复制平台 SDK 实现。
-文本-only 模型的降级策略见 [ADR 0002](adr/0002-image-model-fallback.md)。
+文本-only 模型的图片兼容策略（`imageCompatibility.mode`：`degrade` 默认 /
+`reject`，属显式 Channel 策略而非 Web host parity）见
+[ADR 0002](adr/0002-image-model-fallback.md)。
 
 ### 入站日志与媒体诊断规范
 

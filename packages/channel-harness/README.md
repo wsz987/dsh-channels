@@ -27,11 +27,16 @@ As a Cordis plugin:
     - commands
 ```
 
-Inbound channel images remain real `ImageBlock`s in the original Session. If
-the selected model explicitly declares that it does not accept image input,
-the bridge keeps the same Session and replaces each image with
-`[图片：当前模型不支持查看]` only in the provider-visible request. Text and
-image order is preserved, and unknown model capabilities fail open.
+Inbound channel images remain real `ImageBlock`s in the original Session. How a
+text-only model handles them is an explicit **Channel compatibility policy**
+(`imageCompatibility.mode`, default `degrade`), not host parity: the official
+Web host refuses to switch a Session to a model that cannot see its existing
+images, while channels keep serving the conversation. With `degrade`, each
+image is replaced by `[图片：当前模型不支持查看]` only in the provider-visible
+request (Session history keeps the real blocks, text and image order preserved,
+unknown capabilities fail open). With `reject`, the request is refused with an
+error instead — the user must start a new Session (`/new`) or switch to an
+image-capable model.
 
 ## What it does
 
@@ -65,6 +70,8 @@ image order is preserved, and unknown model capabilities fail open.
     workspace:
       mode: channel-account   # channel-account | host-cwd | disabled
       autoCreate: true
+    imageCompatibility:
+      mode: degrade           # degrade (default) | reject — ADR 0002
     reply:
       updateIntervalMs: 200
       splitParagraphs: true
