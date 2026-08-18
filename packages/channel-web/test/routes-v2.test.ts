@@ -165,6 +165,9 @@ function wireV2(control: ChannelControlLike): Handler {
     inject(_deps: unknown, cb: (webCtx: Record<string, unknown>) => unknown) {
       return cb({ webServer: fakeWebServer, channels: {}, channelControl: control });
     },
+    get(name: string) {
+      return name === 'channelControl' ? control : undefined;
+    },
   };
   apply(fakeCtx as never);
   const captured = handlersByPath.get('/dsh-channels/api/v2');
@@ -487,5 +490,53 @@ describe('handler security guards', () => {
       body: JSON.stringify({ value: big }),
     });
     expect(out.status).toBe(413);
+  });
+});
+
+describe('v2 control provider lifecycle (HMR)', () => {
+  it('resolves the control provider per request: unload degrades to 503, reload is picked up without a stale delegate', async () => {
+    const handlersByPath = new Map<string, Handler>();
+    const fakeWebServer = {
+      register(opts: { kind: string; path: string; handler: Handler }) {
+        handlersByPath.set(opts.path, opts.handler);
+        return () => {};
+      },
+    };
+    // ctx.get() mirrors Cordis: only the CURRENTLY ACTIVE provider is returned;
+    // an unloaded (HMR-removed) provider resolves to undefined.
+    let current: ChannelControlLike | undefined;
+    const fakeCtx = {
+      inject(_deps: unknown, cb: (webCtx: Record<string, unknown>) => unknown) {
+        return cb({ webServer: fakeWebServer });
+      },
+      get(name: string) {
+        return name === 'channelControl' ? current : undefined;
+      },
+    };
+    apply(fakeCtx as never);
+    const handler = handlersByPath.get('/dsh-channels/api/v2');
+    if (!handler) throw new Error('v2 handler was not captured');
+
+    // Provider A serves the first request.
+    const a = makeControl();
+    current = a.control;
+    const first = await invokeDirect(handler, { method: 'GET', url: '/dsh-channels/api/v2/channels' });
+    expect(first.status).toBe(200);
+    expect(a.calls.listChannels).toBe(1);
+
+    // HMR unload of the control plugin: no active provider -> 503, never a stale call.
+    current = undefined;
+    const unloaded = await invokeDirect(handler, { method: 'GET', url: '/dsh-channels/api/v2/channels' });
+    expect(unloaded.status).toBe(503);
+    expect(a.calls.listChannels).toBe(1);
+
+    // HMR reload provides a NEW object: the next request must hit the new
+    // provider — the API wrapper must not keep delegating to provider A.
+    const b = makeControl();
+    current = b.control;
+    const reloaded = await invokeDirect(handler, { method: 'GET', url: '/dsh-channels/api/v2/channels' });
+    expect(reloaded.status).toBe(200);
+    expect(b.calls.listChannels).toBe(1);
+    expect(a.calls.listChannels).toBe(1);
   });
 });

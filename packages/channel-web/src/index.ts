@@ -57,12 +57,26 @@ function isMutationWithBody(method: string): boolean {
 }
 
 /**
- * Build the v2 prefix handler. `control` is resolved lazily so a control
- * service that becomes available after webServer is picked up on the next
- * request; when it is never available, every v2 request returns 503.
+ * Build the v2 prefix handler. `control` is resolved lazily on every request
+ * so a control service that becomes available after webServer is picked up on
+ * the next request; when it is never available, every v2 request returns 503.
+ * The API wrapper is re-created whenever the control service identity changes
+ * (an HMR reload of the control plugin provides a NEW service object), so a
+ * request can never delegate to an unloaded provider.
  */
 function makeV2Handler(resolveControl: () => ChannelControlLike | undefined) {
   let api: ChannelApiV2 | undefined;
+  let apiControl: ChannelControlLike | undefined;
+
+  // Re-create the API wrapper whenever the control service identity changes
+  // (an HMR reload of the control plugin provides a NEW service object), so a
+  // request can never delegate to an unloaded provider.
+  function apiFor(control: ChannelControlLike): ChannelApiV2 {
+    if (apiControl === control && api) return api;
+    api = new ChannelApiV2(control);
+    apiControl = control;
+    return api;
+  }
 
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const url = req.url ?? '/';
@@ -76,7 +90,7 @@ function makeV2Handler(resolveControl: () => ChannelControlLike | undefined) {
     if (!control) {
       return sendJson(res, 503, errorBody('SERVICE_UNAVAILABLE', 'channel control is not available'));
     }
-    api ??= new ChannelApiV2(control);
+    const ready = apiFor(control);
 
     if (MUTATION_METHODS.has(method) && !isLoopbackAddress(req.socket.remoteAddress)) {
       return sendJson(res, 403, errorBody('FORBIDDEN', 'state-changing requests are loopback-only'));
@@ -88,12 +102,12 @@ function makeV2Handler(resolveControl: () => ChannelControlLike | undefined) {
       }
       const body = await readJsonBody<Record<string, unknown>>(req);
       if (!body.ok) return sendJson(res, body.status, body.error);
-      const result = await api.handle(method, pathname, body.value);
+      const result = await ready.handle(method, pathname, body.value);
       return sendJson(res, result.status, result.body);
     }
 
     if (method === 'GET' || method === 'DELETE') {
-      const result = await api.handle(method, pathname, undefined);
+      const result = await ready.handle(method, pathname, undefined);
       return sendJson(res, result.status, result.body);
     }
 
@@ -140,17 +154,17 @@ export function apply(ctx: Context): void {
   });
 
   // v2 control-plane (doc §28–§33): needs webServer; channelControl is
-  // optional — when absent, requests return 503.
-  let controlRef: ChannelControlLike | undefined;
+  // optional — when absent, requests return 503. The control service is read
+  // lazily via ctx.get() on every request (never cached in a module-level ref):
+  // ctx.get() resolves only the currently active provider, so an HMR unload of
+  // the control plugin immediately degrades to 503 instead of calling into an
+  // already-unloaded service object.
   ctx.inject(['webServer'], (webCtx) => {
     const server = (webCtx as unknown as { webServer: WebServerLike }).webServer;
     return server.register({
       kind: 'prefix',
       path: '/dsh-channels/api/v2',
-      handler: makeV2Handler(() => controlRef),
+      handler: makeV2Handler(() => ctx.get('channelControl') as ChannelControlLike | undefined),
     });
-  });
-  ctx.inject(['webServer', 'channelControl'], (webCtx) => {
-    controlRef = (webCtx as unknown as { channelControl?: ChannelControlLike }).channelControl;
   });
 }

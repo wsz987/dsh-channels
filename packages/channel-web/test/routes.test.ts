@@ -109,6 +109,9 @@ function wireHandler(adapters: ChannelAdapter[]): Handler {
     inject(_deps: unknown, cb: (webCtx: Record<string, unknown>) => unknown) {
       return cb({ webServer: fakeWebServer, channels });
     },
+    get(_name: string) {
+      return undefined; // no channelControl in the v1 suite
+    },
   };
   apply(fakeCtx as never);
   const captured = handlersByPath.get('/dsh-channels/api/v1');
