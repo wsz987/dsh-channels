@@ -944,7 +944,7 @@ pnpm 将传递依赖提升到 profile 根目录。根入口同时承载 Web host
 - **patch 语义**：`cordis.patch.yml` / profile patch 是**整体替换**目标插件 `config`，不是深度合并；覆盖时必须保留该插件完整字段。
 - **Cordis 插件形态**：`export const name` / `export const inject` / `export function apply(ctx, config)`；WS、long-poll、Gateway、heartbeat 等手动资源放 `ctx.effect()`；事件监听走 `ctx.on()` 由框架自动清理。
 - **inject 名称**：只用 Harness public service 名（`channels`、`channelControl`、`agents`、`credentials`、`llm`、`commands`、`agentDefaultModel`），禁止私造 key。
-- **命令**：统一走 `commandFactories` / `ctx.commands.register`；命令名 lowercase、以 `/` 开头；handler 返回 `{ kind: 'success' | 'error', text }`；未注册命令被拦截；命令结果不进模型历史。
+- **命令**：统一走 `commandFactories` / `ctx.commands.register`；命令名 lowercase、以 `/` 开头；handler 返回 `{ kind: 'success' | 'error', text }`；未注册命令不再被拦截（作为普通用户输入交给模型）；命令结果不进模型历史。
 - **Agent 输入语义**：普通聊天 `agent.followup()`；执行中纠偏才用 `agent.steer()`；额外上下文用 `agent.inject()`（不得代替聊天）。
 - **回复只消费官方 `session/event`**：`assistant/chunk`、`assistant/message`、`turn/end`；`tool/call` / `tool/result` 只作可选 UX，不混入回复协议。
 - **配置与凭据**：部署可调参数进 Schemastery 配置，禁止写死常量；凭据只经 `ctx.credentials` 引用（如 `appSecretRef`），配置/patch 禁止明文 Secret。
@@ -1036,7 +1036,7 @@ ctx.logger.info(
 
 ### 通用文件是可替换扩展
 
-Harness `0.1.0-rc.6` 的 `ctx.attachments` 只提供栅格图片的验证、保存和读取，
+Harness `0.1.0-rc.7` 的 `ctx.attachments` 只提供栅格图片的验证、保存和读取，
 当前 `ContentBlock` 也没有通用 `FileBlock`。因此 PDF / DOCX / XLSX / 文本
 暂由 `@wsz987/channel-files` 补充：
 

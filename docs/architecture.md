@@ -2,7 +2,7 @@
 title: 架构总览
 summary: 分层、依赖方向、monorepo 结构、架构红线与最终架构。
 when_to_use: 架构 | 依赖方向 | 红线 | 分层 | 依赖关系
-authoritative: 架构原则、monorepo 结构、依赖方向、架构红线（11 条）。
+authoritative: 架构原则、monorepo 结构、依赖方向、架构红线（12 条）。
 see_also: [architecture/common-design.md, architecture/channel-roadmap.md, architecture/adr/]
 status: as-built
 ---
@@ -290,6 +290,10 @@ Root package 安装所有渠道 SDK。
 ### 红线 11
 
 直接依赖 Harness private/internal source，而不是 public package API。
+
+### 红线 12
+
+适配器直接读写 Harness persistence（SessionBinding 等持久化只允许由 `channel-harness` 的 store 接口负责）。
 
 ---
 
