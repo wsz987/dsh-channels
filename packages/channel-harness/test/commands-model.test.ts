@@ -287,13 +287,45 @@ describe('ChannelModelSelectionController', () => {
     expect(await controller.selectionForStep(agent as never)).toEqual({ provider: 'header', model: 'header-model', reasoningEffort: ReasoningEffortId('high') });
   });
 
-  it('uses the headless hook without a first-turn prepare RPC', async () => {
+  it('uses the headless hook without a first-turn RPC', async () => {
     const rootCtx = new Context();
     const controller = new ChannelModelSelectionController(rootCtx);
     const agent = fakeAgent(rootCtx, 's2');
     const dispose = controller.install(agent.ctx);
-    await controller.prepare(agent as never);
     dispose();
     expect(controller.mode).toBe('local');
+  });
+
+  it('keeps a local Agent owner when the Host mounts later', async () => {
+    const rootCtx = new Context();
+    const controller = new ChannelModelSelectionController(rootCtx);
+    const agent = fakeAgent(rootCtx, 's-late-host');
+    const dispose = controller.install(agent.ctx);
+    const selectModel = vi.fn(async () => ({ result: { ok: true } }));
+    rootCtx.provide('apiProxy', { sessions: { selectModel } });
+
+    await controller.select(agent as never, { provider: 'local', model: 'local-model' });
+
+    expect(selectModel).not.toHaveBeenCalled();
+    expect(await controller.current(agent as never)).toEqual({ provider: 'local', model: 'local-model' });
+    dispose();
+  });
+
+  it('keeps a Host Agent owner while the Host implementation is replaced', async () => {
+    const rootCtx = new Context();
+    const hostOneSelect = vi.fn(async () => ({ result: { ok: true } }));
+    const hostOneDispose = rootCtx.provide('apiProxy', { sessions: { selectModel: hostOneSelect } });
+    const controller = new ChannelModelSelectionController(rootCtx);
+    const agent = fakeAgent(rootCtx, 's-host-hmr');
+    const dispose = controller.install(agent.ctx);
+    hostOneDispose();
+    const hostTwoSelect = vi.fn(async () => ({ result: { ok: true } }));
+    rootCtx.provide('apiProxy', { sessions: { selectModel: hostTwoSelect } });
+
+    await controller.select(agent as never, { provider: 'host', model: 'host-model' });
+
+    expect(hostOneSelect).not.toHaveBeenCalled();
+    expect(hostTwoSelect).toHaveBeenCalledOnce();
+    dispose();
   });
 });

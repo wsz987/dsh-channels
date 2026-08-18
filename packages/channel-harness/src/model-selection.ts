@@ -41,6 +41,12 @@ export interface HostModelSelection {
 
 export class ChannelModelSelectionController {
   private readonly refs = new WeakMap<Context, ChannelModelSelectionRef>();
+  /**
+   * The owner strategy is fixed when the Agent scope is installed. The Host
+   * service itself is resolved live so HMR can replace its implementation
+   * without changing ownership of an existing Agent.
+   */
+  private readonly strategies = new WeakMap<Context, ChannelModelSelectionMode>();
 
   constructor(private readonly rootCtx: Context) {}
 
@@ -50,21 +56,25 @@ export class ChannelModelSelectionController {
 
   /** Install only the headless hook; Web Host owns it when apiProxy is present. */
   install(agentCtx: Context): () => void {
-    if (this.mode === 'host') return () => {};
+    const strategy = this.mode;
+    this.strategies.set(agentCtx, strategy);
+    if (strategy === 'host') {
+      return () => {
+        if (this.strategies.get(agentCtx) === strategy) this.strategies.delete(agentCtx);
+      };
+    }
     const ref: ChannelModelSelectionRef = { current: undefined, assembled: undefined };
     const dispose = installModelSelection(agentCtx, ref);
     this.refs.set(agentCtx, ref);
     return () => {
       dispose();
-      this.refs.delete(agentCtx);
+      if (this.refs.get(agentCtx) === ref) this.refs.delete(agentCtx);
+      if (this.strategies.get(agentCtx) === strategy) this.strategies.delete(agentCtx);
     };
   }
 
-  /** No first-turn RPC: Harness creates/resumes the Session directly. */
-  async prepare(_agent: Agent): Promise<void> {}
-
   async current(agent: Agent): Promise<ModelSelection | undefined> {
-    if (this.mode === 'host') {
+    if (this.strategyFor(agent) === 'host') {
       const host = await this.readHostCurrent(agent);
       if (host) return host;
     }
@@ -72,7 +82,7 @@ export class ChannelModelSelectionController {
   }
 
   async selectionForStep(agent: Agent): Promise<ModelSelection | undefined> {
-    if (this.mode === 'local') {
+    if (this.strategyFor(agent) === 'local') {
       const ref = this.refs.get(agent.ctx);
       if (ref?.assembled) return ref.assembled;
     }
@@ -80,7 +90,7 @@ export class ChannelModelSelectionController {
   }
 
   async select(agent: Agent, selection: ModelSelection): Promise<void> {
-    if (this.mode === 'host') {
+    if (this.strategyFor(agent) === 'host') {
       const selectModel = this.hostApiProxy()?.sessions?.selectModel;
       if (!selectModel) throw new Error('host model selection is unavailable: session.selectModel is not mounted');
       const response = await selectModel({
@@ -109,6 +119,15 @@ export class ChannelModelSelectionController {
 
   private hostApiProxy(): ChannelHostApiProxy | undefined {
     return this.rootCtx.get('apiProxy') as ChannelHostApiProxy | undefined;
+  }
+
+  /**
+   * Agents configured through the bridge always have a recorded strategy.
+   * Keep the deployment-wide mode as a compatibility fallback for direct
+   * controller callers that have not installed the Agent-scoped hook.
+   */
+  private strategyFor(agent: Agent): ChannelModelSelectionMode {
+    return this.strategies.get(agent.ctx) ?? this.mode;
   }
 
   private async readHostCurrent(agent: Agent): Promise<ModelSelection | undefined> {

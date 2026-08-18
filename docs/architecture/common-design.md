@@ -1148,9 +1148,11 @@ PDF 解析使用 `unpdf`（PDF.js），DOCX 使用 `mammoth`，XLSX 使用 `xlsx
   的 `/model` 切换则直接委托官方 Host `session.selectModel` RPC；无 Web Host 的 headless
   渠道使用官方 `installModelSelection` hook。两条路径都保存 `agentDefaultModel`，因此
   当前 Session 与未来新 Session 仍由同一套 Harness 语义衔接。
-- **channel 不维护竞争 owner**：不做 per-Agent host/local pin、不缓存 `apiProxy` 身份、
-  不在首条消息前调用 `session.models` 做 `prepare()`。Host/local 只在实际读写时按当前
-  可用的官方入口选择；图片 `agent/pre-step` 读取当前 Session 的同一模型视图。
+- **channel 不维护竞争 owner**：每个 Agent setup 时只记录一次 `host` 或 `local` 策略，
+  不缓存 `apiProxy` 身份，也不在首条消息前调用 `session.models` 做 `prepare()`。已有 Agent
+  不会因为 Host 后挂载而动态增加第二个 waterfall；Host 策略仍每次解析当前的 `apiProxy`
+  实例，以支持 HMR 替换后的恢复。图片 `agent/pre-step` 读取该 Agent 当前策略对应的
+  Session 模型视图。
 - **回归测试验证边界**：`commands-model.test.ts` 覆盖当前 Session 切换、默认保存、
   reasoning 校验、header/options 优先级，并断言不需要 first-turn RPC。
 - **测试易错**：fake agent 用 `createScope(rootCtx, agent)` 会继承根服务、掩盖真实环境 agent
