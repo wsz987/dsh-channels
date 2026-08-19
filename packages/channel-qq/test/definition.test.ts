@@ -287,7 +287,7 @@ describe('apply() — channel-control registration', () => {
     expect((registered as { id?: string }).id).toBe('qq');
   });
 
-  it('does nothing when the channel is disabled', () => {
+  it('registers the definition even when disabled (enabled: false)', () => {
     const register = vi.fn();
     const ctx = new Context() as Context & {
       channelControl?: { definitions: { register(d: unknown): unknown } };
@@ -298,7 +298,11 @@ describe('apply() — channel-control registration', () => {
 
     apply(ctx, makeConfig({ enabled: false }));
 
-    expect(register).not.toHaveBeenCalled();
+    // The control plane owns lifecycle: a disabled definition must stay in the
+    // directory so the Web control plane can re-enable it (doc §19/§20).
+    expect(register).toHaveBeenCalledTimes(1);
+    const registered = register.mock.calls[0][0] as { enabled?: boolean };
+    expect(registered.enabled).toBe(false);
   });
 });
 

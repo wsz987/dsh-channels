@@ -82,6 +82,13 @@ export interface PublicAuthSession {
   qr?: PublicQrPayload;
   expiresAt?: number;
   prompt?: PublicAuthPrompt;
+  /**
+   * Safe provider polling interval (ms) the browser may use to space its own
+   * client polls (doc §15). NOT a secret: it is the provider's declared
+   * throttle and the host already enforces the same bound server-side via
+   * `nextPollAt`. Omitted unless the provider declared one (> 0).
+   */
+  pollingIntervalMs?: number;
 }
 
 /**
@@ -217,8 +224,23 @@ export interface ChannelSummary {
  */
 export interface ChannelDefinition {
   id: string;
-  /** Whether the channel is enabled in configuration (doc §29 ChannelSummary.enabled). */
-  enabled: boolean;
+  /**
+   * Whether the channel is enabled in configuration (doc §29 ChannelSummary.enabled).
+   *
+   * Implementations MUST expose this as a live getter over their mutable
+   * config snapshot (e.g. `get enabled() { return state.enabled }`), never as
+   * a registration-time snapshot — the control plane's `setEnabled` reads it
+   * again after persisting a change.
+   */
+  readonly enabled: boolean;
+  /**
+   * Persist the enabled intent (doc §21). Implementations mutate their
+   * config snapshot and push through their durable store (settings scope /
+   * credentials seam). The control plane reacts by stopping the runtime when
+   * disabled or starting it when re-enabled (doc §22). Optional for
+   * definitions that are permanently enabled.
+   */
+  setEnabled?(enabled: boolean): Promise<void>;
   /** Static setup descriptor (fields + authMethods). */
   setup: ChannelSetupDescriptor;
   /**

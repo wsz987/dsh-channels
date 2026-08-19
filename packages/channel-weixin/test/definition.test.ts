@@ -215,7 +215,7 @@ describe('apply() wiring', () => {
     expect(effect).toHaveBeenCalled();
   });
 
-  it('does nothing when the channel is disabled', () => {
+  it('registers the definition even when disabled (enabled: false)', () => {
     const register = vi.fn();
     const ctx = new Context();
     new ChannelService(ctx);
@@ -225,7 +225,12 @@ describe('apply() wiring', () => {
     });
     const effect = vi.spyOn(ctx, 'effect');
     weixinApply(ctx, makeConfig({ enabled: false } as WeixinConfig), {});
-    expect(register).not.toHaveBeenCalled();
+    // The control plane owns lifecycle: a disabled definition must stay in the
+    // directory so the Web control plane can re-enable it (doc §19/§20).
+    expect(register).toHaveBeenCalledTimes(1);
+    const def = register.mock.calls[0][0] as { enabled?: boolean };
+    expect(def.enabled).toBe(false);
+    // Control-plane path never touches the legacy mount effect.
     expect(effect).not.toHaveBeenCalled();
   });
 });

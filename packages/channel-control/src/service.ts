@@ -87,36 +87,73 @@ export class ChannelControlService extends Service {
   async listChannels(): Promise<ChannelSummary[]> {
     const rows: ChannelSummary[] = [];
     for (const definition of this.definitions.list()) {
+      rows.push(await this.summarize(definition));
+    }
+    return rows;
+  }
+
+  /** One merged row for a single registered channel, or a stable ChannelError. */
+  async getChannel(channelId: string): Promise<ChannelSummary> {
+    return this.summarize(this.definitions.require(channelId));
+  }
+
+  /**
+   * Enable / disable a channel (doc §22, §25). Disabling persists the intent
+   * and stops the runtime; enabling persists the intent and — when the channel
+   * is configured — starts the runtime. Returns the latest merged summary.
+   */
+  async setEnabled(channelId: string, enabled: boolean): Promise<ChannelSummary> {
+    const definition = this.definitions.require(channelId);
+    if (!definition.setEnabled) {
+      throw new ControlError(
+        'ENABLE_NOT_SUPPORTED',
+        `channel '${channelId}' does not support enable/disable`,
+      );
+    }
+    await definition.setEnabled(enabled);
+    if (!enabled) {
+      await this.runtime.stop(channelId);
+    } else {
       let configured = false;
       try {
         configured = (await definition.getConfiguredState()).configured;
       } catch {
         configured = false;
       }
-      const enabled = definition.enabled;
-      const running = this.runtime.isRunning(definition.id);
-      if (running) {
-        const status = await this.runtime.status(definition.id);
-        rows.push({
-          id: definition.id,
-          configured,
-          enabled,
-          mounted: status.mounted,
-          runtime: status.running ? 'running' : 'stopped',
-          connection: status.connection,
-        });
-      } else {
-        rows.push({
-          id: definition.id,
-          configured,
-          enabled,
-          mounted: false,
-          runtime: 'stopped',
-          connection: 'unknown',
-        });
-      }
+      if (configured) await this.runtime.start(channelId);
     }
-    return rows;
+    return this.getChannel(channelId);
+  }
+
+  /** Merge one definition's registry + runtime + configured state into a row. */
+  private async summarize(definition: ChannelDefinition): Promise<ChannelSummary> {
+    let configured = false;
+    try {
+      configured = (await definition.getConfiguredState()).configured;
+    } catch {
+      configured = false;
+    }
+    const enabled = definition.enabled;
+    const running = this.runtime.isRunning(definition.id);
+    if (running) {
+      const status = await this.runtime.status(definition.id);
+      return {
+        id: definition.id,
+        configured,
+        enabled,
+        mounted: status.mounted,
+        runtime: status.running ? 'running' : 'stopped',
+        connection: status.connection,
+      };
+    }
+    return {
+      id: definition.id,
+      configured,
+      enabled,
+      mounted: false,
+      runtime: 'stopped',
+      connection: 'unknown',
+    };
   }
 
   async getSetup(channelId: string): Promise<ChannelSetupDescriptor> {
@@ -217,10 +254,16 @@ export class ChannelControlService extends Service {
         `credential '${fieldName}' is read-only (not writable)`,
       );
     }
-    if (typeof value !== 'string' || !value) {
-      throw new ControlError('INVALID_CREDENTIAL', 'credential value must be a non-empty string');
+    if (typeof value !== 'string') {
+      throw new ControlError('INVALID_CREDENTIAL', 'credential value must be a string');
     }
-    await this.credentials.set(field.ref, value);
+    // Empty value = clear/delete the stored credential (the harness credential
+    // seam rejects set(ref, '') and exposes unset for exactly this).
+    if (value === '') {
+      await this.credentials.unset(field.ref);
+    } else {
+      await this.credentials.set(field.ref, value);
+    }
     const described = await this.credentials.describe(field.ref);
     return { configured: described.configured, writable: described.writable };
   }

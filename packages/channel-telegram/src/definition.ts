@@ -48,6 +48,8 @@ export interface CreateTelegramDefinitionOptions {
   deps?: TelegramAdapterDeps;
   /** Injected credentials seam (wraps ctx.credentials in apply()). */
   credentials: TelegramCredentialSeam;
+  /** Durable store for the enabled intent (doc §21) when the host provides one. */
+  persistEnabled?: (enabled: boolean) => Promise<void>;
 }
 
 /** Allowed non-secret nested sub-config keys merged by saveConfig. */
@@ -181,7 +183,13 @@ export function createTelegramDefinition(
 
   return {
     id: 'telegram',
-    enabled: state.enabled,
+    get enabled() {
+      return state.enabled;
+    },
+    async setEnabled(enabled: boolean): Promise<void> {
+      state.enabled = enabled;
+      await options.persistEnabled?.(enabled);
+    },
     setup,
     getConfiguredState: configuredState,
     saveConfig,

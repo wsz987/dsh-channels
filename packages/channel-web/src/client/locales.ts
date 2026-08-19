@@ -6,52 +6,51 @@
 export const locales = {
   zh: {
     nav: '渠道',
-    title: '渠道',
     channelWeixin: '微信',
     channelQq: 'QQ',
     channelDingtalk: '钉钉',
     channelLark: '飞书',
     channelTelegram: 'Telegram',
     loading: '加载中…',
-    // dashboard
-    connecting: '连接中…',
-    configure: '配置',
     configured: '已配置',
     notConfigured: '未配置',
-    enabled: '已启用',
-    disabled: '未启用',
-    capabilities: '能力',
-    // status (RuntimeStatus)
+    // status
     statusConnected: '已连接',
-    statusDegraded: '部分异常',
-    statusUnknown: '状态未知',
-    statusDown: '不可用',
     // generic form
-    save: '保存',
     saving: '保存中…',
-    saved: '已保存',
     saveError: '保存失败',
     inputValue: '输入',
-    credentialKeepBlank: '已配置，留空保持不变',
     readonlyHint: '只读',
-    // setup dialog
+    // setup copy
     setupIntro: '填写渠道凭证，保存后自动连接。已配置的字段可留空。',
     setupIntroDingtalk: '扫码授权可一键创建并授权钉钉机器人，成功后自动回填凭证；也可填写已有应用凭证并保存连接。已配置的字段可留空。',
     setupIntroLark: '填写 App ID 和 App Secret 后保存即可连接；扫码授权可一键配置机器人，用于接入 deepseek-harness。已配置的字段可留空。',
     setupIntroTelegram: '在 @BotFather 创建机器人并获取 Bot Token，填写后保存即可连接。已配置的字段可留空。',
-    authMethodTabs: '授权方式',
-    credentialsTab: '填写凭证',
     scanTab: '扫码登录',
     scanAuthTab: '扫码授权',
     portalLoginTab: '平台扫码',
     saveAndConnect: '保存并连接',
-    saveAndContinue: '保存并继续授权',
-    saveAndScanAuthorize: '保存并扫码授权',
     openPlatform: '打开官方开放平台',
     incompleteSetup: '请填写所有尚未配置的必填项',
     setupSaved: '配置已保存，渠道连接已启动',
-    setupDisabled: '配置已保存，渠道已停止',
     done: '完成',
+    // inline setup sections
+    setupSection: '应用配置',
+    // inline auth section
+    authSection: '授权',
+    beginAuth: '开始授权',
+    authNeedsConfigFirst: '请先在「应用配置」中填写并保存必填凭证，再开始授权',
+    // permissions section
+    permissionsSection: '权限与事件',
+    permissionMessageReceive: '消息接收',
+    permissionMessageSend: '消息发送',
+    permissionScopeImRead: '机器人消息读取（IM scope）',
+    permissionScopeImWrite: '机器人消息发送（IM scope）',
+    permissionRequired: '必需',
+    viewOfficialDocs: '查看官方文档',
+    // enable lifecycle (row switch)
+    enableChannel: '启动渠道',
+    disableChannel: '停用渠道',
     // auth progress
     waitingScan: '等待扫码',
     scannedConfirm: '已扫码，请确认',
@@ -68,8 +67,6 @@ export const locales = {
     // qr display
     openLink: '在新窗口打开',
     // misc
-    close: '关闭',
-    refresh: '刷新',
     expiresIn: '剩余',
     seconds: '秒',
     connectionError: '连接出错',
@@ -77,52 +74,51 @@ export const locales = {
   },
   en: {
     nav: 'Channels',
-    title: 'Channels',
     channelWeixin: 'Weixin',
     channelQq: 'QQ',
     channelDingtalk: 'DingTalk',
     channelLark: 'Lark',
     channelTelegram: 'Telegram',
     loading: 'Loading…',
-    // dashboard
-    connecting: 'Connecting…',
-    configure: 'Configure',
     configured: 'Configured',
     notConfigured: 'Not configured',
-    enabled: 'Enabled',
-    disabled: 'Disabled',
-    capabilities: 'Capabilities',
-    // status (RuntimeStatus)
+    // status
     statusConnected: 'Connected',
-    statusDegraded: 'Degraded',
-    statusUnknown: 'Unknown',
-    statusDown: 'Unavailable',
     // generic form
-    save: 'Save',
     saving: 'Saving…',
-    saved: 'Saved',
     saveError: 'Save failed',
     inputValue: 'Value',
-    credentialKeepBlank: 'Configured — leave blank to keep',
     readonlyHint: 'Read-only',
-    // setup dialog
+    // setup copy
     setupIntro: 'Enter channel credentials and connect. Leave configured fields blank to keep them unchanged.',
     setupIntroDingtalk: 'Scan to create and authorize a DingTalk bot in one step, then fill the credentials automatically; or enter an existing app credential and connect. Leave configured fields blank to keep them unchanged.',
     setupIntroLark: 'Save and connect directly with App ID and App Secret. Scanning one-click configures the bot to connect to deepseek-harness. Leave configured fields blank to keep them unchanged.',
     setupIntroTelegram: 'Create a bot and get its Bot Token from @BotFather, then save and connect. Leave configured fields blank to keep them unchanged.',
-    authMethodTabs: 'Authorization method',
-    credentialsTab: 'Credentials',
     scanTab: 'Scan to sign in',
     scanAuthTab: 'Scan to authorize',
     portalLoginTab: 'Platform login',
     saveAndConnect: 'Save and connect',
-    saveAndContinue: 'Save and continue authorization',
-    saveAndScanAuthorize: 'Save and scan to authorize',
     openPlatform: 'Open official developer console',
     incompleteSetup: 'Complete every required field that is not configured yet',
     setupSaved: 'Configuration saved and channel connection started',
-    setupDisabled: 'Configuration saved and channel stopped',
     done: 'Done',
+    // inline setup sections
+    setupSection: 'Application config',
+    // inline auth section
+    authSection: 'Authorization',
+    beginAuth: 'Begin authorization',
+    authNeedsConfigFirst: 'Fill in and save the required credentials under "Application config" first',
+    // permissions section
+    permissionsSection: 'Permissions & events',
+    permissionMessageReceive: 'Receive messages',
+    permissionMessageSend: 'Send messages',
+    permissionScopeImRead: 'Bot message read (IM scope)',
+    permissionScopeImWrite: 'Bot message send (IM scope)',
+    permissionRequired: 'Required',
+    viewOfficialDocs: 'View official docs',
+    // enable lifecycle (row switch)
+    enableChannel: 'Enable channel',
+    disableChannel: 'Disable channel',
     // auth progress
     waitingScan: 'Waiting for scan',
     scannedConfirm: 'Scanned, please confirm',
@@ -139,8 +135,6 @@ export const locales = {
     // qr display
     openLink: 'Open in new window',
     // misc
-    close: 'Close',
-    refresh: 'Refresh',
     expiresIn: 'Expires in',
     seconds: 's',
     connectionError: 'Connection error',

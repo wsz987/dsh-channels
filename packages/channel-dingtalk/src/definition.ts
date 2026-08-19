@@ -43,6 +43,8 @@ export interface DingTalkDefinitionOptions {
   credentials: DingTalkCredentialSeam;
   /** Durable store for the non-secret setup field when the host provides one. */
   persistSetup?: (patch: { upstream: Pick<DingTalkConfig['upstream'], 'clientId'> }) => Promise<void>;
+  /** Durable store for the enabled intent (doc §21) when the host provides one. */
+  persistEnabled?: (enabled: boolean) => Promise<void>;
   /** Reconcile the runtime after device registration writes new credentials. */
   onAuthCompleted?: () => Promise<void>;
 }
@@ -109,7 +111,13 @@ export function createDingTalkDefinition(options: DingTalkDefinitionOptions): Ch
 
   return {
     id: 'dingtalk',
-    enabled: state.enabled,
+    get enabled() {
+      return state.enabled;
+    },
+    async setEnabled(enabled: boolean): Promise<void> {
+      state.enabled = enabled;
+      await options.persistEnabled?.(enabled);
+    },
 
     setup,
 

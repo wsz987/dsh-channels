@@ -92,8 +92,6 @@ function migrateLegacyToken(ctx: ContextWithCredentials, config: TelegramConfig)
 }
 
 export function apply(ctx: Context, config: TelegramConfig, deps: TelegramAdapterDeps = {}): void {
-  if (!config.enabled) return;
-
   const credentialsCtx = ctx as ContextWithCredentials;
   migrateLegacyToken(credentialsCtx, config);
   const ref = config.tokenRef ?? TELEGRAM_BOT_TOKEN_REF;
@@ -103,8 +101,10 @@ export function apply(ctx: Context, config: TelegramConfig, deps: TelegramAdapte
     | undefined;
 
   if (control) {
-    // Control plane present (doc §25/§27): register the definition; the plane
-    // owns adapter instantiation + headless auto-start.
+    // Control plane present (doc §25/§27): register the definition EVEN when
+    // disabled — the plane owns adapter instantiation + headless auto-start,
+    // and a disabled definition must stay visible so the Web control plane can
+    // re-enable it later (doc §19/§20).
     const settings = ctx.get('settings') as SettingsProvider | undefined;
     const scope = settings?.register(settingsNamespace('channels-telegram'), Config, { base: config });
     const effectiveConfig = scope?.get() ?? config;
@@ -117,13 +117,17 @@ export function apply(ctx: Context, config: TelegramConfig, deps: TelegramAdapte
           describe: (name) => credentialsCtx.credentials.describe(credentialRef(name)),
           set: (name, value) => credentialsCtx.credentials.set(credentialRef(name), value),
         },
+        persistEnabled: (enabled) => scope?.update({ enabled }) ?? Promise.resolve(),
       }),
     );
     return;
   }
 
-  // Legacy fallback (standalone, no control plane): mount directly. Unconfigured
-  // token must NOT throw (doc §25) — log a warning and stay idle.
+  // Legacy fallback (standalone, no control plane): mount directly. There is no
+  // directory/control surface to re-enable a disabled channel, so the config
+  // `enabled` gate still applies (doc §20). Unconfigured token must NOT throw
+  // (doc §25) — log a warning and stay idle.
+  if (!config.enabled) return;
   ctx.effect(async () => {
     const token = deps.token ?? (await credentialsCtx.credentials.resolve(credentialRef(ref)))?.value;
     if (!token) {

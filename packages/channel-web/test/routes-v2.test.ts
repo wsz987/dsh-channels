@@ -52,6 +52,7 @@ interface Fakes {
     saveConfig: Array<[string, Record<string, unknown>]>;
     saveCredential: Array<[string, string, string]>;
     applySetup: Array<[string, { config: Record<string, unknown>; credentials: Record<string, string> }]>;
+    setEnabled: Array<[string, boolean]>;
     beginAuth: Array<[string, unknown]>;
     pollAuth: string[];
     submitInput: Array<[string, unknown]>;
@@ -72,6 +73,7 @@ function makeControl(
     saveConfig: [],
     saveCredential: [],
     applySetup: [],
+    setEnabled: [],
     beginAuth: [],
     pollAuth: [],
     submitInput: [],
@@ -88,6 +90,18 @@ function makeControl(
         { id: KNOWN, configured: true, enabled: true, mounted: true, runtime: 'running', connection: 'connected' },
       ];
       return rows;
+    },
+    async setEnabled(channelId, enabled) {
+      requireKnown(channelId);
+      calls.setEnabled.push([channelId, enabled]);
+      return {
+        id: channelId,
+        configured: true,
+        enabled,
+        mounted: enabled,
+        runtime: enabled ? 'running' : 'stopped',
+        connection: enabled ? 'connected' : 'unknown',
+      };
     },
     async getSetup(channelId) {
       requireKnown(channelId);
@@ -302,6 +316,86 @@ describe('PATCH /channels/:id/config (doc §30)', () => {
     });
     expect(out.status).toBe(400);
     expect((out.body as { error?: { code?: string } }).error?.code).toBe('SECRET_FIELD_REJECTED');
+  });
+});
+
+describe('PUT /channels/:id/enabled (doc §23)', () => {
+  it('enable → 200 + summary with runtime started', async () => {
+    const fresh = makeControl();
+    const handler = wireV2(fresh.control);
+    const { status, body } = await invokeDirect(handler, {
+      method: 'PUT',
+      url: '/dsh-channels/api/v2/channels/qq/enabled',
+      body: JSON.stringify({ enabled: true }),
+    });
+    expect(status).toBe(200);
+    expect(fresh.calls.setEnabled).toEqual([[KNOWN, true]]);
+    expect(body).toMatchObject({ id: KNOWN, enabled: true, mounted: true, runtime: 'running' });
+  });
+
+  it('disable → 200 + summary with runtime stopped', async () => {
+    const fresh = makeControl();
+    const handler = wireV2(fresh.control);
+    const { status, body } = await invokeDirect(handler, {
+      method: 'PUT',
+      url: '/dsh-channels/api/v2/channels/qq/enabled',
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(status).toBe(200);
+    expect(fresh.calls.setEnabled).toEqual([[KNOWN, false]]);
+    expect(body).toMatchObject({ id: KNOWN, enabled: false, mounted: false, runtime: 'stopped' });
+  });
+
+  it('non-boolean body → 400 INVALID_INPUT', async () => {
+    const fresh = makeControl();
+    const handler = wireV2(fresh.control);
+    const out = await invokeDirect(handler, {
+      method: 'PUT',
+      url: '/dsh-channels/api/v2/channels/qq/enabled',
+      body: JSON.stringify({ enabled: 'yes' }),
+    });
+    expect(out.status).toBe(400);
+    expect((out.body as { error?: { code?: string } }).error?.code).toBe('INVALID_INPUT');
+    expect(fresh.calls.setEnabled).toEqual([]);
+  });
+
+  it('missing boolean body → 400 INVALID_INPUT', async () => {
+    const fresh = makeControl();
+    const handler = wireV2(fresh.control);
+    const out = await invokeDirect(handler, {
+      method: 'PUT',
+      url: '/dsh-channels/api/v2/channels/qq/enabled',
+      body: '{}',
+    });
+    expect(out.status).toBe(400);
+    expect(fresh.calls.setEnabled).toEqual([]);
+  });
+
+  it('unknown channel → 404 CHANNEL_NOT_FOUND', async () => {
+    const fresh = makeControl();
+    const handler = wireV2(fresh.control);
+    const { status, body } = await invokeDirect(handler, {
+      method: 'PUT',
+      url: '/dsh-channels/api/v2/channels/nope/enabled',
+      body: JSON.stringify({ enabled: true }),
+    });
+    expect(status).toBe(404);
+    expect((body as { error?: { code?: string } }).error?.code).toBe('CHANNEL_NOT_FOUND');
+  });
+
+  it('unsupported control plane → 400 ENABLE_NOT_SUPPORTED', async () => {
+    const fresh = makeControl();
+    fresh.control.setEnabled = async () => {
+      throw new ControlError('ENABLE_NOT_SUPPORTED', 'channel has no setEnabled');
+    };
+    const handler = wireV2(fresh.control);
+    const { status, body } = await invokeDirect(handler, {
+      method: 'PUT',
+      url: '/dsh-channels/api/v2/channels/qq/enabled',
+      body: JSON.stringify({ enabled: true }),
+    });
+    expect(status).toBe(400);
+    expect((body as { error?: { code?: string } }).error?.code).toBe('ENABLE_NOT_SUPPORTED');
   });
 });
 

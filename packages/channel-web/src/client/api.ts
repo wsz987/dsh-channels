@@ -84,6 +84,8 @@ export interface PublicAuthSession {
   qr?: PublicQrPayload | null;
   expiresAt?: number;
   prompt?: PublicAuthPrompt | null;
+  /** Safe provider polling interval (ms); never a secret (doc §15). */
+  pollingIntervalMs?: number;
 }
 
 /** v2 public auth status (GET /channels/:id/auth/sessions/:sessionId). */
@@ -141,24 +143,42 @@ async function request<T>(path: string, init?: RequestInit, base: string = BASE_
 // ---------------------------------------------------------------------------
 
 /** GET /channels → ChannelSummary[] */
-export async function fetchChannelsV2(): Promise<ChannelSummary[]> {
-  const body = await request<{ channels: ChannelSummary[] }>('/channels');
+export async function fetchChannelsV2(signal?: AbortSignal): Promise<ChannelSummary[]> {
+  const body = await request<{ channels: ChannelSummary[] }>('/channels', { signal });
   return body.channels ?? [];
 }
 
 /** GET /channels/:id/setup → ChannelSetupDescriptor */
-export async function fetchSetup(id: string): Promise<ChannelSetupDescriptor> {
-  return request<ChannelSetupDescriptor>(`/channels/${encodeURIComponent(id)}/setup`);
+export async function fetchSetup(id: string, signal?: AbortSignal): Promise<ChannelSetupDescriptor> {
+  return request<ChannelSetupDescriptor>(`/channels/${encodeURIComponent(id)}/setup`, { signal });
+}
+
+/**
+ * PUT /channels/:id/enabled → ChannelSummary (doc §23). Persists the enabled
+ * intent; the control plane starts/stops the runtime accordingly.
+ */
+export async function setChannelEnabled(
+  id: string,
+  enabled: boolean,
+  signal?: AbortSignal,
+): Promise<ChannelSummary> {
+  return request<ChannelSummary>(`/channels/${encodeURIComponent(id)}/enabled`, {
+    method: 'PUT',
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ enabled }),
+    signal,
+  });
 }
 
 /** PATCH /channels/:id/config — non-secret patch → { configured, fields } */
 export async function saveConfig(
   id: string,
   patch: Record<string, unknown>,
+  signal?: AbortSignal,
 ): Promise<{ configured: boolean; fields: ChannelSetupField[] }> {
   return request<{ configured: boolean; fields: ChannelSetupField[] }>(
     `/channels/${encodeURIComponent(id)}/config`,
-    { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(patch) },
+    { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(patch), signal },
   );
 }
 
@@ -167,10 +187,11 @@ export async function saveCredential(
   id: string,
   field: string,
   value: string,
+  signal?: AbortSignal,
 ): Promise<{ configured: boolean; writable: boolean }> {
   return request<{ configured: boolean; writable: boolean }>(
     `/channels/${encodeURIComponent(id)}/credentials/${encodeURIComponent(field)}`,
-    { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ value }) },
+    { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ value }), signal },
   );
 }
 
@@ -181,11 +202,13 @@ export async function applySetup(
     credentials: Record<string, string>;
     reconcile?: boolean;
   },
+  signal?: AbortSignal,
 ): Promise<{ configured: boolean; connection: ConnectionState }> {
   return request(`/channels/${encodeURIComponent(id)}/setup`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
+    signal,
   });
 }
 
@@ -194,6 +217,7 @@ export async function beginAuth(
   id: string,
   method: AuthMethod,
   accountId?: string,
+  signal?: AbortSignal,
 ): Promise<PublicAuthSession> {
   const body: Record<string, unknown> = { method };
   if (accountId) body.accountId = accountId;
@@ -201,13 +225,19 @@ export async function beginAuth(
     method: 'POST',
     headers: JSON_HEADERS,
     body: JSON.stringify(body),
+    signal,
   });
 }
 
 /** GET /channels/:id/auth/sessions/:sessionId → PublicAuthStatus */
-export async function pollAuthSession(id: string, sessionId: string): Promise<PublicAuthStatus> {
+export async function pollAuthSession(
+  id: string,
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<PublicAuthStatus> {
   return request<PublicAuthStatus>(
     `/channels/${encodeURIComponent(id)}/auth/sessions/${encodeURIComponent(sessionId)}`,
+    { signal },
   );
 }
 
@@ -217,16 +247,22 @@ export async function submitAuthInput(
   sessionId: string,
   kind: string,
   value: string,
+  signal?: AbortSignal,
 ): Promise<PublicAuthStatus> {
   return request<PublicAuthStatus>(
     `/channels/${encodeURIComponent(id)}/auth/sessions/${encodeURIComponent(sessionId)}/input`,
-    { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ kind, value }) },
+    { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ kind, value }), signal },
   );
 }
 
 /** DELETE /channels/:id/auth/sessions/:sessionId → 204 */
-export async function cancelAuth(id: string, sessionId: string): Promise<void> {
+export async function cancelAuth(
+  id: string,
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<void> {
   await request<unknown>(`/channels/${encodeURIComponent(id)}/auth/sessions/${encodeURIComponent(sessionId)}`, {
     method: 'DELETE',
+    signal,
   });
 }

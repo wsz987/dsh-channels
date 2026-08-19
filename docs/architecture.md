@@ -261,7 +261,14 @@ import 'dingtalk-stream';
 
 ### 红线 4
 
-Root package 安装所有渠道 SDK。
+Root Bundle 直接实现或直接调用任何平台 SDK：
+
+```ts
+// channels bundle 的 src 里
+import '@larksuiteoapi/node-sdk'
+```
+
+平台 SDK 的依赖和使用必须被隔离在对应 `channel-*` 子包。Root Bundle 可以通过依赖这些子包完成一次性产品安装（`@wsz987/dsh-channels -> channel-lark -> Lark SDK`），但不得自己直接接触平台 SDK。
 
 ### 红线 5
 

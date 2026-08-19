@@ -62,6 +62,12 @@ export function toPublicSession(session: SessionSnapshot): PublicAuthSession {
   if (session.expiresAt !== undefined) publicSession.expiresAt = session.expiresAt;
   const prompt = toPublicPrompt(session.prompt);
   if (prompt) publicSession.prompt = prompt;
+  // The provider poll interval is safe to expose (doc §15): it is neither a
+  // secret nor a credential — it just lets the browser space client polls at
+  // the provider's declared throttle. Only forwarded when actually declared.
+  if (typeof session.pollingIntervalMs === 'number' && session.pollingIntervalMs > 0) {
+    publicSession.pollingIntervalMs = session.pollingIntervalMs;
+  }
   return publicSession;
 }
 
