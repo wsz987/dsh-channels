@@ -12,6 +12,7 @@ import type { WeixinConfig } from './config.js';
 import { Config } from './config.js';
 import { WeixinAdapter, type WeixinAdapterDeps } from './adapter.js';
 import { createWeixinDefinition } from './definition.js';
+import { AccountCredentialStore } from './auth/account-store.js';
 
 export const name = 'channel-weixin';
 export const inject: string[] = ['channels'];
@@ -149,12 +150,25 @@ export function apply(ctx: Context, config: WeixinConfig, deps: WeixinAdapterDep
     // later (doc §19/§20). The M1 QR flow is driven through the mounted adapter.
     const settings = ctx.get('settings') as SettingsProvider | undefined;
     const scope = settings?.register(settingsNamespace('channels-weixin'), Config, { base: config });
+    // Weixin owner auto-discovery (plan §23): the control plane never reads
+    // weixin credential storage; a closure here maps the stored scanning
+    // user's canonical id out of the platform's own AccountCredentialStore.
+    const resolveOwnerIdentity = async (accountId: string): Promise<string | undefined> => {
+      const store = new AccountCredentialStore({
+        secrets: ctx.channels.resources.secrets,
+        storage: ctx.channels.resources.storage,
+        accountId,
+      });
+      const credential = await store.load();
+      return credential?.userId;
+    };
     control.definitions.register(
       createWeixinDefinition({
         config: scope?.get() ?? config,
         deps,
         getAdapter: () => control.runtime?.adapter('weixin'),
         persistEnabled: (enabled) => scope?.update({ enabled }) ?? Promise.resolve(),
+        resolveOwnerIdentity,
       }),
     );
     return;

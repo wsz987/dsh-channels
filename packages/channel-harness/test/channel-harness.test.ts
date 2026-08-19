@@ -6,6 +6,7 @@ import { Context } from '@deepseek-ai/cordis';
 import { AgentRegistry, type Agent } from '@deepseek-ai/dsh-agent';
 import { AttachmentId } from '@deepseek-ai/dsh-attachment';
 import { ChannelService, type ChannelEvent, type MessageReceived } from '@wsz987/channel-core';
+import { accessPolicyStorageKey, type ChannelAccessPolicy } from '@wsz987/channel-core';
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
 import {
   AgentManager,
@@ -188,6 +189,24 @@ function makeMessageEvent(overrides: Partial<MessageReceived> = {}): MessageRece
     },
     ...overrides,
   };
+}
+
+/** Open DM policy so lifecycle-wired bridges (which ALWAYS gate) admit messages. */
+const openDmPolicy: ChannelAccessPolicy = {
+  version: 1,
+  preset: 'owner-only',
+  dmPolicy: 'open',
+  allowFrom: [],
+  groupPolicy: 'disabled',
+  groups: {},
+};
+
+/** Seed an open DM access policy into the bridge's shared ChannelStorage. */
+async function seedOpenPolicy(ctx: Context, channel = 'weixin', account = 'main'): Promise<void> {
+  await ctx.channels.resources.storage.set(
+    accessPolicyStorageKey(channel, account),
+    JSON.stringify(openDmPolicy),
+  );
 }
 
 function fakeSession(id: string): Session {
@@ -752,6 +771,7 @@ describe('ChannelHarnessBridge end-to-end', () => {
   it('startBridge wires a Cordis context and drains on dispose', async () => {
     const ctx = new Context();
     new ChannelService(ctx);
+    await seedOpenPolicy(ctx, 'fake');
     const agents = new AgentRegistry(ctx);
     agents.setFactory({
       createAgent: async (_owner, options) => ({
@@ -790,6 +810,7 @@ describe('ChannelHarnessBridge end-to-end', () => {
 
       const ctx = new Context();
       new ChannelService(ctx);
+      await seedOpenPolicy(ctx);
       const agents = new AgentRegistry(ctx);
       const idleResolvers: Array<() => void> = [];
       let harnessMessageId: string | undefined;
@@ -864,6 +885,7 @@ describe('ChannelHarnessBridge end-to-end', () => {
 
       const ctx = new Context();
       new ChannelService(ctx);
+      await seedOpenPolicy(ctx);
       const agents = new AgentRegistry(ctx);
       let harnessMessageId: string | undefined;
       const followup = (message: { id: string }) => {
@@ -922,6 +944,7 @@ describe('ChannelHarnessBridge end-to-end', () => {
       async function runBridge(): Promise<string> {
         const ctx = new Context();
         new ChannelService(ctx);
+        await seedOpenPolicy(ctx);
         const agents = new AgentRegistry(ctx);
         agents.setFactory({
           createAgent: async (_owner, options) => ({

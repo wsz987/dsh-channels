@@ -194,6 +194,15 @@ export function createDingTalkDefinition(options: DingTalkDefinitionOptions): Ch
     },
 
     autoStart: true,
+    // Declared access capability (plan §11). DingTalk supports DM + groups; no
+    // mention activation in V1; owner is identified via the /dsh-claim flow.
+    access: {
+      directMessages: true,
+      groups: true,
+      mentions: false,
+      ownerDiscovery: 'claim',
+      identityLabels: { user: 'DingTalk Sender ID', group: 'DingTalk Conversation ID' },
+    },
   };
 }
 

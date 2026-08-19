@@ -19,4 +19,8 @@ export * from './auth/sanitizer.js';
 export * from './auth/session-manager.js';
 export * from './runtime/manager.js';
 export * from './runtime/mount-handle.js';
+export * from './access/policy-store.js';
+export * from './access/validation.js';
+export * from './access/materialize.js';
+export * from './access/manager.js';
 export * from './service.js';

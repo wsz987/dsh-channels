@@ -40,6 +40,7 @@ import { ReplyContextStore, type ChannelReplyContext } from './reply-context-sto
 import type { ChannelHarnessBridgeOptions } from './bridge.js';
 import type { SaveImageHook } from './message-converter.js';
 import { installDebugConsoleExporter } from './debug-logger.js';
+import { StoredChannelAccessPolicyResolver } from './access/resolver.js';
 import type { ChannelFileProvider } from './file-provider.js';
 
 export interface BridgeLifecycle {
@@ -154,6 +155,13 @@ export function startBridge(
   const commandDeps: ChannelHarnessBridgeOptions['commandDeps'] = {
     startNewSession: (agent) => bridge.startNewSession(agent),
   };
+  // Fail-closed Access Gate (plan §3.1/§17/§32): production ALWAYS resolves the
+  // policy from the shared ChannelStorage and logs decisions on the
+  // `channel-access` namespace. Reads once per inbound — no policy caching (§16).
+  const accessResolver = new StoredChannelAccessPolicyResolver(
+    () => ctx.channels.resources.storage,
+  );
+  const accessLogger = ctx.logger('channel-access');
   bridge = new ChannelHarnessBridge({
     config,
     bindingStore,
@@ -162,6 +170,8 @@ export function startBridge(
     getAdapter,
     replyContexts,
     logger,
+    accessResolver,
+    accessLogger,
     saveImage,
     fileProvider,
     ctx,

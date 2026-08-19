@@ -39,6 +39,8 @@ export interface ChannelSummary {
   mounted: boolean;
   runtime: RuntimeState;
   connection: ConnectionState;
+  /** Access readiness of the channel (plan §28). */
+  access: ChannelAccessReadiness;
 }
 
 /** One setup field of a ChannelSetupDescriptor. `ref` is stripped by the host. */
@@ -99,6 +101,81 @@ export interface PublicAuthStatus {
 
 export interface PublicError {
   error: { code: string; message: string };
+}
+
+// ---------------------------------------------------------------------------
+// Access-control DTOs (plan §27, §29) — mirror @wsz987/channel-control shapes.
+// Policies carry ONLY canonical owner/sender/group ids — never any secret.
+// ---------------------------------------------------------------------------
+
+export type ChannelAccessReadiness =
+  | 'ready'
+  | 'needs-owner'
+  | 'missing-policy'
+  | 'invalid-policy';
+
+/** How a channel determines its local operator / owner identity (plan §10). */
+export type OwnerDiscoveryMode = 'account' | 'claim' | 'manual';
+
+/** Declared access capability of a channel (plan §10). */
+export interface ChannelAccessDescriptor {
+  directMessages: boolean;
+  groups: boolean;
+  mentions: boolean;
+  ownerDiscovery: OwnerDiscoveryMode;
+  identityLabels: { user: string; group?: string };
+  defaults?: { requireMention?: boolean };
+}
+
+export type AccessPreset = 'owner-only' | 'allowlist' | 'custom';
+export type DirectMessagePolicy = 'disabled' | 'allowlist' | 'open';
+export type GroupPolicy = 'disabled' | 'allowlist';
+export type GroupSenderPolicy = 'allowlist' | 'open';
+
+/** One named-group rule (V1: named groups only, no global open). */
+export interface GroupAccessRule {
+  enabled: boolean;
+  senderPolicy: GroupSenderPolicy;
+  allowFrom: string[];
+  requireMention: boolean;
+}
+
+/** Versioned, cross-package access policy (shared contract in channel-core). */
+export interface ChannelAccessPolicy {
+  version: 1;
+  preset: AccessPreset;
+  ownerId?: string;
+  dmPolicy: DirectMessagePolicy;
+  allowFrom: string[];
+  groupPolicy: GroupPolicy;
+  groups: Record<string, GroupAccessRule>;
+}
+
+/** Full access picture for one channel+account (plan §27). */
+export interface ChannelAccessState {
+  descriptor: ChannelAccessDescriptor;
+  readiness: ChannelAccessReadiness;
+  policy?: ChannelAccessPolicy;
+  owner: { configured: boolean; id?: string; source?: 'account' | 'claim' | 'manual' };
+}
+
+export type OwnerClaimPhase =
+  | 'waiting-message'
+  | 'candidate'
+  | 'confirmed'
+  | 'expired'
+  | 'cancelled';
+
+/** Browser-facing owner-claim session (plan §21). */
+export interface PublicOwnerClaimSession {
+  id: string;
+  channelId: string;
+  accountId: string;
+  phase: OwnerClaimPhase;
+  /** Short one-time challenge the local browser shows the operator. NOT a credential. */
+  challengeCode?: string;
+  expiresAt: number;
+  candidate?: { senderId: string };
 }
 
 // ---------------------------------------------------------------------------
@@ -265,4 +342,74 @@ export async function cancelAuth(
     method: 'DELETE',
     signal,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Access-control API (plan §30)
+// ---------------------------------------------------------------------------
+
+/** GET /channels/:id/access → ChannelAccessState */
+export async function fetchAccess(id: string, signal?: AbortSignal): Promise<ChannelAccessState> {
+  return request<ChannelAccessState>(`/channels/${encodeURIComponent(id)}/access`, { signal });
+}
+
+/** PUT /channels/:id/access → ChannelAccessState */
+export async function saveAccess(
+  id: string,
+  policy: ChannelAccessPolicy,
+  signal?: AbortSignal,
+): Promise<ChannelAccessState> {
+  return request<ChannelAccessState>(`/channels/${encodeURIComponent(id)}/access`, {
+    method: 'PUT',
+    headers: JSON_HEADERS,
+    body: JSON.stringify(policy),
+    signal,
+  });
+}
+
+/** POST /channels/:id/access/owner-claims → 201 PublicOwnerClaimSession */
+export async function beginOwnerClaim(
+  id: string,
+  signal?: AbortSignal,
+): Promise<PublicOwnerClaimSession> {
+  return request<PublicOwnerClaimSession>(
+    `/channels/${encodeURIComponent(id)}/access/owner-claims`,
+    { method: 'POST', signal },
+  );
+}
+
+/** GET /channels/:id/access/owner-claims/:claimId → PublicOwnerClaimSession */
+export async function fetchOwnerClaim(
+  id: string,
+  claimId: string,
+  signal?: AbortSignal,
+): Promise<PublicOwnerClaimSession> {
+  return request<PublicOwnerClaimSession>(
+    `/channels/${encodeURIComponent(id)}/access/owner-claims/${encodeURIComponent(claimId)}`,
+    { signal },
+  );
+}
+
+/** POST /channels/:id/access/owner-claims/:claimId/confirm → ChannelAccessState */
+export async function confirmOwnerClaim(
+  id: string,
+  claimId: string,
+  signal?: AbortSignal,
+): Promise<ChannelAccessState> {
+  return request<ChannelAccessState>(
+    `/channels/${encodeURIComponent(id)}/access/owner-claims/${encodeURIComponent(claimId)}/confirm`,
+    { method: 'POST', signal },
+  );
+}
+
+/** DELETE /channels/:id/access/owner-claims/:claimId → 204 */
+export async function cancelOwnerClaim(
+  id: string,
+  claimId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  await request<unknown>(
+    `/channels/${encodeURIComponent(id)}/access/owner-claims/${encodeURIComponent(claimId)}`,
+    { method: 'DELETE', signal },
+  );
 }

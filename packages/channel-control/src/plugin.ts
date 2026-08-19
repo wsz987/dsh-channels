@@ -5,17 +5,39 @@
  * channel (headless support, doc §25/§27). autoStartAll is guarded so a single
  * misconfigured/broken channel can never crash profile activation. On fiber
  * unload the plugin stops and disposes every runtime mount.
+ *
+ * The access manager is wired over the shared, durable channel-domain storage
+ * (`ctx.channels.resources.storage`) so policies written here and read by the
+ * harness resolver share one KV namespace (plan §15). Owner identity resolution
+ * delegates to each registered definition's optional `resolveOwnerIdentity`.
  */
 import { type Context } from '@deepseek-ai/cordis';
+import type { ChannelService } from '@wsz987/channel-core';
 import { ChannelControlService } from './service.js';
 import type { CredentialSeam } from './credentials/manager.js';
+import { ChannelStorageAccessPolicyStore } from './access/policy-store.js';
 
 export const name = 'channel-control';
 export const inject: string[] = ['channels', 'credentials'];
 
 export function apply(ctx: Context): void {
   const credentials = (ctx as Context & { credentials: CredentialSeam }).credentials;
-  const service = new ChannelControlService(ctx, { credentials });
+  const channels = (ctx as Context & { channels: ChannelService }).channels;
+
+  // The resolver closure references `service`; annotate it explicitly so the
+  // self-reference resolves without circular-inference.
+  let service: ChannelControlService;
+  service = new ChannelControlService(ctx, {
+    credentials,
+    // Durable policy store over the same ChannelStorage the harness resolver reads.
+    accessStore: new ChannelStorageAccessPolicyStore(() => channels.resources.storage),
+    // Owner identity resolution delegates to the registered definition's hook.
+    resolveOwnerIdentity: async (
+      channelId: string,
+      accountId: string,
+    ): Promise<string | undefined> =>
+      service.definitions.get(channelId)?.resolveOwnerIdentity?.(accountId),
+  });
 
   // Headless auto-start: definitions registered BEFORE this plugin activates
   // are swept here; definitions registered afterwards (channel plugins
@@ -36,5 +58,23 @@ export function apply(ctx: Context): void {
   // On fiber unload, stop and dispose every mounted runtime adapter.
   ctx.effect(() => {
     return () => service.runtime.stopAll().catch(() => {});
+  });
+
+  // Owner-claim event listener (plan §22). observe() NEVER throws (it catches
+  // and logs internally), but wrap it anyway so a failure can never propagate
+  // back to the adapter inbound loop (which would treat the whole platform
+  // message as failed). The disposer is returned through ctx.effect teardown.
+  ctx.effect(() => {
+    const off = channels.on((event) => {
+      try {
+        service.ownerClaims.observe(event);
+      } catch (error) {
+        ctx.logger('channel-control').warn(
+          '[channel-control] owner claim observe failed',
+          error,
+        );
+      }
+    });
+    return off;
   });
 }

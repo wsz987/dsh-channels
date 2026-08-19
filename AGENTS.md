@@ -34,6 +34,24 @@
 >
 > 这样即使某些 Agent 的 Skill 自动发现机制偶尔不工作，AGENTS.md 仍然会兜底要求它读取该 Skill。
 
+### 入站访问控制
+
+涉及以下内容时：
+
+- inbound / `message.received`
+- sender / conversation identity
+- owner / owner claim
+- dmPolicy / groupPolicy / allowFrom / requireMention
+- interaction security
+
+必须先阅读：
+
+1. `docs/security/inbound-access-control.md`
+2. `docs/security/channel-identity-map.md`
+3. `docs/architecture.md`（涉及依赖/职责变化时）
+
+Adapter 不得自行定义不同于 `channel-harness` 的 ACL 语义；外部主体必须先授权，再产生本地副作用（架构红线 13）。
+
 包结构（`packages/`）：
 
 | 包 | 职责 |

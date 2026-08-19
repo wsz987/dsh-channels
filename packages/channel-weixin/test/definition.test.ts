@@ -181,6 +181,28 @@ describe('createWeixinDefinition', () => {
     const adapter = await def.createAdapter();
     expect(adapter.id).toBe('weixin');
   });
+
+  it('exposes resolveOwnerIdentity from the injected closure', async () => {
+    const fn = vi.fn(async (accountId: string) =>
+      accountId === 'main' ? 'wx-scan-user-123' : undefined,
+    );
+    const def = createWeixinDefinition({
+      config: makeConfig(),
+      deps: {},
+      getAdapter: () => undefined,
+      resolveOwnerIdentity: fn,
+    });
+    expect(def.resolveOwnerIdentity).toBeDefined();
+    await expect(def.resolveOwnerIdentity!('main')).resolves.toBe('wx-scan-user-123');
+    await expect(def.resolveOwnerIdentity!('other')).resolves.toBeUndefined();
+    expect(fn).toHaveBeenCalledWith('main');
+    expect(fn).toHaveBeenCalledWith('other');
+  });
+
+  it('omits resolveOwnerIdentity when the closure is not provided', () => {
+    const def = makeDefinition(undefined);
+    expect(def.resolveOwnerIdentity).toBeUndefined();
+  });
 });
 
 describe('apply() wiring', () => {
@@ -202,6 +224,8 @@ describe('apply() wiring', () => {
     const def = register.mock.calls[0][0] as ChannelDefinition;
     expect(def.id).toBe('weixin');
     expect(def.autoStart).toBe(true);
+    // The plugin wires the owner-identity resolver over ctx.channels.resources.
+    expect(typeof def.resolveOwnerIdentity).toBe('function');
     // Control-plane path never touches the legacy mount effect.
     expect(effect).not.toHaveBeenCalled();
   });

@@ -21,7 +21,13 @@ export type ControlErrorCode =
   | 'CREDENTIAL_NOT_SUPPORTED'
   | 'CREDENTIAL_READONLY'
   | 'INVALID_CREDENTIAL'
-  | 'UNKNOWN_FIELD';
+  | 'UNKNOWN_FIELD'
+  | 'INVALID_ACCESS_POLICY'
+  | 'CLAIM_NOT_FOUND'
+  | 'CLAIM_EXPIRED'
+  | 'CLAIM_CANCELLED'
+  | 'CLAIM_NOT_SUPPORTED'
+  | 'CLAIM_INVALID';
 
 const MESSAGES: Record<ControlErrorCode, string> = {
   CONTROL_ERROR: 'channel control error',
@@ -38,6 +44,12 @@ const MESSAGES: Record<ControlErrorCode, string> = {
   CREDENTIAL_READONLY: 'credential is read-only (not writable)',
   INVALID_CREDENTIAL: 'credential value must be a string (empty string clears it)',
   UNKNOWN_FIELD: 'channel has no such setup field',
+  INVALID_ACCESS_POLICY: 'access policy is invalid for this channel',
+  CLAIM_NOT_FOUND: 'owner claim not found',
+  CLAIM_EXPIRED: 'owner claim has expired',
+  CLAIM_CANCELLED: 'owner claim was cancelled',
+  CLAIM_NOT_SUPPORTED: 'channel does not support owner claim',
+  CLAIM_INVALID: 'owner claim is in an invalid state for this operation',
 };
 
 /** Base control-plane error. */

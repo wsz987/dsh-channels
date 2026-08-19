@@ -15,15 +15,23 @@
  * package carries no dependency on any concrete credentials implementation.
  */
 import { Service, type Context } from '@deepseek-ai/cordis';
-import type { ChannelAdapter } from '@wsz987/channel-core';
+import type { ChannelAccessPolicy, ChannelAdapter } from '@wsz987/channel-core';
 import { ChannelDefinitionRegistry } from './definitions/registry.js';
 import { CredentialManager, type CredentialSeam } from './credentials/manager.js';
 import { AuthSessionManager } from './auth/session-manager.js';
 import { ControlError } from './errors.js';
 import { ChannelRuntimeManager } from './runtime/manager.js';
+import { ChannelAccessManager } from './access/manager.js';
+import { OwnerClaimSessionManager } from './access/owner-claim.js';
+import {
+  type ChannelAccessPolicyStore,
+  MemoryAccessPolicyStore,
+} from './access/policy-store.js';
 import type {
   AuthBeginInput,
   AuthInput,
+  ChannelAccessReadiness,
+  ChannelAccessState,
   ChannelDefinition,
   ChannelSetupDescriptor,
   ChannelSetupField,
@@ -32,6 +40,7 @@ import type {
   ChannelSummary,
   ConfiguredState,
   InternalAuthSession,
+  PublicOwnerClaimSession,
 } from './types.js';
 
 declare module '@deepseek-ai/cordis' {
@@ -47,6 +56,16 @@ export interface ChannelControlServiceOptions {
   credentials: CredentialSeam;
   /** Injectable clock for auth (ms since epoch). Defaults to Date.now. */
   now?: () => number;
+  /**
+   * Optional access-policy store. Defaults to an in-memory store; the plugin
+   * wires the durable ChannelStorage-backed store over ctx.channels.resources.
+   */
+  accessStore?: ChannelAccessPolicyStore;
+  /**
+   * Optional owner-identity resolver. Defaults to delegating to the registered
+   * definition's `resolveOwnerIdentity(accountId)` when present.
+   */
+  resolveOwnerIdentity?(channelId: string, accountId: string): Promise<string | undefined>;
 }
 
 const SECRET_SUFFIXES = ['secret', 'Secret', 'token', 'Token'] as const;
@@ -61,6 +80,8 @@ export class ChannelControlService extends Service {
   readonly credentials: CredentialManager;
   readonly auth: AuthSessionManager;
   readonly runtime: ChannelRuntimeManager;
+  readonly access: ChannelAccessManager;
+  readonly ownerClaims: OwnerClaimSessionManager;
 
   constructor(ctx: Context, options: ChannelControlServiceOptions) {
     super(ctx, 'channelControl');
@@ -71,6 +92,23 @@ export class ChannelControlService extends Service {
       ctx,
       registry: this.definitions,
       credentials: options.credentials,
+    });
+    // Access manager shares the SAME definitions registry so summarization and
+    // access reads always agree on a channel's declared descriptor.
+    const accessStore = options.accessStore ?? new MemoryAccessPolicyStore();
+    const resolveOwnerIdentity = options.resolveOwnerIdentity ?? (async (channelId: string, accountId: string) => {
+      return this.definitions.get(channelId)?.resolveOwnerIdentity?.(accountId);
+    });
+    this.access = new ChannelAccessManager({
+      registry: this.definitions,
+      store: accessStore,
+      resolveOwnerIdentity,
+    });
+    this.ownerClaims = new OwnerClaimSessionManager({
+      registry: this.definitions,
+      store: accessStore,
+      logger: this.ctx.logger('channel-control'),
+      now: options.now,
     });
     // Doc §27: auto-start configured channels the moment their plugin
     // registers the definition (channel plugins activate after this service).
@@ -135,6 +173,9 @@ export class ChannelControlService extends Service {
     }
     const enabled = definition.enabled;
     const running = this.runtime.isRunning(definition.id);
+    // Access readiness (plan §28): cheap, failure-tolerant; default to
+    // 'missing-policy' so a broken definition never breaks the collapsed row.
+    const access = await this.accessReadiness(definition.id);
     if (running) {
       const status = await this.runtime.status(definition.id);
       return {
@@ -144,6 +185,7 @@ export class ChannelControlService extends Service {
         mounted: status.mounted,
         runtime: status.running ? 'running' : 'stopped',
         connection: status.connection,
+        access,
       };
     }
     return {
@@ -153,7 +195,17 @@ export class ChannelControlService extends Service {
       mounted: false,
       runtime: 'stopped',
       connection: 'unknown',
+      access,
     };
+  }
+
+  /** Access readiness for a channel, guarded so failures default safely. */
+  private async accessReadiness(channelId: string): Promise<ChannelAccessReadiness> {
+    try {
+      return (await this.access.getState(channelId, 'main')).readiness;
+    } catch {
+      return 'missing-policy';
+    }
   }
 
   async getSetup(channelId: string): Promise<ChannelSetupDescriptor> {
@@ -364,6 +416,49 @@ export class ChannelControlService extends Service {
 
   cancelAuth(sessionId: string) {
     return this.auth.cancel(sessionId);
+  }
+
+  /** Access state for a channel+account (plan §27, §29). */
+  getAccess(channelId: string, accountId = 'main'): Promise<ChannelAccessState> {
+    return this.access.getState(channelId, accountId);
+  }
+
+  /** Validate + persist an access policy, returning the resulting state (plan §29, §31). */
+  saveAccess(
+    channelId: string,
+    policy: ChannelAccessPolicy,
+    accountId = 'main',
+  ): Promise<ChannelAccessState> {
+    return this.access.saveAccess(channelId, policy, accountId);
+  }
+
+  // ---- owner claim surface (plan §29, §55) ----------------------------------
+
+  /** Begin a local owner-claim session (plan §21). */
+  beginOwnerClaim(channelId: string, accountId = 'main'): PublicOwnerClaimSession {
+    return this.ownerClaims.begin(channelId, accountId);
+  }
+
+  /** Read an owner-claim session (throws CLAIM_EXPIRED / CLAIM_NOT_FOUND). */
+  getOwnerClaim(channelId: string, claimId: string): PublicOwnerClaimSession {
+    return this.ownerClaims.get(channelId, claimId);
+  }
+
+  /**
+   * Confirm a candidate and persist the owner, then return the resulting
+   * access state for the channel+account (plan §25, §29).
+   */
+  async confirmOwnerClaim(
+    channelId: string,
+    claimId: string,
+  ): Promise<ChannelAccessState> {
+    const session = await this.ownerClaims.confirm(channelId, claimId);
+    return this.access.getState(channelId, session.accountId);
+  }
+
+  /** Cancel an owner-claim session (plan §29). */
+  cancelOwnerClaim(channelId: string, claimId: string): void {
+    this.ownerClaims.cancel(channelId, claimId);
   }
 
 }

@@ -14,6 +14,7 @@ import type {
   MessageId,
 } from './account.js';
 import type { MessagePart } from './messages.js';
+import type { MessageActivation } from './access.js';
 
 export interface ConversationRef {
   id: ConversationId;
@@ -31,6 +32,11 @@ export interface MessageRef {
   content: MessagePart[];
   replyTo?: MessageId;
   createdAt?: number;
+  /**
+   * Activation facts computed by the adapter at the trust boundary (e.g.
+   * `mentionedBot`). The Harness Access Gate reads these — never `raw`.
+   */
+  activation?: MessageActivation;
 }
 
 /** A user message received from a messaging platform. */

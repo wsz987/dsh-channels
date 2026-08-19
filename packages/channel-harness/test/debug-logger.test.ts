@@ -50,4 +50,20 @@ describe('installDebugConsoleExporter', () => {
       'telegram inbound {"parts":[{"type":"image","localDataBytes":123}]}',
     );
   });
+
+  it('exports the channel-access gate namespace (plan §42)', () => {
+    vi.stubEnv(CHANNELS_DEBUG_ENV, '1');
+    const consoleInfo = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const ctx = new Context();
+    installDebugConsoleExporter(ctx);
+    ctx.logger('channel-access').info('inbound dropped', {
+      channel: 'weixin',
+      account: 'main',
+      conversationType: 'dm',
+      reason: 'user_not_allowed',
+    });
+    expect(consoleInfo).toHaveBeenCalledWith(
+      'inbound dropped {"channel":"weixin","account":"main","conversationType":"dm","reason":"user_not_allowed"}',
+    );
+  });
 });

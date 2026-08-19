@@ -302,6 +302,14 @@ import '@larksuiteoapi/node-sdk'
 
 适配器直接读写 Harness persistence（SessionBinding 等持久化只允许由 `channel-harness` 的 store 接口负责）。
 
+### 红线 13
+
+外部主体未授权就产生本地副作用。
+
+任一能够触发 Agent、Command、Session、Binding、Workspace、Interaction 或其他本地特权行为的外部入站事件，必须首先通过 `channel-harness` 的统一 Access Gate。缺失 policy、损坏 policy、未知 sender、未知 group 均 Fail-Closed。Adapter 只负责 canonical identity 与 activation facts，不得实现渠道私有 ACL engine。`requireMention` 是 Activation，不是 Authorization。
+
+见 `docs/security/inbound-access-control.md` 与 `docs/security/channel-identity-map.md`。
+
 ---
 
 ## 最终架构

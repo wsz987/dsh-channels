@@ -184,6 +184,15 @@ export function createQQDefinition(options: QQDefinitionOptions): ChannelDefinit
     },
     setup,
     autoStart: true,
+    // Declared access capability (plan §11). QQ supports DM + named groups; no
+    // mention activation in V1; owner is identified via the /dsh-claim flow.
+    access: {
+      directMessages: true,
+      groups: true,
+      mentions: false,
+      ownerDiscovery: 'claim',
+      identityLabels: { user: 'QQ User OpenID', group: 'QQ Group OpenID' },
+    },
 
     async getConfiguredState(): Promise<ConfiguredState> {
       const appId = Boolean(snapshot.appId);

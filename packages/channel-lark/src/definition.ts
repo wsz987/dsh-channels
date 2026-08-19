@@ -260,5 +260,14 @@ export function createLarkDefinition(
     },
     createAdapter,
     autoStart: true,
+    // Declared access capability (plan §11). Lark supports DM + groups; no
+    // mention activation in V1; owner is identified via the /dsh-claim flow.
+    access: {
+      directMessages: true,
+      groups: true,
+      mentions: false,
+      ownerDiscovery: 'claim',
+      identityLabels: { user: 'Lark User ID', group: 'Lark Chat ID' },
+    },
   };
 }

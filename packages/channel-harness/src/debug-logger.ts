@@ -19,6 +19,7 @@ export function installDebugConsoleExporter(ctx: Context): void {
     levels: {
       default: -1,
       'channel-harness': 3,
+      'channel-access': 3,
       'channel-weixin': 3,
       'channel-qq': 3,
       'channel-lark': 3,

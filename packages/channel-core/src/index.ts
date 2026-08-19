@@ -9,6 +9,7 @@
  * This package never imports Harness Agent APIs and never depends on any
  * specific messaging platform.
  */
+export * from './access.js';
 export * from './account.js';
 export * from './adapter.js';
 export * from './capabilities.js';

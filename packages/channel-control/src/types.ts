@@ -10,7 +10,11 @@
  * Host-only types ([InternalAuthSession], [AuthProviderSession]) must never
  * cross the browser boundary — see auth/sanitizer.ts for the public DTOs.
  */
-import type { ChannelAdapter, ChannelHealth } from '@wsz987/channel-core';
+import type {
+  ChannelAccessPolicy,
+  ChannelAdapter,
+  ChannelHealth,
+} from '@wsz987/channel-core';
 
 /** How a channel begins an authorization flow (doc §15). */
 export type AuthMethod =
@@ -207,6 +211,84 @@ export interface ChannelRuntimeStatus {
   lastError?: string | null;
 }
 
+/**
+ * How a channel determines its local operator / owner identity (plan §10, §24).
+ * - `account`: the domain account is identified up front (e.g. Weixin's
+ *   scanning QR userId); owner is bootstrapped automatically.
+ * - `claim`: no upfront identity; the owner identifies themselves via the
+ *   reserved `/dsh-claim` flow.
+ * - `manual`: the owner is assigned manually by the operator.
+ */
+export type OwnerDiscoveryMode = 'account' | 'claim' | 'manual';
+
+/**
+ * Declared access capability of a channel (plan §10). Adapters publish it; the
+ * control plane and harness use it to decide what a policy may express and
+ * whether owner bootstrap applies.
+ */
+export interface ChannelAccessDescriptor {
+  directMessages: boolean;
+  groups: boolean;
+  mentions: boolean;
+  ownerDiscovery: OwnerDiscoveryMode;
+  identityLabels: { user: string; group?: string };
+  defaults?: { requireMention?: boolean };
+}
+
+/**
+ * High-level access state of a channel (plan §27), surfaced to the Web control
+ * plane so an operator can see at a glance why inbound is gated.
+ */
+export type ChannelAccessReadiness =
+  | 'ready'
+  | 'needs-owner'
+  | 'missing-policy'
+  | 'invalid-policy';
+
+/**
+ * Full access picture for one channel+account (plan §27). The `policy` carries
+ * canonical sender/group IDs — never any secret — because these are exactly what
+ * the operator edits in the ACL.
+ */
+export interface ChannelAccessState {
+  descriptor: ChannelAccessDescriptor;
+  readiness: ChannelAccessReadiness;
+  policy?: ChannelAccessPolicy;
+  owner: { configured: boolean; id?: string; source?: 'account' | 'claim' | 'manual' };
+}
+
+/**
+ * Lifecycle phase of a local owner-claim session (plan §21).
+ * - `waiting-message`: a challenge is outstanding; no valid candidate yet.
+ * - `candidate`: a valid DM reply carried the exact challenge code.
+ * - `confirmed`: the local operator confirmed the candidate (owner persisted).
+ * - `expired`: TTL passed before confirmation.
+ * - `cancelled`: the local operator cancelled the session.
+ */
+export type OwnerClaimPhase =
+  | 'waiting-message'
+  | 'candidate'
+  | 'confirmed'
+  | 'expired'
+  | 'cancelled';
+
+/**
+ * Browser-facing owner-claim session (plan §21). This is the ONLY claim DTO
+ * surfaced outside the host. `challengeCode` is a short one-time challenge the
+ * local browser shows the operator who then sends it to the bot; it is NOT a
+ * platform credential and must never be logged.
+ */
+export interface PublicOwnerClaimSession {
+  id: string;
+  channelId: string;
+  accountId: string;
+  phase: OwnerClaimPhase;
+  /** Short one-time challenge the local browser shows the operator. NOT a credential. */
+  challengeCode?: string;
+  expiresAt: number;
+  candidate?: { senderId: string };
+}
+
 /** Row returned by [ChannelControlService.listChannels] (doc §29). */
 export interface ChannelSummary {
   id: string;
@@ -215,6 +297,8 @@ export interface ChannelSummary {
   mounted: boolean;
   runtime: 'running' | 'stopped';
   connection: 'connected' | 'degraded' | 'disconnected' | 'unknown';
+  /** Access readiness of the channel (plan §28). */
+  access: ChannelAccessReadiness;
 }
 
 /**
@@ -273,6 +357,14 @@ export interface ChannelDefinition {
   createAdapter(): Promise<ChannelAdapter>;
   /** Whether this channel should auto-mount when configured (headless, doc §27). Default true. */
   autoStart?: boolean;
+  /** Required: declared access capability descriptor (execution plan §10). */
+  access: ChannelAccessDescriptor;
+  /**
+   * Only implemented by ownerDiscovery='account' channels. Returns the canonical
+   * sender.id of the account owner (e.g. Weixin's scanning QR userId). Never
+   * exposes platform storage format to the control plane.
+   */
+  resolveOwnerIdentity?(accountId: string): Promise<string | undefined>;
 }
 
 export type { ChannelAdapter, ChannelHealth };

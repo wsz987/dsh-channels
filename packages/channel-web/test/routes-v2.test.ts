@@ -14,10 +14,13 @@ import type { AddressInfo } from 'node:net';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ControlError } from '@wsz987/channel-control';
 import type {
+  ChannelAccessState,
   ChannelSetupDescriptor,
   ChannelSummary,
   PublicAuthSession,
+  PublicOwnerClaimSession,
 } from '@wsz987/channel-control';
+import type { ChannelAccessPolicy } from '@wsz987/channel-core';
 import { apply } from '../src/index.js';
 import type { ChannelControlLike } from '../src/host/routes-v2.js';
 
@@ -43,6 +46,48 @@ const CONFIGURED = {
   },
 };
 
+/** A valid custom-style access policy (mirrors the shared channel-core shape). */
+const VALID_POLICY: ChannelAccessPolicy = {
+  version: 1,
+  preset: 'custom',
+  ownerId: 'owner-1',
+  dmPolicy: 'allowlist',
+  allowFrom: ['alice', 'bob'],
+  groupPolicy: 'disabled',
+  groups: {},
+};
+
+/** Default access state the fake returns unless overridden. */
+const ACCESS_STATE: ChannelAccessState = {
+  descriptor: {
+    directMessages: true,
+    groups: true,
+    mentions: true,
+    ownerDiscovery: 'claim',
+    identityLabels: { user: 'user id', group: 'group id' },
+  },
+  readiness: 'ready',
+  policy: VALID_POLICY,
+  owner: { configured: true, id: 'owner-1', source: 'claim' },
+};
+
+/** The claim session the fake returns from beginOwnerClaim. */
+const CLAIM: PublicOwnerClaimSession = {
+  id: 'claim-1',
+  channelId: KNOWN,
+  accountId: 'main',
+  phase: 'waiting-message',
+  challengeCode: 'abcdef1234567890',
+  expiresAt: Date.now() + 300_000,
+};
+
+const CLAIM_WITH_CANDIDATE: PublicOwnerClaimSession = {
+  ...CLAIM,
+  phase: 'candidate',
+  challengeCode: undefined,
+  candidate: { senderId: 'owner-1' },
+};
+
 interface Fakes {
   control: ChannelControlLike;
   calls: {
@@ -57,13 +102,28 @@ interface Fakes {
     pollAuth: string[];
     submitInput: Array<[string, unknown]>;
     cancelAuth: string[];
+    getAccess: string[];
+    saveAccess: Array<[string, ChannelAccessPolicy]>;
+    beginOwnerClaim: string[];
+    getOwnerClaim: Array<[string, string]>;
+    confirmOwnerClaim: Array<[string, string]>;
+    cancelOwnerClaim: Array<[string, string]>;
   };
+}
+
+interface AccessOverrides {
+  /** Replace the access state returned by getAccess/saveAccess. */
+  getAccess?: (channelId: string) => Promise<ChannelAccessState>;
+  saveAccess?: (channelId: string, policy: ChannelAccessPolicy) => Promise<ChannelAccessState>;
+  getOwnerClaim?: (channelId: string, claimId: string) => Promise<PublicOwnerClaimSession>;
+  confirmOwnerClaim?: (channelId: string, claimId: string) => Promise<ChannelAccessState>;
 }
 
 function makeControl(
   overrides: Partial<{
     pollAuth: (sessionId: string) => Promise<unknown>;
     saveConfig: (channelId: string, patch: Record<string, unknown>) => Promise<void>;
+    access: AccessOverrides;
   }> = {},
 ): Fakes {
   const calls: Fakes['calls'] = {
@@ -78,6 +138,12 @@ function makeControl(
     pollAuth: [],
     submitInput: [],
     cancelAuth: [],
+    getAccess: [],
+    saveAccess: [],
+    beginOwnerClaim: [],
+    getOwnerClaim: [],
+    confirmOwnerClaim: [],
+    cancelOwnerClaim: [],
   };
   const requireKnown = (channelId: string): void => {
     if (channelId !== KNOWN) throw new ControlError('CONTROL_DEFINITION_NOT_FOUND');
@@ -158,6 +224,39 @@ function makeControl(
     },
     async cancelAuth(sessionId) {
       calls.cancelAuth.push(sessionId);
+    },
+    async getAccess(channelId) {
+      requireKnown(channelId);
+      calls.getAccess.push(channelId);
+      if (overrides.access?.getAccess) return overrides.access.getAccess(channelId);
+      return ACCESS_STATE;
+    },
+    async saveAccess(channelId, policy) {
+      requireKnown(channelId);
+      calls.saveAccess.push([channelId, policy]);
+      if (overrides.access?.saveAccess) return overrides.access.saveAccess(channelId, policy);
+      return { ...ACCESS_STATE, readiness: 'ready', policy, owner: { ...ACCESS_STATE.owner } };
+    },
+    async beginOwnerClaim(channelId) {
+      requireKnown(channelId);
+      calls.beginOwnerClaim.push(channelId);
+      return CLAIM;
+    },
+    async getOwnerClaim(channelId, claimId) {
+      requireKnown(channelId);
+      calls.getOwnerClaim.push([channelId, claimId]);
+      if (overrides.access?.getOwnerClaim) return overrides.access.getOwnerClaim(channelId, claimId);
+      return CLAIM;
+    },
+    async confirmOwnerClaim(channelId, claimId) {
+      requireKnown(channelId);
+      calls.confirmOwnerClaim.push([channelId, claimId]);
+      if (overrides.access?.confirmOwnerClaim) return overrides.access.confirmOwnerClaim(channelId, claimId);
+      return { ...ACCESS_STATE, owner: { configured: true, id: 'owner-1', source: 'claim' } };
+    },
+    async cancelOwnerClaim(channelId, claimId) {
+      requireKnown(channelId);
+      calls.cancelOwnerClaim.push([channelId, claimId]);
     },
   };
   return { control, calls };
@@ -499,6 +598,252 @@ describe('auth session lifecycle (doc §32)', () => {
     expect(status).toBe(204);
     expect(fresh.calls.cancelAuth).toEqual(['session-1']);
     expect(body).toBeNull();
+  });
+});
+
+describe('GET /channels/:id/access (plan §27/§30)', () => {
+  it('returns the ChannelAccessState', async () => {
+    const fresh = makeControl();
+    const handler = wireV2(fresh.control);
+    const { status, body } = await invokeDirect(handler, {
+      method: 'GET',
+      url: '/dsh-channels/api/v2/channels/qq/access',
+    });
+    expect(status).toBe(200);
+    expect(fresh.calls.getAccess).toEqual([KNOWN]);
+    expect(body).toMatchObject({ readiness: 'ready', owner: { configured: true, id: 'owner-1' } });
+  });
+
+  it('unknown channel → 404', async () => {
+    const fresh = makeControl();
+    const handler = wireV2(fresh.control);
+    const { status, body } = await invokeDirect(handler, {
+      method: 'GET',
+      url: '/dsh-channels/api/v2/channels/nope/access',
+    });
+    expect(status).toBe(404);
+    expect((body as { error?: { code?: string } }).error?.code).toBe('CHANNEL_NOT_FOUND');
+    expect(fresh.calls.getAccess).toEqual([]);
+  });
+});
+
+describe('PUT /channels/:id/access (plan §31)', () => {
+  it('saves a valid policy → 200 + resulting state', async () => {
+    const fresh = makeControl();
+    const handler = wireV2(fresh.control);
+    const { status, body } = await invokeDirect(handler, {
+      method: 'PUT',
+      url: '/dsh-channels/api/v2/channels/qq/access',
+      body: JSON.stringify(VALID_POLICY),
+    });
+    expect(status).toBe(200);
+    expect(fresh.calls.saveAccess).toEqual([[KNOWN, VALID_POLICY]]);
+    expect(body).toMatchObject({ readiness: 'ready' });
+  });
+
+  it('malformed policy → 400 INVALID_INPUT (never reaches control)', async () => {
+    const fresh = makeControl();
+    const handler = wireV2(fresh.control);
+    const { status, body } = await invokeDirect(handler, {
+      method: 'PUT',
+      url: '/dsh-channels/api/v2/channels/qq/access',
+      body: JSON.stringify({ version: 1, presets: 'typo' }),
+    });
+    expect(status).toBe(400);
+    expect((body as { error?: { code?: string } }).error?.code).toBe('INVALID_INPUT');
+    expect(fresh.calls.saveAccess).toEqual([]);
+  });
+
+  it('policy requiring mention on a mentions=false channel → 400 INVALID_ACCESS_POLICY', async () => {
+    const fresh = makeControl();
+    fresh.control.saveAccess = async () => {
+      throw new ControlError(
+        'INVALID_ACCESS_POLICY',
+        "group 'g' requires mention but channel does not support mentions",
+      );
+    };
+    const handler = wireV2(fresh.control);
+    const { status, body } = await invokeDirect(handler, {
+      method: 'PUT',
+      url: '/dsh-channels/api/v2/channels/qq/access',
+      body: JSON.stringify({
+        ...VALID_POLICY,
+        groupPolicy: 'allowlist',
+        groups: { g: { enabled: true, senderPolicy: 'allowlist', allowFrom: ['x'], requireMention: true } },
+      }),
+    });
+    expect(status).toBe(400);
+    expect((body as { error?: { code?: string } }).error?.code).toBe('INVALID_ACCESS_POLICY');
+  });
+
+  it('unknown channel → 404', async () => {
+    const fresh = makeControl();
+    const handler = wireV2(fresh.control);
+    const { status, body } = await invokeDirect(handler, {
+      method: 'PUT',
+      url: '/dsh-channels/api/v2/channels/nope/access',
+      body: JSON.stringify(VALID_POLICY),
+    });
+    expect(status).toBe(404);
+    expect((body as { error?: { code?: string } }).error?.code).toBe('CHANNEL_NOT_FOUND');
+    expect(fresh.calls.saveAccess).toEqual([]);
+  });
+});
+
+describe('owner-claim lifecycle (plan §29/§30)', () => {
+  it('POST /channels/qq/access/owner-claims → 201 + session', async () => {
+    const fresh = makeControl();
+    const handler = wireV2(fresh.control);
+    const { status, body } = await invokeDirect(handler, {
+      method: 'POST',
+      url: '/dsh-channels/api/v2/channels/qq/access/owner-claims',
+      body: '{}',
+    });
+    expect(status).toBe(201);
+    expect(fresh.calls.beginOwnerClaim).toEqual([KNOWN]);
+    expect(body).toMatchObject({
+      id: 'claim-1',
+      phase: 'waiting-message',
+      challengeCode: 'abcdef1234567890',
+    });
+  });
+
+  it('GET claim → session', async () => {
+    const fresh = makeControl();
+    const handler = wireV2(fresh.control);
+    const { status, body } = await invokeDirect(handler, {
+      method: 'GET',
+      url: '/dsh-channels/api/v2/channels/qq/access/owner-claims/claim-1',
+    });
+    expect(status).toBe(200);
+    expect(fresh.calls.getOwnerClaim).toEqual([[KNOWN, 'claim-1']]);
+    expect(body).toMatchObject({ id: 'claim-1', phase: 'waiting-message' });
+  });
+
+  it('confirm candidate → 200 ChannelAccessState', async () => {
+    const fresh = makeControl({
+      access: {
+        getOwnerClaim: async () => CLAIM_WITH_CANDIDATE,
+      },
+    });
+    const handler = wireV2(fresh.control);
+    const { status, body } = await invokeDirect(handler, {
+      method: 'POST',
+      url: '/dsh-channels/api/v2/channels/qq/access/owner-claims/claim-1/confirm',
+      body: '{}',
+    });
+    expect(status).toBe(200);
+    expect(fresh.calls.confirmOwnerClaim).toEqual([[KNOWN, 'claim-1']]);
+    expect(body).toMatchObject({ readiness: 'ready', owner: { configured: true, id: 'owner-1' } });
+  });
+
+  it('confirm before candidate → 400 CLAIM_INVALID', async () => {
+    const fresh = makeControl({
+      access: {
+        confirmOwnerClaim: async () => {
+          throw new ControlError('CLAIM_INVALID', 'no candidate to confirm');
+        },
+      },
+    });
+    const handler = wireV2(fresh.control);
+    const { status, body } = await invokeDirect(handler, {
+      method: 'POST',
+      url: '/dsh-channels/api/v2/channels/qq/access/owner-claims/claim-1/confirm',
+      body: '{}',
+    });
+    expect(status).toBe(400);
+    expect((body as { error?: { code?: string } }).error?.code).toBe('CLAIM_INVALID');
+  });
+
+  it('expired claim → 410 CLAIM_EXPIRED', async () => {
+    const fresh = makeControl({
+      access: {
+        getOwnerClaim: async () => {
+          throw new ControlError('CLAIM_EXPIRED');
+        },
+      },
+    });
+    const handler = wireV2(fresh.control);
+    const { status, body } = await invokeDirect(handler, {
+      method: 'GET',
+      url: '/dsh-channels/api/v2/channels/qq/access/owner-claims/old',
+    });
+    expect(status).toBe(410);
+    expect((body as { error?: { code?: string } }).error?.code).toBe('CLAIM_EXPIRED');
+  });
+
+  it('unknown claim → 404 CLAIM_NOT_FOUND', async () => {
+    const fresh = makeControl({
+      access: {
+        getOwnerClaim: async () => {
+          throw new ControlError('CLAIM_NOT_FOUND');
+        },
+      },
+    });
+    const handler = wireV2(fresh.control);
+    const { status, body } = await invokeDirect(handler, {
+      method: 'GET',
+      url: '/dsh-channels/api/v2/channels/qq/access/owner-claims/ghost',
+    });
+    expect(status).toBe(404);
+    expect((body as { error?: { code?: string } }).error?.code).toBe('CLAIM_NOT_FOUND');
+  });
+
+  it('DELETE claim → cancelOwnerClaim → 204', async () => {
+    const fresh = makeControl();
+    const handler = wireV2(fresh.control);
+    const { status, body } = await invokeDirect(handler, {
+      method: 'DELETE',
+      url: '/dsh-channels/api/v2/channels/qq/access/owner-claims/claim-1',
+    });
+    expect(status).toBe(204);
+    expect(fresh.calls.cancelOwnerClaim).toEqual([[KNOWN, 'claim-1']]);
+    expect(body).toBeNull();
+  });
+});
+
+describe('access responses never leak platform secrets (plan §30)', () => {
+  it('GET access body carries no token/secret/provider state', async () => {
+    const fresh = makeControl();
+    const handler = wireV2(fresh.control);
+    const out = await invokeDirect(handler, {
+      method: 'GET',
+      url: '/dsh-channels/api/v2/channels/qq/access',
+    });
+    const json = JSON.stringify(out.body);
+    expect(json).not.toMatch(/token/i);
+    expect(json).not.toMatch(/secret/i);
+    expect(json).not.toContain('providerState');
+    expect(json).not.toContain('deviceCode');
+  });
+
+  it('put access response carries no token/secret/provider state', async () => {
+    const fresh = makeControl();
+    const handler = wireV2(fresh.control);
+    const out = await invokeDirect(handler, {
+      method: 'PUT',
+      url: '/dsh-channels/api/v2/channels/qq/access',
+      body: JSON.stringify(VALID_POLICY),
+    });
+    const json = JSON.stringify(out.body);
+    expect(json).not.toMatch(/token/i);
+    expect(json).not.toMatch(/secret/i);
+    expect(json).not.toContain('providerState');
+    expect(json).not.toContain('deviceCode');
+  });
+
+  it('claim session response carries no token/secret/provider state', async () => {
+    const fresh = makeControl();
+    const handler = wireV2(fresh.control);
+    const out = await invokeDirect(handler, {
+      method: 'GET',
+      url: '/dsh-channels/api/v2/channels/qq/access/owner-claims/claim-1',
+    });
+    const json = JSON.stringify(out.body);
+    expect(json).not.toMatch(/token/i);
+    expect(json).not.toMatch(/secret/i);
+    expect(json).not.toContain('providerState');
+    expect(json).not.toContain('deviceCode');
   });
 });
 

@@ -76,6 +76,13 @@ import { ChannelModelSelectionController } from './model-selection.js';
 import { toLoggableError } from './loggable-error.js';
 import { ChannelSessionFactory } from './channel-session-factory.js';
 import { installImageCompatibility } from './image-model-fallback.js';
+import { isReservedClaimCommand } from '@wsz987/channel-core';
+import { InboundAccessController } from './access/controller.js';
+import type {
+  ChannelAccessPolicyResolver,
+  ResolvedAccessPolicy,
+} from './access/resolver.js';
+import type { AccessDecisionReason } from './access/decision.js';
 
 export interface ChannelHarnessBridgeOptions {
   config: Config;
@@ -85,6 +92,19 @@ export interface ChannelHarnessBridgeOptions {
   getAdapter(channelId: string): ChannelAdapter | undefined;
   replyContexts: ReplyContextStore;
   logger: ChannelLogger;
+  /**
+   * Optional fail-closed Access Gate resolver (plan §17, §32). When ABSENT the
+   * bridge runs in "unwired" (backward-test-compat) mode and SKIPS the gate so
+   * existing harness unit tests that don't wire a resolver keep passing.
+   * Production lifecycle ALWAYS provides it.
+   */
+  accessResolver?: ChannelAccessPolicyResolver;
+  /**
+   * Namespaced logger for access decisions (plan §42, namespace
+   * `channel-access`). Falls back to `logger` when not provided. Never logs
+   * message body / challenge codes / raw payload / tokens.
+   */
+  accessLogger?: ChannelLogger;
   /** Optional attachment-commit seam (WX5 real image path). */
   saveImage?: SaveImageHook;
   /** Optional generic-file extension. Absent keeps ordinary file placeholders. */
@@ -165,6 +185,8 @@ export class ChannelHarnessBridge {
   private readonly commandDeps: ChannelCommandDependencies;
   /** Per-conversation generation counters, invalidated by /stop (spec §6). */
   private readonly conversationGenerations = new Map<string, number>();
+  /** Pure fail-closed access decision engine (plan §19). No I/O. */
+  private readonly accessController = new InboundAccessController();
 
   constructor(private readonly options: ChannelHarnessBridgeOptions) {
     this.modelSelection =
@@ -261,7 +283,6 @@ export class ChannelHarnessBridge {
       return;
     }
 
-    const key = this.conversationKey(event);
     // The command parser operates on the RAW user text (the concatenated plain
     // text blocks), never on the '[channel=.. sender=.. message=..] ' metadata
     // prefix the model-facing converter prepends, and never after a trim (the
@@ -270,6 +291,17 @@ export class ChannelHarnessBridge {
       .filter((part): part is TextPart => part.type === 'text')
       .map((part) => part.text)
       .join('');
+
+    // ------------------------------------------------------------------
+    // FAIL-CLOSED ACCESS GATE (plan §32). Runs BEFORE any side effect:
+    // before conversationKey / parseCommand / /stop / binding writes /
+    // session / workspace / agent. A drop here means NO side effect at all
+    // (incl. /stop fast path — an unauthorized user can never cancel a live
+    // agent or bump the generation, plan §33).
+    // ------------------------------------------------------------------
+    if (await this.enforceAccessGate(event, text)) return;
+
+    const key = this.conversationKey(event);
     const parsed = parseCommand(text);
 
     // P0: /stop is handled on a FAST PATH AND RUNS IMMEDIATELY — it must
@@ -400,6 +432,109 @@ export class ChannelHarnessBridge {
   /** Bindings without the field predate the stable policy; fail closed. */
   private bindingDurability(binding: SessionBinding): 'ephemeral' | 'durable' {
     return binding.durability ?? 'durable';
+  }
+
+  /**
+   * FAIL-CLOSED Access Gate (plan §32, §33, §42). Returns true when the message
+   * must be DROPPED with NO side effect (agent / command / session / binding /
+   * workspace / generation / /stop fast path), false to let it proceed.
+   *
+   * Order (plan §32):
+   *   1. Reserved claim suppression (/dsh-claim never reaches anything).
+   *   2. Identity validation (plan §9): sender + conversation ids.
+   *   3. Unwired mode: no resolver -> skip the gate (backward-test-compat).
+   *   4. Resolve policy (missing/invalid -> drop, fail closed).
+   *   5. Authorize (security gate) + activate (activation gate).
+   *
+   * Logging follows plan §42: `channel-access` logger, minimal fields
+   * (channel / account / conversationType / reason), never message body,
+   * challenge code, raw payload or tokens.
+   */
+  private async enforceAccessGate(event: MessageReceived, text: string): Promise<boolean> {
+    const accessLogger = this.options.accessLogger ?? this.options.logger;
+
+    // 1. Reserved owner-claim suppression (plan §20, §34): /dsh-claim must
+    //    NEVER reach model / command dispatcher / Session / Binding, even when
+    //    no access policy exists. Static drop — no policy read is needed.
+    if (isReservedClaimCommand(text)) {
+      accessLogger.debug('[channel-access] reserved claim message suppressed', {
+        channel: event.channel,
+        account: event.accountId,
+      });
+      return true;
+    }
+
+    // 2. Identity validation (plan §9): sender.id must be a non-empty string
+    //    and !== 'unknown'; conversation.id must be non-empty.
+    const senderId = event.sender.id;
+    const conversationId = event.conversation.id;
+    if (
+      typeof senderId !== 'string' ||
+      senderId.length === 0 ||
+      senderId === 'unknown'
+    ) {
+      this.dropInbound(accessLogger, event, 'unidentified_sender');
+      return true;
+    }
+    if (typeof conversationId !== 'string' || conversationId.length === 0) {
+      this.dropInbound(accessLogger, event, 'invalid_conversation');
+      return true;
+    }
+
+    // 3. Unwired mode: no resolver -> skip the gate entirely (allow), so
+    //    existing harness unit tests that don't wire a resolver keep passing.
+    //    Production lifecycle ALWAYS provides it.
+    if (!this.options.accessResolver) return false;
+
+    // 4. Resolve the policy (fail closed; plan §15/§17).
+    let resolved: ResolvedAccessPolicy;
+    try {
+      resolved = await this.options.accessResolver.resolve(event.channel, event.accountId);
+    } catch (error) {
+      this.options.logger.warn('[channel-access] policy resolution failed', toLoggableError(error));
+      return true;
+    }
+    if (resolved.state === 'missing') {
+      this.dropInbound(accessLogger, event, 'missing_policy');
+      return true;
+    }
+    if (resolved.state === 'invalid') {
+      this.dropInbound(accessLogger, event, 'invalid_policy');
+      return true;
+    }
+
+    // 5. Authorize (Security Gate) then activate (Activation Gate).
+    const decision = this.accessController.authorize({
+      conversationType: event.conversation.type,
+      senderId,
+      conversationId,
+      mentionedBot: event.message.activation?.mentionedBot,
+      policy: resolved.policy,
+    });
+    if (!decision.authorized) {
+      this.dropInbound(accessLogger, event, decision.reason);
+      return true;
+    }
+    if (!decision.activated) {
+      this.dropInbound(accessLogger, event, decision.reason);
+      return true;
+    }
+
+    return false;
+  }
+
+  /** Log a fail-closed inbound drop with minimal plan-§42 fields. */
+  private dropInbound(
+    accessLogger: ChannelLogger,
+    event: MessageReceived,
+    reason: AccessDecisionReason,
+  ): void {
+    accessLogger.info('[channel-access] inbound dropped', {
+      channel: event.channel,
+      account: event.accountId,
+      conversationType: event.conversation.type,
+      reason,
+    });
   }
 
   /**

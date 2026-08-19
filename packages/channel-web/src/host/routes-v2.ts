@@ -21,6 +21,7 @@
 import type {
   AuthBeginInput,
   AuthInput,
+  ChannelAccessState,
   ChannelSetupDescriptor,
   ChannelSetupInput,
   ChannelSetupResult,
@@ -28,7 +29,9 @@ import type {
   ConfiguredState,
   PublicAuthSession,
   PublicAuthStatus,
+  PublicOwnerClaimSession,
 } from '@wsz987/channel-control';
+import type { ChannelAccessPolicy } from '@wsz987/channel-core';
 import { isChannelError } from '@wsz987/channel-core';
 import { isControlError } from '@wsz987/channel-control';
 import { z } from 'zod';
@@ -55,6 +58,17 @@ export interface ChannelControlLike {
   pollAuth(sessionId: string): Promise<PublicAuthStatus>;
   submitAuthInput(sessionId: string, input: AuthInput): Promise<PublicAuthStatus>;
   cancelAuth(sessionId: string): Promise<void>;
+  // ---- access control (plan §29) ------------------------------------------
+  getAccess(channelId: string, accountId?: string): Promise<ChannelAccessState>;
+  saveAccess(
+    channelId: string,
+    policy: ChannelAccessPolicy,
+    accountId?: string,
+  ): Promise<ChannelAccessState>;
+  beginOwnerClaim(channelId: string, accountId?: string): Promise<PublicOwnerClaimSession>;
+  getOwnerClaim(channelId: string, claimId: string): Promise<PublicOwnerClaimSession>;
+  confirmOwnerClaim(channelId: string, claimId: string): Promise<ChannelAccessState>;
+  cancelOwnerClaim(channelId: string, claimId: string): Promise<void>;
 }
 
 export interface ApiResultV2 {
@@ -106,8 +120,10 @@ function mapControlError(error: unknown): ApiResultV2 {
       case 'UNKNOWN_FIELD':
       case 'AUTH_SESSION_NOT_FOUND':
       case 'AUTH_SESSION_CANCELLED':
+      case 'CLAIM_NOT_FOUND':
         return { status: 404, body: errorBody(error.code, error.message) };
       case 'AUTH_SESSION_EXPIRED':
+      case 'CLAIM_EXPIRED':
         return { status: 410, body: errorBody(error.code, error.message) };
       case 'SECRET_FIELD_REJECTED':
       case 'NOT_A_SECRET_FIELD':
@@ -117,6 +133,10 @@ function mapControlError(error: unknown): ApiResultV2 {
       case 'AUTH_NOT_SUPPORTED':
       case 'AUTH_NOT_READY':
       case 'ENABLE_NOT_SUPPORTED':
+      case 'INVALID_ACCESS_POLICY':
+      case 'CLAIM_CANCELLED':
+      case 'CLAIM_NOT_SUPPORTED':
+      case 'CLAIM_INVALID':
         return { status: 400, body: errorBody(error.code, error.message) };
       default:
         return {
@@ -290,6 +310,75 @@ export class ChannelApiV2 {
     return run(() => this.control.cancelAuth(sid.value), () => ({ status: 204, body: undefined }));
   }
 
+  /** GET /channels/:channelId/access → ChannelAccessState (plan §27). */
+  async getAccess(channelId: string): Promise<ApiResultV2> {
+    const found = await this.channelOr404(channelId);
+    if (!found.ok) return found.result;
+    return run(() => this.control.getAccess(channelId), (state) => ({ status: 200, body: state }));
+  }
+
+  /**
+   * PUT /channels/:channelId/access → ChannelAccessState (plan §31).
+   * Body is a strict ChannelAccessPolicy; malformed input is a 400 INVALID_INPUT
+   * before it reaches the control plane.
+   */
+  async saveAccess(channelId: string, body: unknown): Promise<ApiResultV2> {
+    const found = await this.channelOr404(channelId);
+    if (!found.ok) return found.result;
+    const parsed = accessPolicySchema.safeParse(body);
+    if (!parsed.success) return badInput(accessPolicyMessage(parsed.error)).result;
+    return run(() => this.control.saveAccess(channelId, parsed.data), (state) => ({
+      status: 200,
+      body: state,
+    }));
+  }
+
+  /** POST /channels/:channelId/access/owner-claims → 201 PublicOwnerClaimSession (plan §29). */
+  async beginOwnerClaim(channelId: string): Promise<ApiResultV2> {
+    const found = await this.channelOr404(channelId);
+    if (!found.ok) return found.result;
+    return run(() => this.control.beginOwnerClaim(channelId), (session) => ({
+      status: 201,
+      body: session,
+    }));
+  }
+
+  /** GET /channels/:channelId/access/owner-claims/:claimId → PublicOwnerClaimSession (plan §29). */
+  async getOwnerClaim(channelId: string, claimId: unknown): Promise<ApiResultV2> {
+    const found = await this.channelOr404(channelId);
+    if (!found.ok) return found.result;
+    const cid = requireString(claimId, 'claimId');
+    if (!cid.ok) return cid.result;
+    return run(() => this.control.getOwnerClaim(channelId, cid.value), (session) => ({
+      status: 200,
+      body: session,
+    }));
+  }
+
+  /** POST /channels/:channelId/access/owner-claims/:claimId/confirm → ChannelAccessState (plan §29). */
+  async confirmOwnerClaim(channelId: string, claimId: unknown): Promise<ApiResultV2> {
+    const found = await this.channelOr404(channelId);
+    if (!found.ok) return found.result;
+    const cid = requireString(claimId, 'claimId');
+    if (!cid.ok) return cid.result;
+    return run(() => this.control.confirmOwnerClaim(channelId, cid.value), (state) => ({
+      status: 200,
+      body: state,
+    }));
+  }
+
+  /** DELETE /channels/:channelId/access/owner-claims/:claimId → 204 (plan §29). */
+  async cancelOwnerClaim(channelId: string, claimId: unknown): Promise<ApiResultV2> {
+    const found = await this.channelOr404(channelId);
+    if (!found.ok) return found.result;
+    const cid = requireString(claimId, 'claimId');
+    if (!cid.ok) return cid.result;
+    return run(() => this.control.cancelOwnerClaim(channelId, cid.value), () => ({
+      status: 204,
+      body: undefined,
+    }));
+  }
+
   /**
    * Match a path under `/dsh-channels/api/v2` (the prefix is stripped by the
    * caller) and dispatch. Returns 404 for unknown routes.
@@ -325,6 +414,30 @@ export class ChannelApiV2 {
     const input = /^\/channels\/([^/]+)\/auth\/sessions\/([^/]+)\/input$/.exec(clean);
     if (method === 'POST' && input) {
       return this.submitInput(safeDecode(input[1]!), safeDecode(input[2]!), body);
+    }
+
+    // ---- access control (plan §30) ---------------------------------------
+    const access = /^\/channels\/([^/]+)\/access$/.exec(clean);
+    if (access) {
+      const id = safeDecode(access[1]!);
+      if (method === 'GET') return this.getAccess(id);
+      if (method === 'PUT') return this.saveAccess(id, body);
+    }
+
+    const beginClaim = /^\/channels\/([^/]+)\/access\/owner-claims$/.exec(clean);
+    if (method === 'POST' && beginClaim) return this.beginOwnerClaim(safeDecode(beginClaim[1]!));
+
+    const claimConfirm = /^\/channels\/([^/]+)\/access\/owner-claims\/([^/]+)\/confirm$/.exec(clean);
+    if (method === 'POST' && claimConfirm) {
+      return this.confirmOwnerClaim(safeDecode(claimConfirm[1]!), safeDecode(claimConfirm[2]!));
+    }
+
+    const claim = /^\/channels\/([^/]+)\/access\/owner-claims\/([^/]+)$/.exec(clean);
+    if (claim) {
+      const id = safeDecode(claim[1]!);
+      const claimId = safeDecode(claim[2]!);
+      if (method === 'GET') return this.getOwnerClaim(id, claimId);
+      if (method === 'DELETE') return this.cancelOwnerClaim(id, claimId);
     }
 
     return { status: 404, body: errorBody('NOT_FOUND', 'no such endpoint') };
@@ -429,3 +542,45 @@ const authBeginSchema = z.object({
 const enabledPatchSchema = z.object({
   enabled: z.boolean(),
 }, 'enabled must be a boolean').loose();
+
+// ---------------------------------------------------------------------------
+// Access control body schema (plan §31)
+// ---------------------------------------------------------------------------
+
+/** Canonical sender/group id: non-empty, trimmed. IDs are opaque (no lowercase). */
+const accessIdSchema = z.string().min(1).trim();
+
+/**
+ * Strict `ChannelAccessPolicy` body for PUT /channels/:id/access. Mirrors the
+ * shared `channel-access-policy` contract in @wsz987/channel-core exactly:
+ * version pinned to 1, every field enforced, unknown keys rejected. The parsed
+ * value is passed verbatim to `control.saveAccess`, which re-validates it
+ * against the channel's declared descriptor (mentions/groups/DM capability).
+ */
+const accessPolicySchema = z
+  .object({
+    version: z.literal(1),
+    preset: z.enum(['owner-only', 'allowlist', 'custom']),
+    ownerId: accessIdSchema.optional(),
+    dmPolicy: z.enum(['disabled', 'allowlist', 'open']),
+    allowFrom: z.array(accessIdSchema),
+    groupPolicy: z.enum(['disabled', 'allowlist']),
+    groups: z.record(
+      z.string().trim(),
+      z.object({
+        enabled: z.boolean(),
+        senderPolicy: z.enum(['allowlist', 'open']),
+        allowFrom: z.array(accessIdSchema),
+        requireMention: z.boolean(),
+      }),
+    ),
+  })
+  .strict();
+
+/** Human-friendly message for the first zod issue of an access policy body. */
+function accessPolicyMessage(err: z.ZodError): string {
+  const first = err.issues[0];
+  if (!first) return 'invalid access policy';
+  const at = first.path.length > 0 ? ` (${first.path.join('.')})` : '';
+  return `invalid access policy${at}: ${first.message}`;
+}

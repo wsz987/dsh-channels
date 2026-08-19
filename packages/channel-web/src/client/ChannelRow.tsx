@@ -33,6 +33,7 @@ import { ChannelBrandIcon } from './components/ChannelBrandIcon.js';
 import { Switch } from './components/Switch.js';
 import { ChannelSetup } from './ChannelSetup.js';
 import { ChannelAuth } from './ChannelAuth.js';
+import { ChannelAccess } from './ChannelAccess.js';
 import { ChannelPermissions } from './ChannelPermissions.js';
 
 /**
@@ -255,6 +256,17 @@ export function ChannelRow(props: ChannelRowProps) {
         >
           <StateDot state={collapsedDot(channel)} size={8} />
           <span>{collapsedLabel(channel, t)}</span>
+          {accessWarning(channel, t) && (
+            <span
+              style={{
+                color: 'var(--dsw-alias-state-warn-primary)',
+                whiteSpace: 'nowrap',
+              }}
+              data-testid="channel-access-warning"
+            >
+              {accessWarning(channel, t)}
+            </span>
+          )}
         </span>
 
         {/* 启动 / 停用 — a direct switch on the collapsed row, replacing the
@@ -307,6 +319,8 @@ export function ChannelRow(props: ChannelRowProps) {
             t={t}
           />
 
+          <ChannelAccess channel={channel} web={web} t={t} onChanged={onChanged} />
+
           <ChannelPermissions channel={channel} web={web} t={t} />
         </div>
       )}
@@ -344,6 +358,24 @@ function collapsedDot(channel: ChannelSummary): 'done' | 'ongoing' | 'error' {
   if (channel.runtime === 'running' && channel.connection === 'connected') return 'done';
   if (channel.enabled && channel.runtime === 'running' && channel.connection === 'disconnected') return 'error';
   return 'ongoing';
+}
+
+/**
+ * Surface access-readiness trouble on the collapsed row (plan §28) so the
+ * operator can see why inbound is gated before expanding the row. Empty string
+ * when nothing is wrong.
+ */
+function accessWarning(channel: ChannelSummary, t: (key: string) => string): string {
+  switch (channel.access) {
+    case 'needs-owner':
+      return t('readinessNeedsOwner');
+    case 'missing-policy':
+      return t('readinessMissingPolicy');
+    case 'invalid-policy':
+      return t('readinessInvalidPolicy');
+    default:
+      return '';
+  }
 }
 
 export default ChannelRow;
