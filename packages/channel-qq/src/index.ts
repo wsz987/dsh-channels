@@ -62,15 +62,15 @@ export { mapInbound, mapMessageParts, type QQInboundMeta } from './mapper.js';
 export { manifest, type QQManifest } from './manifest.js';
 
 export function apply(ctx: Context, config: QQConfig, deps: QQAdapterDeps = {}): void {
-  if (!config.enabled) return;
-
   const control = ctx.get('channelControl') as
     | { definitions: { register(d: unknown): unknown } }
     | undefined;
 
   if (control) {
-    // Universal Channel Control Plane present: register the definition and
-    // let the control plane drive setup/credential/auto-start (doc §25/§27).
+    // Universal Channel Control Plane present: register the definition EVEN
+    // when disabled — the plane drives setup/credential/auto-start (doc
+    // §25/§27) and a disabled definition must stay visible so the Web control
+    // plane can re-enable it later (doc §19/§20).
     const credentials = (ctx as Context & { credentials: CredentialSeam }).credentials;
     const settings = ctx.get('settings') as SettingsProvider | undefined;
     const scope = settings?.register(settingsNamespace('channels-qq'), Config, { base: config });
@@ -80,14 +80,18 @@ export function apply(ctx: Context, config: QQConfig, deps: QQAdapterDeps = {}):
         deps,
         credentials,
         persistSetup: (patch) => scope?.update(patch) ?? Promise.resolve(),
+        persistEnabled: (enabled) => scope?.update({ enabled }) ?? Promise.resolve(),
       }),
     );
     return;
   }
 
-  // Legacy / headless fallback when channel-control is absent. Mount ONLY when
-  // configured: an unconfigured channel logs a warning and returns WITHOUT
-  // throwing, so it can never crash profile startup (doc §25).
+  // Legacy / headless fallback when channel-control is absent. There is no
+  // directory/control surface to re-enable a disabled channel, so the config
+  // `enabled` gate still applies (doc §20). Mount ONLY when configured: an
+  // unconfigured channel logs a warning and returns WITHOUT throwing, so it can
+  // never crash profile startup (doc §25).
+  if (!config.enabled) return;
   if (!config.appSecretRef) {
     ctx.logger.warn(`[channel-qq] no appSecretRef configured; skipping mount`);
     return;

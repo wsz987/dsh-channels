@@ -60,6 +60,8 @@ export interface CreateLarkDefinitionOptions {
   credentials: LarkCredentialSeam;
   /** Durable store for the non-secret setup field when the host provides one. */
   persistSetup?: (patch: { upstream: Pick<LarkConfig['upstream'], 'appId'> }) => Promise<void>;
+  /** Durable store for the enabled intent (doc §21) when the host provides one. */
+  persistEnabled?: (enabled: boolean) => Promise<void>;
 }
 
 /** Allowed non-secret nested sub-config keys merged by saveConfig. */
@@ -230,7 +232,13 @@ export function createLarkDefinition(
 
   return {
     id: 'lark',
-    enabled: state.enabled,
+    get enabled() {
+      return state.enabled;
+    },
+    async setEnabled(enabled: boolean): Promise<void> {
+      state.enabled = enabled;
+      await options.persistEnabled?.(enabled);
+    },
     setup,
     getConfiguredState: configuredState,
     saveConfig,

@@ -432,6 +432,48 @@ describe('ChannelControlService', () => {
     });
   });
 
+  it('saveCredential with an empty value clears the credential via unset', async () => {
+    const writes: { ref: string; value: string }[] = [];
+    const unsets: string[] = [];
+    const seamRecorder: CredentialSeam = {
+      async resolve() {
+        return undefined;
+      },
+      async describe(ref) {
+        // configured only when set and not subsequently unset.
+        return {
+          configured: !unsets.includes(ref) && writes.some((w) => w.ref === ref),
+          writable: true,
+        };
+      },
+      async set(ref, value) {
+        writes.push({ ref, value });
+      },
+      async unset(ref) {
+        unsets.push(ref);
+      },
+    };
+    const ctx = new Context();
+    new ChannelService(ctx);
+    const registry = new ChannelDefinitionRegistry();
+    registry.register(
+      makeDef('qq', {
+        setup: {
+          fields: [
+            { name: 'appSecret', kind: 'secret', secret: true, configured: false, writable: true, ref: 'QQBOT_APP_SECRET' },
+          ],
+          authMethods: ['credentials'],
+        },
+      }),
+    );
+    const service = new ChannelControlService(ctx, { credentials: seamRecorder, registry });
+
+    const result = await service.saveCredential('qq', 'appSecret', '');
+    expect(result).toMatchObject({ configured: false, writable: true });
+    expect(unsets).toEqual(['QQBOT_APP_SECRET']);
+    expect(writes).toEqual([]);
+  });
+
   it('registers ctx.channelControl via module augmentation and Cordis Service', () => {
     const ctx = new Context();
     new ChannelService(ctx);
@@ -445,5 +487,128 @@ describe('ChannelControlService', () => {
     expect(ctx.channelControl.credentials).toBeInstanceOf(CredentialManager);
     expect(ctx.channelControl.auth).toBeInstanceOf(AuthSessionManager);
     expect(ctx.channelControl.runtime).toBeInstanceOf(ChannelRuntimeManager);
+  });
+});
+
+describe('ChannelControlService enable lifecycle (doc §22, §25, §27)', () => {
+  /**
+   * Build a definition whose `enabled` is a live getter over mutable state and
+   * whose `setEnabled` persists the intent (mirrors the adapter definitions).
+   * `makeDef` spreads overrides as data properties, so the dynamic getter is
+   * installed afterwards with defineProperty.
+   */
+  function makeToggleableDef(
+    initialEnabled: boolean,
+    overrides: Partial<ChannelDefinition> = {},
+  ): { def: ChannelDefinition; persisted: boolean[]; setEnabled: ReturnType<typeof vi.fn> } {
+    let enabled = initialEnabled;
+    const persisted: boolean[] = [];
+    const setEnabled = vi.fn(async (next: boolean) => {
+      enabled = next;
+      persisted.push(next);
+    });
+    const def = makeDef('qq', { getConfiguredState: async () => ({ configured: true, fields: {} }), ...overrides });
+    Object.defineProperty(def, 'enabled', { get: () => enabled, configurable: true });
+    (def as { setEnabled?: unknown }).setEnabled = setEnabled;
+    return { def, persisted, setEnabled };
+  }
+
+  it('disabled definitions still appear in the directory (acceptance 39.9)', async () => {
+    const { def } = makeToggleableDef(false);
+    const { service } = harness([def]);
+    const rows = await service.listChannels();
+    expect(rows.map((r) => r.id)).toContain('qq');
+    expect(rows.find((r) => r.id === 'qq')).toMatchObject({
+      enabled: false,
+      configured: true,
+      mounted: false,
+      runtime: 'stopped',
+    });
+  });
+
+  it('setEnabled(true) persists the intent and starts a configured runtime', async () => {
+    const { def, persisted, setEnabled } = makeToggleableDef(false);
+    const adapter = makeAdapter('qq');
+    def.createAdapter = async () => adapter;
+    const { service } = harness([def]);
+
+    await service.setEnabled('qq', true);
+    expect(setEnabled).toHaveBeenCalledWith(true);
+    expect(persisted).toEqual([true]);
+    expect(service.runtime.isRunning('qq')).toBe(true);
+    expect(await service.getChannel('qq')).toMatchObject({
+      enabled: true,
+      mounted: true,
+      runtime: 'running',
+      connection: 'connected',
+    });
+
+    await service.runtime.stop('qq');
+  });
+
+  it('setEnabled(false) persists the intent and stops the runtime', async () => {
+    const { def, persisted, setEnabled } = makeToggleableDef(true);
+    const adapter = makeAdapter('qq');
+    def.createAdapter = async () => adapter;
+    const { service } = harness([def]);
+
+    await service.setEnabled('qq', true); // enabled + configured -> running
+    expect(service.runtime.isRunning('qq')).toBe(true);
+
+    await service.setEnabled('qq', false);
+    expect(setEnabled).toHaveBeenLastCalledWith(false);
+    expect(persisted).toEqual([true, false]);
+    expect(service.runtime.isRunning('qq')).toBe(false);
+    expect(await service.getChannel('qq')).toMatchObject({
+      enabled: false,
+      mounted: false,
+      runtime: 'stopped',
+    });
+  });
+
+  it('setEnabled(true) leaves an unconfigured channel stopped', async () => {
+    const { def } = makeToggleableDef(false, {
+      getConfiguredState: async () => ({ configured: false, fields: {} }),
+    });
+    def.createAdapter = vi.fn(async () => {
+      throw new Error('must not be created for an unconfigured channel');
+    });
+    const { service } = harness([def]);
+
+    await service.setEnabled('qq', true);
+    expect(service.runtime.isRunning('qq')).toBe(false);
+    expect(await service.getChannel('qq')).toMatchObject({
+      enabled: true,
+      configured: false,
+      mounted: false,
+      runtime: 'stopped',
+    });
+  });
+
+  it('setEnabled without a definition.setEnabled throws ENABLE_NOT_SUPPORTED', async () => {
+    const { service } = harness([makeDef('qq')]);
+    await expect(service.setEnabled('qq', true)).rejects.toMatchObject({
+      code: 'ENABLE_NOT_SUPPORTED',
+    });
+    await expect(service.setEnabled('qq', false)).rejects.toMatchObject({
+      code: 'ENABLE_NOT_SUPPORTED',
+    });
+  });
+
+  it('a disabled definition registered after the service is not auto-started', async () => {
+    const ctx = new Context();
+    new ChannelService(ctx);
+    const registry = new ChannelDefinitionRegistry();
+    const service = new ChannelControlService(ctx, { credentials: seam, registry });
+    const { def } = makeToggleableDef(false);
+    const adapter = makeAdapter('qq');
+    def.createAdapter = async () => adapter;
+
+    registry.register(def);
+    expect(service.runtime.isRunning('qq')).toBe(false);
+
+    await service.setEnabled('qq', true);
+    expect(service.runtime.isRunning('qq')).toBe(true);
+    await service.runtime.stop('qq');
   });
 });

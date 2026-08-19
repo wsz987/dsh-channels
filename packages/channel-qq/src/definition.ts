@@ -49,6 +49,8 @@ export interface QQDefinitionOptions {
   credentials: CredentialSeam;
   /** Durable store for the non-secret setup field when the host provides one. */
   persistSetup?: (patch: Pick<QQConfig, 'appId'>) => Promise<void>;
+  /** Durable store for the enabled intent (doc §21) when the host provides one. */
+  persistEnabled?: (enabled: boolean) => Promise<void>;
 }
 
 /**
@@ -173,7 +175,13 @@ export function createQQDefinition(options: QQDefinitionOptions): ChannelDefinit
 
   return {
     id: 'qq',
-    enabled: snapshot.enabled,
+    get enabled() {
+      return snapshot.enabled;
+    },
+    async setEnabled(enabled: boolean): Promise<void> {
+      snapshot.enabled = enabled;
+      await options.persistEnabled?.(enabled);
+    },
     setup,
     autoStart: true,
 

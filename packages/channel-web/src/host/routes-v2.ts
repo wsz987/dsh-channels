@@ -39,6 +39,7 @@ export interface ChannelControlLike {
   listChannels(): Promise<ChannelSummary[]>;
   getSetup(channelId: string): Promise<ChannelSetupDescriptor>;
   getConfiguredState(channelId: string): Promise<ConfiguredState>;
+  setEnabled(channelId: string, enabled: boolean): Promise<ChannelSummary>;
   saveConfig(channelId: string, patch: Record<string, unknown>): Promise<void>;
   describeCredential(
     channelId: string,
@@ -115,6 +116,7 @@ function mapControlError(error: unknown): ApiResultV2 {
       case 'CREDENTIAL_NOT_SUPPORTED':
       case 'AUTH_NOT_SUPPORTED':
       case 'AUTH_NOT_READY':
+      case 'ENABLE_NOT_SUPPORTED':
         return { status: 400, body: errorBody(error.code, error.message) };
       default:
         return {
@@ -186,6 +188,22 @@ export class ChannelApiV2 {
     const found = await this.channelOr404(channelId);
     if (!found.ok) return found.result;
     return run(() => this.control.getSetup(channelId), (setup) => ({ status: 200, body: setup }));
+  }
+
+  /**
+   * PUT /channels/:channelId/enabled → ChannelSummary (doc §23).
+   * Body: `{ enabled: boolean }`. The control plane persists the intent and
+   * starts/stops the runtime accordingly.
+   */
+  async setEnabled(channelId: string, body: unknown): Promise<ApiResultV2> {
+    const found = await this.channelOr404(channelId);
+    if (!found.ok) return found.result;
+    const parsed = enabledPatchSchema.safeParse(body);
+    if (!parsed.success) return badInput('enabled must be a boolean').result;
+    return run(() => this.control.setEnabled(channelId, parsed.data.enabled), (summary) => ({
+      status: 200,
+      body: summary,
+    }));
   }
 
   /** PUT /channels/:channelId/setup → save the whole form and reconcile. */
@@ -284,6 +302,9 @@ export class ChannelApiV2 {
     if (method === 'GET' && setup) return this.getSetup(safeDecode(setup[1]!));
     if (method === 'PUT' && setup) return this.applySetup(safeDecode(setup[1]!), body);
 
+    const enabled = /^\/channels\/([^/]+)\/enabled$/.exec(clean);
+    if (method === 'PUT' && enabled) return this.setEnabled(safeDecode(enabled[1]!), body);
+
     const config = /^\/channels\/([^/]+)\/config$/.exec(clean);
     if (method === 'PATCH' && config) return this.saveConfig(safeDecode(config[1]!), body);
 
@@ -318,10 +339,10 @@ export class ChannelApiV2 {
     return { ok: true, value: parsed.data };
   }
 
-  /** PUT credentials body: `{ value: string }`. */
+  /** PUT credentials body: `{ value: string }` (empty string clears). */
   private credentialValue(body: unknown): { ok: true; value: string } | { ok: false; result: ApiResultV2 } {
     const parsed = credentialValueSchema.safeParse(body);
-    if (!parsed.success) return badInput('value must be a non-empty string');
+    if (!parsed.success) return badInput('value must be a string (empty clears it)');
     return { ok: true, value: parsed.data.value };
   }
 
@@ -343,7 +364,7 @@ export class ChannelApiV2 {
     if (!parsedCredentials.success) {
       const first = parsedCredentials.error.issues[0];
       if (first && first.path.length === 1) {
-        return badInput(`credential ${String(first.path[0])} must be a non-empty string`);
+        return badInput(`credential ${String(first.path[0])} must be a string (empty clears it)`);
       }
       return badInput('config and credentials must be JSON objects');
     }
@@ -390,16 +411,21 @@ export const authInputSchema = z.object({
   value: z.string().min(1),
 }, 'kind must be "verification-code"').loose();
 
-/** PUT credentials body: `{ value: string }`. */
+/** PUT credentials body: `{ value: string }`. An empty string clears the credential. */
 const credentialValueSchema = z.object({
-  value: z.string().min(1),
-}, 'value must be a non-empty string').loose();
+  value: z.string(),
+}, 'value must be a string').loose();
 
-/** setup `credentials`: map of field name → non-empty (trimmed) string. */
-const credentialsRecordSchema = z.record(z.string(), z.string().trim().min(1));
+/** setup `credentials`: map of field name → value (empty string clears the credential). */
+const credentialsRecordSchema = z.record(z.string(), z.string().trim());
 
 /** POST auth/sessions body: `{ method: AuthMethod, accountId?: string }`. */
 const authBeginSchema = z.object({
   method: z.enum(AUTH_METHODS),
   accountId: z.string().min(1).optional(),
 }, 'method must be one of ' + AUTH_METHODS.join(', ')).loose();
+
+/** PUT channels/:id/enabled body: `{ enabled: boolean }`. */
+const enabledPatchSchema = z.object({
+  enabled: z.boolean(),
+}, 'enabled must be a boolean').loose();

@@ -128,8 +128,6 @@ async function migrateLegacyAppSecret(
 }
 
 export function apply(ctx: Context, config: LarkConfig, deps: LarkAdapterDeps = {}): void {
-  if (!config.enabled) return;
-
   // Adapt the CredentialProvider to the structural seam expected by the
   // definition (credentialRef branding is applied here, once).
   const seam = {
@@ -150,8 +148,10 @@ export function apply(ctx: Context, config: LarkConfig, deps: LarkAdapterDeps = 
     | undefined;
 
   if (control) {
-    // Control plane present (doc §12/§26/§27): register the definition; the
-    // plane owns adapter instantiation + headless auto-start.
+    // Control plane present (doc §12/§26/§27): register the definition EVEN
+    // when disabled — the plane owns adapter instantiation + headless
+    // auto-start, and a disabled definition must stay visible so the Web
+    // control plane can re-enable it later (doc §19/§20).
     const settings = ctx.get('settings') as SettingsProvider | undefined;
     const scope = settings?.register(settingsNamespace('channels-lark'), Config, { base: config });
     control.definitions.register(
@@ -160,13 +160,18 @@ export function apply(ctx: Context, config: LarkConfig, deps: LarkAdapterDeps = 
         deps,
         credentials: seam,
         persistSetup: (patch) => scope?.update(patch) ?? Promise.resolve(),
+        persistEnabled: (enabled) => scope?.update({ enabled }) ?? Promise.resolve(),
       }),
     );
     return;
   }
 
   // Legacy fallback (standalone, no control plane): mount directly. Unconfigured
-  // SDK mode must NOT throw (doc §25) — log a warning and stay idle.
+  // SDK mode must NOT throw (doc §25) — log a warning and stay idle. In this
+  // mode there is no directory/control surface, so the config `enabled` gate
+  // still applies (doc §20).
+  if (!config.enabled) return;
+
   ctx.effect(async () => {
     let appId: string | undefined;
     let appSecret: string | undefined;

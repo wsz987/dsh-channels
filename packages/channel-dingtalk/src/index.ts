@@ -114,8 +114,6 @@ type ChannelControlLike = {
 };
 
 export function apply(ctx: Context, config: DingTalkConfig, deps: DingTalkAdapterDeps = {}): void {
-  if (!config.enabled) return;
-
   // --- One-time legacy plaintext -> credential-reference migration (§52 Task 4).
   // The value is written to the credentials seam exactly once, then the
   // plaintext is deleted from the in-memory config. Never double-written.
@@ -130,7 +128,9 @@ export function apply(ctx: Context, config: DingTalkConfig, deps: DingTalkAdapte
 
   const control = ctx.get('channelControl') as ChannelControlLike | undefined;
   if (control) {
-    // The control plane owns lifecycle: register only, runtime auto-starts.
+    // The control plane owns lifecycle: register EVEN when disabled so the Web
+    // control plane can re-enable the channel later (doc §19/§20); runtime
+    // auto-starts.
     const settings = ctx.get('settings') as SettingsProvider | undefined;
     const scope = settings?.register(settingsNamespace('channels-dingtalk'), Config, { base: config });
     const effectiveConfig = scope?.get() ?? config;
@@ -140,6 +140,7 @@ export function apply(ctx: Context, config: DingTalkConfig, deps: DingTalkAdapte
         deps,
         credentials: ctx.credentials,
         persistSetup: (patch) => scope?.update(patch) ?? Promise.resolve(),
+        persistEnabled: (enabled) => scope?.update({ enabled }) ?? Promise.resolve(),
         onAuthCompleted: control.runtime
           ? async () => {
               try {
@@ -160,7 +161,10 @@ export function apply(ctx: Context, config: DingTalkConfig, deps: DingTalkAdapte
     return;
   }
 
-  // --- Legacy standalone mount (channel-control absent).
+  // --- Legacy standalone mount (channel-control absent). No directory/control
+  // surface exists to re-enable a disabled channel, so the config `enabled`
+  // gate still applies (doc §20).
+  if (!config.enabled) return;
   const credentialsCtx = ctx as Context & { credentials: (typeof ctx.credentials) };
   ctx.effect(async () => {
     // SDK mode requires a resolved credential; gateway mode owns its own.

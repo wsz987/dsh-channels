@@ -15,6 +15,7 @@ export type ControlErrorCode =
   | 'AUTH_SESSION_CANCELLED'
   | 'AUTH_SESSION_EXPIRED'
   | 'AUTH_NOT_READY'
+  | 'ENABLE_NOT_SUPPORTED'
   | 'SECRET_FIELD_REJECTED'
   | 'NOT_A_SECRET_FIELD'
   | 'CREDENTIAL_NOT_SUPPORTED'
@@ -30,11 +31,12 @@ const MESSAGES: Record<ControlErrorCode, string> = {
   AUTH_SESSION_CANCELLED: 'auth session was cancelled',
   AUTH_SESSION_EXPIRED: 'auth session has expired',
   AUTH_NOT_READY: 'channel is not mounted; start it before beginning auth',
+  ENABLE_NOT_SUPPORTED: 'channel does not support enable/disable',
   SECRET_FIELD_REJECTED: 'secret fields must be saved through the credentials seam',
   NOT_A_SECRET_FIELD: 'field is not a secret; save it through the config endpoint',
   CREDENTIAL_NOT_SUPPORTED: 'field has no credential ref',
   CREDENTIAL_READONLY: 'credential is read-only (not writable)',
-  INVALID_CREDENTIAL: 'credential value must be a non-empty string',
+  INVALID_CREDENTIAL: 'credential value must be a string (empty string clears it)',
   UNKNOWN_FIELD: 'channel has no such setup field',
 };
 

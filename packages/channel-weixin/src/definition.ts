@@ -36,6 +36,8 @@ export interface WeixinDefinitionOptions {
    * M1 auth flow through this seam so behavior stays identical to headless.
    */
   getAdapter: () => ChannelAdapter | undefined;
+  /** Durable store for the enabled intent (doc §21) when the host provides one. */
+  persistEnabled?: (enabled: boolean) => Promise<void>;
 }
 
 const AUTH_NOT_READY_MSG = 'weixin adapter is not mounted; start the channel first';
@@ -102,6 +104,14 @@ const DEFAULT_EXPIRES_MS = 3 * 60_000;
 export function createWeixinDefinition(options: WeixinDefinitionOptions): ChannelDefinition {
   const { config, deps, getAdapter } = options;
 
+  // In the control-plane wiring `config` is the (frozen) settings-scope object
+  // (`settings.register(...).get()`), so `config.enabled` is READ-ONLY — an
+  // in-process write throws "Cannot assign to read only property 'enabled'"
+  // and breaks disabling the channel. Keep the live flag in a local mutable
+  // snapshot (mirrors qq/telegram's `snapshot.enabled`) and let
+  // persistEnabled() persist the intent through the settings scope.
+  const state: { enabled: boolean } = { enabled: config.enabled };
+
   const requireAdapter = () => getAdapter();
 
   const pollCurrent = async (session: AuthProviderSession): Promise<PublicAuthStatus> => {
@@ -115,7 +125,13 @@ export function createWeixinDefinition(options: WeixinDefinitionOptions): Channe
 
   return {
     id: 'weixin',
-    enabled: config.enabled,
+    get enabled() {
+      return state.enabled;
+    },
+    async setEnabled(enabled: boolean): Promise<void> {
+      state.enabled = enabled;
+      await options.persistEnabled?.(enabled);
+    },
     setup: {
       fields: [],
       authMethods: ['qr'],

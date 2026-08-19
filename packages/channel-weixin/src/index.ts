@@ -5,6 +5,7 @@
  * (QR login, getUpdates long-poll, sendmessage). Streaming is `buffered`.
  */
 import { type Context } from '@deepseek-ai/cordis';
+import { settingsNamespace, type SettingsProvider } from '@deepseek-ai/dsh-settings';
 import { mountChannelAdapter } from '@wsz987/channel-core';
 import type { ChannelAdapter, ChannelDefinition } from '@wsz987/channel-control';
 import type { WeixinConfig } from './config.js';
@@ -140,22 +141,28 @@ type ChannelControlLike = {
 };
 
 export function apply(ctx: Context, config: WeixinConfig, deps: WeixinAdapterDeps = {}): void {
-  if (!config.enabled) return;
   const control = ctx.get('channelControl') as ChannelControlLike | undefined;
   if (control) {
-    // Control-plane entry (doc §43): register the definition; the control
-    // plane auto-starts it (autoStart) and drives the M1 QR flow through the
-    // mounted adapter.
+    // Control-plane entry (doc §43): register the definition EVEN when
+    // disabled — the control plane auto-starts it (autoStart) and a disabled
+    // definition must stay visible so the Web control plane can re-enable it
+    // later (doc §19/§20). The M1 QR flow is driven through the mounted adapter.
+    const settings = ctx.get('settings') as SettingsProvider | undefined;
+    const scope = settings?.register(settingsNamespace('channels-weixin'), Config, { base: config });
     control.definitions.register(
       createWeixinDefinition({
-        config,
+        config: scope?.get() ?? config,
         deps,
         getAdapter: () => control.runtime?.adapter('weixin'),
+        persistEnabled: (enabled) => scope?.update({ enabled }) ?? Promise.resolve(),
       }),
     );
     return;
   }
   // Legacy headless/standalone path (no channel-control): mount as today.
+  // There is no directory/control surface to re-enable a disabled channel, so
+  // the config `enabled` gate still applies (doc §20).
+  if (!config.enabled) return;
   const adapter = new WeixinAdapter(config, deps);
   mountChannelAdapter(
     ctx,

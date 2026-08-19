@@ -354,7 +354,7 @@ describe('apply() wiring', () => {
     void creds;
   });
 
-  it('does not register when the channel is disabled', () => {
+  it('registers the definition even when disabled (enabled: false)', () => {
     const ctx = new Context();
     new ChannelService(ctx);
     new FakeCredentials(ctx);
@@ -364,7 +364,10 @@ describe('apply() wiring', () => {
     });
 
     apply(ctx, makeConfig({ enabled: false }), {});
-    expect(registered).toHaveLength(0);
+    // The control plane owns lifecycle: a disabled definition must stay in the
+    // directory so the Web control plane can re-enable it (doc §19/§20).
+    expect(registered).toHaveLength(1);
+    expect((registered[0] as { enabled?: boolean }).enabled).toBe(false);
   });
 
   it('migrates a legacy plaintext clientSecret into credentials once and deletes it', () => {
