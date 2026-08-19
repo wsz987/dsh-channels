@@ -22,6 +22,17 @@
 | `docs/release.md` | 发版 / changeset / release gate（版本与发布权威） |
 | `docs/weixin-live-verification-runbook.md` | 执行 Weixin live gate、填 manifest 真实值 |
 | `docs/architecture/adr/` | 架构决策记录（上游边界、图片模型降级） |
+| `.agents/skills/dsh-channels-verification/SKILL.md` | 核验渠道实现 / SDK / 官方接口 / 权限 / manifest / 上游版本漂移时使用 |
+
+> **硬规则**：当任务涉及以下内容时，**必须**加载 `.agents/skills/dsh-channels-verification/SKILL.md`：
+>
+> - 核验 QQ / 微信 / 钉钉 / 飞书 / Telegram 实现
+> - 修改渠道 SDK / API / 权限
+> - 修改 manifest / testedVersion / upstream
+> - 检查平台权限、事件订阅、Gateway intents
+> - 判断 channel-web 权限展示是否与真实平台能力一致
+>
+> 这样即使某些 Agent 的 Skill 自动发现机制偶尔不工作，AGENTS.md 仍然会兜底要求它读取该 Skill。
 
 包结构（`packages/`）：
 

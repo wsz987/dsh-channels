@@ -1,0 +1,13 @@
+interface:
+  display_name: dsh channels verification
+  short_description: 核验 wsz987/dsh-channels 当前代码架构、各渠道插件/上游、配置与凭据字段、实际接口、平台权限和官方文档，并识别代码/文档/平台能力漂移。用于新增渠道、升级
+    SDK、发布前检查、排查权限问题、维护 channel-web 渠道设置页。
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true
