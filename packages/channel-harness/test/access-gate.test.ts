@@ -185,6 +185,25 @@ function makeFixture(resolver: StubResolver): Fixture {
 }
 
 describe('Fail-closed Access Gate (plan §54)', () => {
+  it('rejects bridge construction without an access resolver', () => {
+    const gateway = new FakeGateway();
+    const manager = new AgentManager(gateway, silentLogger, 4);
+    expect(
+      () => new ChannelHarnessBridge({
+        config: baseConfig(),
+        bindingStore: new MemoryBindingStore(),
+        agentManager: manager,
+        agentRouter: new AgentRouter(baseConfig()),
+        getAdapter: () => undefined,
+        replyContexts: new ReplyContextStore(),
+        logger: silentLogger,
+        ctx: new Context(),
+        commandDeps: { startNewSession: async () => {} },
+        workspaceResolver: noopResolver,
+      } as never),
+    ).toThrow('requires an access policy resolver');
+  });
+
   it('unauthorized plain message -> NO agent side effect (no followup, no session)', async () => {
     const { gateway, bindingStore, resolver, bridge } = makeFixture(new StubResolver());
     resolver.resolveState = { state: 'present', policy: denyDm };
@@ -279,6 +298,30 @@ describe('Fail-closed Access Gate (plan §54)', () => {
     expect(gateway.followups).toHaveLength(1);
     const binding = await bindingStore.get('weixin:main:user_123');
     expect(binding?.sessionId).toBe(gateway.createCalls[0]);
+  });
+
+  it('trims canonical identities before authorization and session routing', async () => {
+    const { gateway, bindingStore, resolver, bridge } = makeFixture(new StubResolver());
+    resolver.resolveState = {
+      state: 'present',
+      policy: { ...denyAllowlist, allowFrom: ['user_123'] },
+    };
+
+    await bridge.handleChannelEvent(makeMessageEvent({
+      sender: { id: '  user_123  ', name: 'Alice' } as never,
+      conversation: { id: '  user_123  ', type: 'dm' } as never,
+    }));
+
+    expect(gateway.followups).toHaveLength(1);
+    expect(await bindingStore.get('weixin:main:user_123')).toBeDefined();
+    expect(await bindingStore.get('weixin:main:  user_123  ')).toBeUndefined();
+  });
+
+  it('rejects whitespace-only canonical identities after trimming', async () => {
+    const { gateway, bridge } = makeFixture(new StubResolver());
+    await bridge.handleChannelEvent(makeMessageEvent({ sender: { id: '   ', name: 'x' } as never }));
+    expect(gateway.createCalls).toHaveLength(0);
+    expect(gateway.followups).toHaveLength(0);
   });
 
   it('reserved /dsh-claim never reaches agent/command/session/binding (plan §20, §34)', async () => {

@@ -47,6 +47,7 @@ import type {
   ChannelWorkspaceResolver,
   ResolvedChannelWorkspace,
 } from '../src/workspace-resolver.ts';
+import { allowAllAccessResolver } from './access-test-helper.ts';
 
 const defaultRoute: AgentRouteSpec = { preset: 'default' };
 
@@ -309,6 +310,7 @@ function makeBridge(options: {
     getAdapter: () => adapter as never,
     replyContexts: new ReplyContextStore(),
     logger,
+    accessResolver: allowAllAccessResolver,
     ctx: rootCtx,
     commandDeps: { startNewSession: (agent) => bridge.startNewSession(agent) },
     workspaceResolver: resolver,

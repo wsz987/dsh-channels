@@ -151,6 +151,17 @@ describe('OwnerClaimSessionManager.begin', () => {
 });
 
 describe('OwnerClaimSessionManager.observe', () => {
+  it('stores the trimmed canonical sender id', () => {
+    const { manager } = makeManager();
+    const claim = manager.begin('qq');
+    const event = claimWithCode(manager, claim.challengeCode!);
+    event.sender.id = '  sender-1  ' as never;
+
+    manager.observe(event);
+
+    expect(manager.get('qq', claim.id).candidate).toEqual({ senderId: 'sender-1' });
+  });
+
   it('captures the first valid candidate with the exact code (single-use)', () => {
     const { manager } = makeManager();
     const claim = manager.begin('qq');

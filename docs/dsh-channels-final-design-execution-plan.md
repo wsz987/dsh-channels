@@ -4,7 +4,7 @@ summary: >
   基于 wsz987/dsh-channels main@78655a40 的当前代码与既有规划，
   收敛 Channel Web 已落地架构，并为所有外部入站消息建立统一、
   Fail-Closed、Owner-aware 的访问控制与激活机制。
-status: final-proposed
+status: implemented-offline-verified
 repository: https://github.com/wsz987/dsh-channels
 branch: main
 baseline_commit: 78655a40a266c4122ecd0c030b0a882fdb92f2df
@@ -25,10 +25,10 @@ see_also:
 
 # DSH Channels 最终架构与入站访问控制执行方案
 
-> 本文是**最终执行方案（final-proposed）**，不是当前 as-built 文档。
+> 本文是已落地实现的执行与核验记录；真实平台权限与 live gate 仍按渠道分别验证。
 >
-> 当前代码事实以 `main@78655a40` 为基线；实现完成后，运行语义必须回写
-> `docs/architecture.md` 与 `docs/security/*`，届时这些 as-built 文档才成为长期权威来源。
+> 代码事实以当前工作树和对应提交为准；长期安全语义同步维护于
+> `docs/architecture.md` 与 `docs/security/*`。
 
 ---
 
@@ -365,7 +365,7 @@ channel-core
 Access Policy 使用独立 namespace：
 
 ```text
-access:policy:v1:<channelId>:<accountId>
+access:policy:v1:<encoded-channelId>:<encoded-accountId>
 ```
 
 例如：
@@ -3791,7 +3791,7 @@ Owner Claim never reaches Agent / Session / Binding.
 ┌──────────────────────────────────────────────────────────────┐
 │        ctx.channels.resources.storage                        │
 │                                                              │
-│ access:policy:v1:<channel>:<account>                         │
+│ access:policy:v1:<encoded-channel>:<encoded-account>         │
 └──────────────────────────────────────────────────────────────┘
 ```
 

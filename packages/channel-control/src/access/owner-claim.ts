@@ -198,8 +198,9 @@ export class OwnerClaimSessionManager {
       if (event.conversation.type !== 'dm') return;
 
       // Require a valid canonical sender.id.
-      const senderId = event.sender.id;
-      if (!senderId || senderId === '' || senderId === 'unknown') return;
+      const senderId =
+        typeof event.sender.id === 'string' ? event.sender.id.trim() : '';
+      if (!senderId || senderId === 'unknown') return;
 
       // Exact challenge match — no partial/fuzzy reveal of the code.
       if (parsed.code !== session.challenge) return;

@@ -130,7 +130,7 @@ export const channelAccessPolicySchema = z
  * the other's key format. E.g. `access:policy:v1:telegram:main`.
  */
 export function accessPolicyStorageKey(channelId: string, accountId: string): string {
-  return `access:policy:v1:${channelId}:${accountId}`;
+  return `access:policy:v1:${encodeURIComponent(channelId)}:${encodeURIComponent(accountId)}`;
 }
 
 // ---------------------------------------------------------------------------

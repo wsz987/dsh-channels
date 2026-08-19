@@ -29,6 +29,17 @@ export interface ChannelAccessPolicyStore {
   delete(channelId: string, accountId: string): Promise<void>;
 }
 
+function parseStoredPolicy(raw: string): ChannelAccessPolicy | undefined {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  const parsed = channelAccessPolicySchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}
+
 /**
  * [ChannelStorageAccessPolicyStore] — a [ChannelAccessPolicyStore] backed by a
  * [ChannelStorage]. Values are written as JSON strings under the shared
@@ -51,8 +62,7 @@ export class ChannelStorageAccessPolicyStore implements ChannelAccessPolicyStore
   async get(channelId: string, accountId: string): Promise<ChannelAccessPolicy | undefined> {
     const raw = await this.getStorage().get(this.key(channelId, accountId));
     if (raw === undefined) return undefined;
-    const parsed = channelAccessPolicySchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : undefined;
+    return parseStoredPolicy(raw);
   }
 
   /** The raw JSON string under the policy key, or undefined when absent. */
@@ -84,8 +94,7 @@ export class MemoryAccessPolicyStore implements ChannelAccessPolicyStore {
   async get(channelId: string, accountId: string): Promise<ChannelAccessPolicy | undefined> {
     const raw = this.values.get(this.key(channelId, accountId));
     if (raw === undefined) return undefined;
-    const parsed = channelAccessPolicySchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : undefined;
+    return parseStoredPolicy(raw);
   }
 
   async getRaw(channelId: string, accountId: string): Promise<string | undefined> {

@@ -42,6 +42,7 @@ import { installChannelCommands, type ChannelCommandDependencies } from '../src/
 import { ChannelModelSelectionController } from '../src/model-selection.ts';
 import { ReplyContextStore } from '../src/reply-context-store.ts';
 import type { ChannelWorkspaceResolver } from '../src/workspace-resolver.ts';
+import { allowAllAccessResolver } from './access-test-helper.ts';
 
 const defaultRoute: AgentRouteSpec = { preset: 'default' };
 
@@ -248,6 +249,7 @@ function makeBridge(
     getAdapter: () => adapter as never,
     replyContexts: new ReplyContextStore(),
     logger: silentLogger,
+    accessResolver: allowAllAccessResolver,
     ctx: rootCtx,
     commandDeps: { startNewSession: (agent) => bridge.startNewSession(agent) },
     workspaceResolver,
@@ -313,6 +315,7 @@ function makeRealGatewayBridge(defaultSelection?: { provider: string; model: str
     getAdapter: () => adapter as never,
     replyContexts: new ReplyContextStore(),
     logger: silentLogger,
+    accessResolver: allowAllAccessResolver,
     ctx: rootCtx,
     commandDeps: { startNewSession: (agent) => bridge.startNewSession(agent) },
     workspaceResolver: noopResolver,
@@ -693,6 +696,7 @@ describe('E. rollback', () => {
       getAdapter: () => adapter as never,
       replyContexts: new ReplyContextStore(),
       logger: silentLogger,
+      accessResolver: allowAllAccessResolver,
       ctx: rootCtx,
       commandDeps: { startNewSession: (agent) => bridge.startNewSession(agent) },
       workspaceResolver: noopResolver,
@@ -722,6 +726,7 @@ describe('E. rollback', () => {
       getAdapter: () => adapter as never,
       replyContexts: new ReplyContextStore(),
       logger: silentLogger,
+      accessResolver: allowAllAccessResolver,
       ctx: rootCtx,
       commandDeps: { startNewSession: (agent) => bridge.startNewSession(agent) },
       workspaceResolver: noopResolver,
@@ -858,6 +863,7 @@ describe('I. multi-channel sharing one command plane', () => {
       getAdapter: (id) => adapters[id] as never,
       replyContexts: new ReplyContextStore(),
       logger: silentLogger,
+      accessResolver: allowAllAccessResolver,
       ctx: rootCtx,
       commandDeps: { startNewSession: (agent) => bridge.startNewSession(agent) },
       workspaceResolver: noopResolver,
@@ -909,6 +915,7 @@ describe('J. concurrency / serialization', () => {
       getAdapter: () => adapter as never,
       replyContexts: new ReplyContextStore(),
       logger: silentLogger,
+      accessResolver: allowAllAccessResolver,
       ctx: rootCtx,
       commandDeps: { startNewSession: (agent) => bridge.startNewSession(agent) },
       workspaceResolver: noopResolver,

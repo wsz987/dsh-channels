@@ -22,11 +22,13 @@
 11. **Owner identity 绝不猜测**（`needs-owner` 而非臆测）。
 12. **Access policy 变更无需重启 adapter**（每次 inbound 直读）。
 13. **Owner Claim 永不进入 Agent / Session / Binding / Command plane**。
+14. **channel-harness 必须注入 Access Policy Resolver**；未接线不得进入放行路径。
 
 ## Policy Schema
 
 见 `packages/channel-core/src/access.ts`（`ChannelAccessPolicy` + zod schema），
-存储 key：`access:policy:v1:<channelId>:<accountId>`。
+存储 key：`access:policy:v1:<encoded-channelId>:<encoded-accountId>`；两个 ID 分量
+独立使用 `encodeURIComponent` 编码，避免 opaque ID 中的 `:` 造成 key 碰撞。
 
 - `version: 1`；未知版本视为 invalid → DENY。
 - `preset`（owner-only / allowlist / custom）仅用于 Web UX / materialization，

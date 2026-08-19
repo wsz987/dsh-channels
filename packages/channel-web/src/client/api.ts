@@ -374,7 +374,7 @@ export async function beginOwnerClaim(
 ): Promise<PublicOwnerClaimSession> {
   return request<PublicOwnerClaimSession>(
     `/channels/${encodeURIComponent(id)}/access/owner-claims`,
-    { method: 'POST', signal },
+    { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({}), signal },
   );
 }
 
@@ -398,7 +398,7 @@ export async function confirmOwnerClaim(
 ): Promise<ChannelAccessState> {
   return request<ChannelAccessState>(
     `/channels/${encodeURIComponent(id)}/access/owner-claims/${encodeURIComponent(claimId)}/confirm`,
-    { method: 'POST', signal },
+    { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({}), signal },
   );
 }
 

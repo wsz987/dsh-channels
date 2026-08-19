@@ -86,6 +86,15 @@ describe('accessPolicyStorageKey', () => {
     expect(accessPolicyStorageKey('telegram', 'main')).toBe('access:policy:v1:telegram:main');
     expect(accessPolicyStorageKey('lark', 'main')).toBe('access:policy:v1:lark:main');
   });
+
+  it('encodes channel and account components independently', () => {
+    const first = accessPolicyStorageKey('a:b', 'c');
+    const second = accessPolicyStorageKey('a', 'b:c');
+
+    expect(first).toBe('access:policy:v1:a%3Ab:c');
+    expect(second).toBe('access:policy:v1:a:b%3Ac');
+    expect(first).not.toBe(second);
+  });
 });
 
 describe('owner claim command', () => {

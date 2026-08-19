@@ -21,6 +21,7 @@ import { ChannelHarnessBridge } from '../src/bridge.ts';
 import { Config } from '../src/config.ts';
 import { ReplyRouter, splitMessage } from '../src/reply-router.ts';
 import type { ChannelWorkspaceResolver } from '../src/workspace-resolver.ts';
+import { allowAllAccessResolver } from './access-test-helper.ts';
 import { ReplyContextStore } from '../src/reply-context-store.ts';
 import { SESSION_BINDING_SCHEMA_VERSION, bindingKey, sessionKey, type SessionBinding } from '../src/session-router.ts';
 import { partsToText, toHarnessUserMessage } from '../src/message-converter.ts';
@@ -669,6 +670,7 @@ describe('ChannelHarnessBridge end-to-end', () => {
         getAdapter: () => adapter as never,
         replyContexts,
         logger: silentLogger,
+        accessResolver: allowAllAccessResolver,
         saveImage,
         ctx,
         commandDeps: { startNewSession: async () => {} },
@@ -724,6 +726,7 @@ describe('ChannelHarnessBridge end-to-end', () => {
       getAdapter: () => new FakeAdapter('weixin') as never,
       replyContexts,
       logger: silentLogger,
+      accessResolver: allowAllAccessResolver,
       ctx: new Context(),
       commandDeps: { startNewSession: async () => {} },
       workspaceResolver: noopResolver,
@@ -758,6 +761,7 @@ describe('ChannelHarnessBridge end-to-end', () => {
       getAdapter: () => new FakeAdapter('weixin') as never,
       replyContexts: new ReplyContextStore(),
       logger: silentLogger,
+      accessResolver: allowAllAccessResolver,
       ctx: new Context(),
       commandDeps: { startNewSession: async () => {} },
       workspaceResolver: noopResolver,
@@ -1015,6 +1019,7 @@ describe('bridge integration with ChannelService events', () => {
       getAdapter: (id) => service.get(id),
       replyContexts: new ReplyContextStore(),
       logger: silentLogger,
+      accessResolver: allowAllAccessResolver,
       ctx: new Context(),
       commandDeps: { startNewSession: async () => {} },
       workspaceResolver: noopResolver,
@@ -1062,6 +1067,7 @@ describe('bridge integration with ChannelService events', () => {
       getAdapter: () => undefined,
       replyContexts: new ReplyContextStore(),
       logger,
+      accessResolver: allowAllAccessResolver,
       fileProvider,
       ctx,
       commandDeps: { startNewSession: async () => {} },

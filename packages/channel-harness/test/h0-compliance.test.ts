@@ -30,6 +30,7 @@ import { Config } from '../src/config.ts';
 import { ReplyRouter } from '../src/reply-router.ts';
 import { ReplyContextStore } from '../src/reply-context-store.ts';
 import type { ChannelWorkspaceResolver } from '../src/workspace-resolver.ts';
+import { allowAllAccessResolver } from './access-test-helper.ts';
 import { SESSION_BINDING_SCHEMA_VERSION, type SessionBinding } from '../src/session-router.ts';
 
 const silentLogger = {
@@ -138,6 +139,7 @@ function makeBridge(gateway: FakeGateway) {
     getAdapter: () => undefined,
     replyContexts: seededContext(new ReplyContextStore()),
     logger: silentLogger,
+    accessResolver: allowAllAccessResolver,
     ctx: new Context(),
     commandDeps: { startNewSession: async () => {} },
     workspaceResolver: noopResolver,

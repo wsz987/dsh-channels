@@ -31,6 +31,7 @@ import { Config as HarnessConfig } from '../../channel-harness/src/config.ts';
 import { ReplyContextStore } from '../../channel-harness/src/reply-context-store.ts';
 import { sessionKey } from '../../channel-harness/src/session-router.ts';
 import type { ChannelWorkspaceResolver } from '../../channel-harness/src/workspace-resolver.ts';
+import { allowAllAccessResolver } from '../../channel-harness/test/access-test-helper.ts';
 import { mapInbound } from '../src/mapper.ts';
 
 /** Minimal in-memory gateway recording every drive call. */
@@ -129,6 +130,7 @@ function makeBridge() {
     getAdapter: () => undefined,
     replyContexts: new ReplyContextStore(),
     logger: silentLogger,
+    accessResolver: allowAllAccessResolver,
     ctx: new Context(),
     commandDeps: { startNewSession: async () => {} },
     workspaceResolver: noopResolver,

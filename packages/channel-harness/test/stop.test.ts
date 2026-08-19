@@ -28,6 +28,7 @@ import { ChannelHarnessBridge } from '../src/bridge.ts';
 import { Config } from '../src/config.ts';
 import { ReplyContextStore } from '../src/reply-context-store.ts';
 import type { ChannelWorkspaceResolver } from '../src/workspace-resolver.ts';
+import { allowAllAccessResolver } from './access-test-helper.ts';
 
 const defaultRoute: AgentRouteSpec = { preset: 'default' };
 
@@ -190,6 +191,7 @@ function makeBridge(rootCtx: Context): Fixture {
     getAdapter: () => adapter as never,
     replyContexts: new ReplyContextStore(),
     logger: silentLogger,
+    accessResolver: allowAllAccessResolver,
     ctx: rootCtx,
     commandDeps: { startNewSession: (agent) => bridge.startNewSession(agent) },
     workspaceResolver: noopResolver,

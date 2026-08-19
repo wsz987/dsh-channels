@@ -1,7 +1,7 @@
 # Channel Identity Map
 
 按渠道记录 canonical identity、dm/group 判定、thread 语义、owner discovery 与
-mention 支持。所有 ID 一律作为 **opaque string** 处理（trim 两端空白后 exact compare；
+mention 支持。所有 ID 一律作为 **opaque string** 处理（在 Harness admission 前 trim 两端空白后 exact compare；
 禁止 lowercase / username / fuzzy / raw fallback 参与 ACL）。
 
 ## Weixin

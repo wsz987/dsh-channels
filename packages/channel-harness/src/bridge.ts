@@ -84,6 +84,10 @@ import type {
 } from './access/resolver.js';
 import type { AccessDecisionReason } from './access/decision.js';
 
+function trimBrandedId<T extends string>(value: T): T {
+  return value.trim() as T;
+}
+
 export interface ChannelHarnessBridgeOptions {
   config: Config;
   bindingStore: SessionBindingStore;
@@ -92,13 +96,8 @@ export interface ChannelHarnessBridgeOptions {
   getAdapter(channelId: string): ChannelAdapter | undefined;
   replyContexts: ReplyContextStore;
   logger: ChannelLogger;
-  /**
-   * Optional fail-closed Access Gate resolver (plan §17, §32). When ABSENT the
-   * bridge runs in "unwired" (backward-test-compat) mode and SKIPS the gate so
-   * existing harness unit tests that don't wire a resolver keep passing.
-   * Production lifecycle ALWAYS provides it.
-   */
-  accessResolver?: ChannelAccessPolicyResolver;
+  /** Fail-closed Access Gate resolver (plan §17, §32). */
+  accessResolver: ChannelAccessPolicyResolver;
   /**
    * Namespaced logger for access decisions (plan §42, namespace
    * `channel-access`). Falls back to `logger` when not provided. Never logs
@@ -189,6 +188,9 @@ export class ChannelHarnessBridge {
   private readonly accessController = new InboundAccessController();
 
   constructor(private readonly options: ChannelHarnessBridgeOptions) {
+    if (!options.accessResolver) {
+      throw new Error('channel-harness requires an access policy resolver');
+    }
     this.modelSelection =
       options.commandDeps.modelSelection ?? new ChannelModelSelectionController(options.ctx);
     // Every Harness service reach is bridged LAZILY from the plugin context
@@ -287,7 +289,8 @@ export class ChannelHarnessBridge {
     // text blocks), never on the '[channel=.. sender=.. message=..] ' metadata
     // prefix the model-facing converter prepends, and never after a trim (the
     // official parseCommand requires '/' at byte zero — spec §5).
-    const text = event.message.content
+    const normalizedEvent = this.normalizeInboundIdentity(event);
+    const text = normalizedEvent.message.content
       .filter((part): part is TextPart => part.type === 'text')
       .map((part) => part.text)
       .join('');
@@ -299,9 +302,9 @@ export class ChannelHarnessBridge {
     // (incl. /stop fast path — an unauthorized user can never cancel a live
     // agent or bump the generation, plan §33).
     // ------------------------------------------------------------------
-    if (await this.enforceAccessGate(event, text)) return;
+    if (await this.enforceAccessGate(normalizedEvent, text)) return;
 
-    const key = this.conversationKey(event);
+    const key = this.conversationKey(normalizedEvent);
     const parsed = parseCommand(text);
 
     // P0: /stop is handled on a FAST PATH AND RUNS IMMEDIATELY — it must
@@ -312,7 +315,7 @@ export class ChannelHarnessBridge {
     // at its next generation check and can never re-wake the agent.
     if (parsed?.name === 'stop') {
       try {
-        await this.handleImmediateStop(event, key, text);
+        await this.handleImmediateStop(normalizedEvent, key, text);
       } catch (error) {
         this.options.logger.error(
           `[channel-harness] /stop handling failed for conversation '${key}'`,
@@ -324,8 +327,22 @@ export class ChannelHarnessBridge {
 
     const generation = this.generationOf(key);
     await this.enqueueSelf(key, () =>
-      this.handleQueuedMessage(event, key, text, parsed, generation),
+      this.handleQueuedMessage(normalizedEvent, key, text, parsed, generation),
     );
+  }
+
+  /** Apply the contract's only identity normalization before any side effect. */
+  private normalizeInboundIdentity(event: MessageReceived): MessageReceived {
+    const senderId = trimBrandedId(event.sender.id);
+    const conversationId = trimBrandedId(event.conversation.id);
+    if (senderId === event.sender.id && conversationId === event.conversation.id) {
+      return event;
+    }
+    return {
+      ...event,
+      sender: { ...event.sender, id: senderId },
+      conversation: { ...event.conversation, id: conversationId },
+    };
   }
 
   /**
@@ -442,9 +459,8 @@ export class ChannelHarnessBridge {
    * Order (plan §32):
    *   1. Reserved claim suppression (/dsh-claim never reaches anything).
    *   2. Identity validation (plan §9): sender + conversation ids.
-   *   3. Unwired mode: no resolver -> skip the gate (backward-test-compat).
-   *   4. Resolve policy (missing/invalid -> drop, fail closed).
-   *   5. Authorize (security gate) + activate (activation gate).
+   *   3. Resolve policy (missing/invalid -> drop, fail closed).
+   *   4. Authorize (security gate) + activate (activation gate).
    *
    * Logging follows plan §42: `channel-access` logger, minimal fields
    * (channel / account / conversationType / reason), never message body,
@@ -481,12 +497,7 @@ export class ChannelHarnessBridge {
       return true;
     }
 
-    // 3. Unwired mode: no resolver -> skip the gate entirely (allow), so
-    //    existing harness unit tests that don't wire a resolver keep passing.
-    //    Production lifecycle ALWAYS provides it.
-    if (!this.options.accessResolver) return false;
-
-    // 4. Resolve the policy (fail closed; plan §15/§17).
+    // 3. Resolve the policy (fail closed; plan §15/§17).
     let resolved: ResolvedAccessPolicy;
     try {
       resolved = await this.options.accessResolver.resolve(event.channel, event.accountId);
@@ -503,7 +514,7 @@ export class ChannelHarnessBridge {
       return true;
     }
 
-    // 5. Authorize (Security Gate) then activate (Activation Gate).
+    // 4. Authorize (Security Gate) then activate (Activation Gate).
     const decision = this.accessController.authorize({
       conversationType: event.conversation.type,
       senderId,

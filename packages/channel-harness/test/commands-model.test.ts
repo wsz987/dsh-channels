@@ -26,6 +26,7 @@ import { Config } from '../src/config.ts';
 import { ReplyContextStore } from '../src/reply-context-store.ts';
 import { ChannelModelSelectionController } from '../src/model-selection.ts';
 import type { ChannelWorkspaceResolver } from '../src/workspace-resolver.ts';
+import { allowAllAccessResolver } from './access-test-helper.ts';
 
 const defaultRoute: AgentRouteSpec = { preset: 'default' };
 const silentLogger = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
@@ -168,6 +169,7 @@ function makeBridge(rootCtx: Context, modelSelection = new ChannelModelSelection
     getAdapter: () => adapter as never,
     replyContexts: new ReplyContextStore(),
     logger: silentLogger,
+    accessResolver: allowAllAccessResolver,
     ctx: rootCtx,
     commandDeps: { startNewSession: (agent) => bridge.startNewSession(agent), modelSelection },
     workspaceResolver: noopResolver,

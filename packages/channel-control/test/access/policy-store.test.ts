@@ -65,6 +65,15 @@ describe('ChannelStorageAccessPolicyStore', () => {
       JSON.stringify({ version: 99, preset: 'nope' }),
     );
   });
+
+  it('malformed stored JSON is treated as invalid without throwing', async () => {
+    const storage: ChannelStorage = new MemoryStorage();
+    const store = new ChannelStorageAccessPolicyStore(() => storage);
+    await storage.set('access:policy:v1:lark:main', '{not-json');
+
+    await expect(store.get('lark', 'main')).resolves.toBeUndefined();
+    await expect(store.getRaw('lark', 'main')).resolves.toBe('{not-json');
+  });
 });
 
 describe('MemoryAccessPolicyStore', () => {
