@@ -103,6 +103,7 @@ export class ChannelControlService extends Service {
       registry: this.definitions,
       store: accessStore,
       resolveOwnerIdentity,
+      logger: this.ctx.logger('channel-control'),
     });
     this.ownerClaims = new OwnerClaimSessionManager({
       registry: this.definitions,

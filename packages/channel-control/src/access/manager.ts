@@ -13,6 +13,7 @@
  * No secret ever passes through here: only canonical sender/group IDs.
  */
 import type {
+  ChannelLogger,
   ChannelAccessPolicy,
 } from '@wsz987/channel-core';
 import { ChannelDefinitionRegistry } from '../definitions/registry.js';
@@ -40,17 +41,20 @@ export interface ChannelAccessManagerOptions {
    * no-op (returns undefined) for channels that do not implement it.
    */
   resolveOwnerIdentity(channelId: string, accountId: string): Promise<string | undefined>;
+  logger?: Pick<ChannelLogger, 'info' | 'warn'>;
 }
 
 export class ChannelAccessManager {
   private readonly registry: ChannelDefinitionRegistry;
   private readonly store: ReadableChannelAccessPolicyStore;
   private readonly resolveOwnerIdentity: ChannelAccessManagerOptions['resolveOwnerIdentity'];
+  private readonly logger: Pick<ChannelLogger, 'info' | 'warn'>;
 
   constructor(options: ChannelAccessManagerOptions) {
     this.registry = options.registry;
     this.store = options.store;
     this.resolveOwnerIdentity = options.resolveOwnerIdentity;
+    this.logger = options.logger ?? { info: () => {}, warn: () => {} };
   }
 
   /** Compute the access state for one channel+account (plan §24, §27). */
@@ -79,6 +83,7 @@ export class ChannelAccessManager {
       if (ownerId) {
         const policy = ownerOnlyPolicy(ownerId);
         await this.store.set(channelId, accountId, policy);
+        this.logger.info(`[channel-control] access policy bootstrapped (channel=${channelId}, account=${accountId}, operation=owner-bootstrap, preset=owner-only, readiness=ready)`);
         return this.buildState(descriptor, 'ready', policy, {
           configured: true,
           id: ownerId,
@@ -105,10 +110,13 @@ export class ChannelAccessManager {
     const definition = this.registry.require(channelId);
     const result = validateAccessPolicy(policy, definition.access);
     if (!result.ok) {
+      this.logger.warn(`[channel-control] access policy rejected (channel=${channelId}, account=${accountId}, operation=save, reason=validation)`);
       throw new ControlError('INVALID_ACCESS_POLICY', result.error);
     }
     await this.store.set(channelId, accountId, result.policy);
-    return this.getState(channelId, accountId);
+    const state = await this.getState(channelId, accountId);
+    this.logger.info(`[channel-control] access policy saved (channel=${channelId}, account=${accountId}, operation=save, preset=${result.policy.preset}, dmPolicy=${result.policy.dmPolicy}, groupPolicy=${result.policy.groupPolicy}, readiness=${state.readiness})`);
+    return state;
   }
 
   private buildState(

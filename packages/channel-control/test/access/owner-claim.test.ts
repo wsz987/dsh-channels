@@ -143,10 +143,13 @@ describe('OwnerClaimSessionManager.begin', () => {
   });
 
   it('allows a new claim after the prior was cancelled', () => {
-    const { manager } = makeManager();
+    const { manager, logger } = makeManager();
     const first = manager.begin('qq');
     manager.cancel('qq', first.id);
     expect(() => manager.begin('qq')).not.toThrow();
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('owner claim started'));
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('owner claim cancelled'));
+    expect(logger.info.mock.calls.flat().join(' ')).not.toContain(first.challengeCode);
   });
 });
 

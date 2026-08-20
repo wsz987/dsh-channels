@@ -17,6 +17,7 @@ import {
   type ChannelAccessPolicy,
 } from '@wsz987/channel-core';
 import type { ChannelAccessDescriptor } from '../types.js';
+import { materializeAccessPolicy } from './materialize.js';
 
 export type AccessValidationResult =
   | { ok: true; policy: ChannelAccessPolicy }
@@ -95,5 +96,5 @@ export function validateAccessPolicy(
     groups,
   };
 
-  return { ok: true, policy: normalized };
+  return { ok: true, policy: materializeAccessPolicy(normalized) };
 }

@@ -144,6 +144,7 @@ export class OwnerClaimSessionManager {
       createdAt: now,
     };
     this.sessions.set(key, session);
+    this.logger.info(`[channel-control] owner claim started (channel=${channelId}, account=${accountId}, operation=claim-begin, expiresAt=${session.expiresAt})`);
     return this.publicView(session);
   }
 
@@ -166,6 +167,7 @@ export class OwnerClaimSessionManager {
       throw new ControlError('CLAIM_INVALID', 'a confirmed owner claim cannot be cancelled');
     }
     session.phase = 'cancelled';
+    this.logger.info(`[channel-control] owner claim cancelled (channel=${channelId}, account=${session.accountId}, operation=claim-cancel)`);
   }
 
   /**

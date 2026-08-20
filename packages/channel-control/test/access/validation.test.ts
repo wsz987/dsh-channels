@@ -38,6 +38,19 @@ describe('validateAccessPolicy — structural / zod', () => {
     expect(result.ok).toBe(true);
   });
 
+  it('materializes allowlist preset as a DM allowlist even when the client sends open', () => {
+    const result = validateAccessPolicy(
+      basePolicy({ preset: 'allowlist', dmPolicy: 'open', allowFrom: ['owner-1'] }),
+      fullDescriptor,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.policy.dmPolicy).toBe('allowlist');
+      expect(result.policy.groupPolicy).toBe('disabled');
+      expect(result.policy.groups).toEqual({});
+    }
+  });
+
   it('rejects an unknown schema version (unknown versions fail closed)', () => {
     const result = validateAccessPolicy(
       { version: 99, preset: 'allowlist', dmPolicy: 'allowlist', allowFrom: [], groupPolicy: 'disabled', groups: {} },
@@ -61,6 +74,7 @@ describe('validateAccessPolicy — descriptor gating', () => {
     const descriptor: ChannelAccessDescriptor = { ...fullDescriptor, mentions: false };
     const result = validateAccessPolicy(
       basePolicy({
+        preset: 'custom',
         groupPolicy: 'allowlist',
         groups: {
           g1: { enabled: true, senderPolicy: 'allowlist', allowFrom: ['owner-1'], requireMention: true },
@@ -76,6 +90,7 @@ describe('validateAccessPolicy — descriptor gating', () => {
     const descriptor: ChannelAccessDescriptor = { ...fullDescriptor, groups: false };
     const result = validateAccessPolicy(
       basePolicy({
+        preset: 'custom',
         groupPolicy: 'allowlist',
         groups: {
           g1: { enabled: true, senderPolicy: 'allowlist', allowFrom: ['owner-1'], requireMention: false },
@@ -121,6 +136,7 @@ describe('validateAccessPolicy — normalization', () => {
   it('dedupes and trims group rule allowFrom but never lowercases or fuzzes', () => {
     const result = validateAccessPolicy(
       basePolicy({
+        preset: 'custom',
         groupPolicy: 'allowlist',
         groups: {
           g1: {

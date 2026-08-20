@@ -11,6 +11,17 @@
  */
 import type { ChannelAccessPolicy } from '@wsz987/channel-core';
 
+/** Keep the persisted policy aligned with its user-facing preset. */
+export function materializeAccessPolicy(policy: ChannelAccessPolicy): ChannelAccessPolicy {
+  if (policy.preset === 'owner-only') {
+    return { ...policy, dmPolicy: 'allowlist', allowFrom: policy.ownerId ? [policy.ownerId] : [], groupPolicy: 'disabled', groups: {} };
+  }
+  if (policy.preset === 'allowlist') {
+    return { ...policy, dmPolicy: 'allowlist', groupPolicy: 'disabled', groups: {} };
+  }
+  return policy;
+}
+
 /** The canonical owner-only policy materialization (plan §6 / §24 / §25). */
 export function ownerOnlyPolicy(ownerId: string): ChannelAccessPolicy {
   return {
