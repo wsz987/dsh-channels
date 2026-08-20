@@ -16,9 +16,10 @@ metadata:
 
 # DSH Channels Verification Skill
 
-> **归档：** 本文是 `.agents/skills/dsh-channels-verification/`（含 `SKILL.md` 与
-> `references/*`）的**过时冗余副本**，仓库内不再引用。核验流程请以当前安装的 Skill
-> 目录为准。
+> **定位：** 本文与 `.agents/skills/dsh-channels-verification/`（`SKILL.md` +
+> `references/*`）**配套并存**，两者交叉核对以**防止平台权限/能力漂移**——Skill 目录是
+> 可被 agent 加载的可执行指引，本文是同一核验内容的持久化快照，用于跨会话检索与
+> 权限基线对照。发现二者不一致时以当前代码 + 官方平台文档为准。
 
 > **快照基线**：`main@78655a40a266c4122ecd0c030b0a882fdb92f2df`（2026-08-19）。
 >

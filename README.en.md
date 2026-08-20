@@ -210,7 +210,7 @@ pnpm ci:check
 - [Third-party adapter authoring guide](docs/adapter-authoring.md)
 - [Release pipeline](docs/release.md)
 - [Weixin live verification runbook](docs/weixin-live-verification-runbook.md)
-- [Archived docs (historical plans / superseded records)](docs/archive/)
+- [Channel permission verification (APIs / scopes / upstream drift)](docs/channel-platform-verification.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 - Per-package READMEs: `packages/*/README.md` (install / config / dev notes for each package)
 

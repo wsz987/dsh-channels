@@ -209,7 +209,7 @@ pnpm ci:check
 - [第三方渠道接入指南](docs/adapter-authoring.md)
 - [发布流程](docs/release.md)
 - [微信 live 验证手册](docs/weixin-live-verification-runbook.md)
-- [归档文档（历史计划/已取代记录）](docs/archive/)
+- [渠道权限核验（接口/权限/上游漂移对照）](docs/channel-platform-verification.md)
 - [第三方版权声明](THIRD_PARTY_NOTICES.md)
 - 各子包 README：`packages/*/README.md`（每个包的安装、配置、开发说明）
 

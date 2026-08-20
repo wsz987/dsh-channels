@@ -1,6 +1,6 @@
 # Inbound Access Control
 
-> 权威 as-built 安全参考。历史实现计划已归档至 `docs/archive/`；本文档是长期权威来源。
+> 权威 as-built 安全参考。本文档是长期权威来源。
 
 ## 目标与不变量
 
