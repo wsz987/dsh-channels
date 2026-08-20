@@ -1,6 +1,6 @@
 {
   "name": "dsh-channels",
-  "version": "0.4.0-beta.0",
+  "version": "0.4.1-beta.0",
   "private": true,
   "description": "Connect WeChat, QQ, DingTalk, Lark and Telegram to DeepSeek Harness — unified config, QR-code auth, chat with your Agent from IM",
   "type": "module",
