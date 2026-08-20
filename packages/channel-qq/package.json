@@ -1,6 +1,6 @@
 {
   "name": "@wsz987/channel-qq",
-  "version": "0.4.0",
+  "version": "0.4.0-beta.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/wsz987/dsh-channels.git"
