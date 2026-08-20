@@ -20,7 +20,7 @@
  * collapsed row (clicking it must not expand the row).
  */
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { IconTriangleRightFill14, StateDot } from '@deepseek-ai/dsh-client-ui-primitives';
+import { Button, IconTriangleRightFill14, StateDot } from '@deepseek-ai/dsh-client-ui-primitives';
 import {
   applySetup,
   fetchSetup,
@@ -28,7 +28,12 @@ import {
   type ChannelSetupDescriptor,
   type ChannelSummary,
 } from './api.js';
-import { channelWebTitle, type ChannelWebDefinition } from './channelRegistry.js';
+import {
+  channelWebTitle,
+  hasAlternativeCredentials,
+  needsConfigBeforeAuth,
+  type ChannelWebDefinition,
+} from './channelRegistry.js';
 import { ChannelBrandIcon } from './components/ChannelBrandIcon.js';
 import { Switch } from './components/Switch.js';
 import { ChannelSetup } from './ChannelSetup.js';
@@ -76,6 +81,7 @@ export function ChannelRow(props: ChannelRowProps) {
   const [setupError, setSetupError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [edited, setEdited] = useState<Set<string>>(new Set());
+  const [showCredentialSetup, setShowCredentialSetup] = useState(false);
 
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -110,6 +116,7 @@ export function ChannelRow(props: ChannelRowProps) {
   // Fetch the descriptor whenever the row is opened (W6: only expanded rows).
   useEffect(() => {
     if (!open) return;
+    setShowCredentialSetup(false);
     setSetupLoading(true);
     loadSetup();
     return () => setupController.current?.abort();
@@ -171,6 +178,18 @@ export function ChannelRow(props: ChannelRowProps) {
     loadSetup();
     onChanged();
   };
+
+  const handleAuthorized = () => {
+    loadSetup();
+    onChanged();
+  };
+
+  const alternativeCredentials = descriptor
+    ? hasAlternativeCredentials(web, descriptor)
+    : false;
+  const authDeferred = descriptor
+    ? needsConfigBeforeAuth(web, descriptor)
+    : false;
 
   const accent = web.accent ?? 'var(--dsw-alias-label-tertiary)';
 
@@ -294,29 +313,68 @@ export function ChannelRow(props: ChannelRowProps) {
           }}
           data-testid="channel-row-body"
         >
-          <ChannelSetup
-            channel={channel}
-            web={web}
-            descriptor={descriptor}
-            loading={setupLoading}
-            loadError={setupError}
-            drafts={drafts}
-            edited={edited}
-            onDraftsChange={setDrafts}
-            onEditedChange={setEdited}
-            t={t}
-            onSaved={handleSetupSaved}
-          />
+          {alternativeCredentials && (
+            <div
+              role="group"
+              aria-label={t('setupMethod')}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(min(128px, 100%), 1fr))',
+                gap: 6,
+                width: 'min(100%, 320px)',
+              }}
+              data-testid="setup-method-selector"
+            >
+              <Button
+                type="button"
+                size="sm"
+                variant={!showCredentialSetup ? 'primary' : 'ghost'}
+                style={{ width: '100%', whiteSpace: 'nowrap' }}
+                aria-pressed={!showCredentialSetup}
+                onClick={() => setShowCredentialSetup(false)}
+              >
+                {t('scanAuthTab')}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={showCredentialSetup ? 'primary' : 'ghost'}
+                style={{ width: '100%', whiteSpace: 'nowrap' }}
+                aria-pressed={showCredentialSetup}
+                onClick={() => setShowCredentialSetup(true)}
+              >
+                {t('existingCredentialsTab')}
+              </Button>
+            </div>
+          )}
 
-          <ChannelAuth
-            channel={channel}
-            web={web}
-            descriptor={descriptor}
-            hasUnsavedSetup={hasUnsavedSetup}
-            saveSetup={saveSetupForAuth}
-            onAuthorized={onChanged}
-            t={t}
-          />
+          {(!alternativeCredentials || showCredentialSetup) && (
+            <ChannelSetup
+              channel={channel}
+              web={web}
+              descriptor={descriptor}
+              loading={setupLoading}
+              loadError={setupError}
+              drafts={drafts}
+              edited={edited}
+              onDraftsChange={setDrafts}
+              onEditedChange={setEdited}
+              t={t}
+              onSaved={handleSetupSaved}
+            />
+          )}
+
+          {(!alternativeCredentials || !showCredentialSetup) && !authDeferred && (
+            <ChannelAuth
+              channel={channel}
+              web={web}
+              descriptor={descriptor}
+              hasUnsavedSetup={hasUnsavedSetup}
+              saveSetup={saveSetupForAuth}
+              onAuthorized={handleAuthorized}
+              t={t}
+            />
+          )}
 
           <ChannelAccess channel={channel} web={web} t={t} onChanged={onChanged} />
         </div>

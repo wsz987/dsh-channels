@@ -14,6 +14,8 @@
  */
 import type { AuthMethod, ChannelSetupDescriptor } from './api.js';
 
+export type SetupMethod = AuthMethod | 'credentials';
+
 export interface ChannelWebDefinition {
   id: string;
   /** Stable sort order in the directory (lower first). */
@@ -40,6 +42,13 @@ export interface ChannelWebDefinition {
    * configured. e.g. Lark `hybrid: ['appId', 'appSecret']`.
    */
   authRequiresConfigured?: Partial<Record<AuthMethod, string[]>>;
+
+  /**
+   * Primary setup path. When this is an interactive auth method and credential
+   * fields also exist, Web presents credentials as an alternative mode instead
+   * of rendering both workflows at once.
+   */
+  preferredSetupMethod?: SetupMethod;
 
 }
 
@@ -70,6 +79,7 @@ export const CHANNEL_WEB: Record<string, ChannelWebDefinition> = {
     titleKey: 'channelDingtalk',
     introKey: 'setupIntroDingtalk',
     docsUrl: 'https://open.dingtalk.com/document/',
+    preferredSetupMethod: 'device',
   },
 
   lark: {
@@ -78,6 +88,7 @@ export const CHANNEL_WEB: Record<string, ChannelWebDefinition> = {
     titleKey: 'channelLark',
     introKey: 'setupIntroLark',
     docsUrl: 'https://open.feishu.cn/document/',
+    preferredSetupMethod: 'credentials',
 
     authRequiresConfigured: {
       hybrid: ['appId', 'appSecret'],
@@ -123,8 +134,6 @@ export function channelWebTitle(definition: ChannelWebDefinition, t: (key: strin
 // Generic setup logic (replaces the removed per-channel branches in authSetup.ts)
 // ---------------------------------------------------------------------------
 
-export type SetupMethod = AuthMethod | 'credentials';
-
 /** Preserve the provider-declared order while retaining an implicit credentials form. */
 export function setupMethods(descriptor: ChannelSetupDescriptor): SetupMethod[] {
   const methods: SetupMethod[] = [...descriptor.authMethods];
@@ -132,6 +141,18 @@ export function setupMethods(descriptor: ChannelSetupDescriptor): SetupMethod[] 
     methods.unshift('credentials');
   }
   return methods;
+}
+
+/** Whether credential fields are an alternative to the preferred interactive flow. */
+export function hasAlternativeCredentials(
+  web: ChannelWebDefinition,
+  descriptor: ChannelSetupDescriptor,
+): boolean {
+  const preferred = web.preferredSetupMethod;
+  return preferred !== undefined
+    && preferred !== 'credentials'
+    && descriptor.fields.length > 0
+    && setupMethods(descriptor).includes(preferred);
 }
 
 /**
@@ -176,6 +197,7 @@ export function channelDocsPlacement(
   descriptor: ChannelSetupDescriptor,
 ): 'setup' | 'auth' | null {
   if (!web.docsUrl) return null;
+  if (hasAlternativeCredentials(web, descriptor)) return 'auth';
   if (descriptor.fields.length > 0) return 'setup';
   return setupMethods(descriptor).some((method) => method !== 'credentials') ? 'auth' : null;
 }

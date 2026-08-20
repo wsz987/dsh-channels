@@ -102,7 +102,7 @@
 保留命令 `/dsh-claim <challengeCode>`（channel-core 提供常量/解析器）。
 
 - 只能由本地 Web/API 主动 begin；16 random bytes 挑战码；5 分钟 TTL；single-use；
-  同一 channel/account 同时最多一个 active claim；只接受 DM；必须有有效 canonical sender.id；
+  同一 channel/account 同时最多一个 active claim，重复 begin 恢复该会话而不替换 challenge；只接受 DM；必须有有效 canonical sender.id；
   收到 candidate 后停止接受新 candidate；candidate 不自动成为 owner；本地 confirm 后才写 owner；
   owner 变化写审计日志。
 - Claim 消息不进入 Agent / Session / Binding / Command plane（Harness 保留并吞掉）。

@@ -10,6 +10,7 @@ import {
   channelWebDefinition,
   channelWebTitle,
   createGenericChannelWebDefinition,
+  hasAlternativeCredentials,
   isSetupMethodAvailable,
   needsConfigBeforeAuth,
   setupIntroKey,
@@ -82,6 +83,20 @@ describe('setup method helpers (generic, no channel branches)', () => {
       'device',
       'credentials',
     ]);
+  });
+
+  it('presents DingTalk credentials as an alternative but keeps Lark credentials primary', () => {
+    const dingtalk: ChannelSetupDescriptor = {
+      authMethods: ['device', 'credentials'],
+      fields: [
+        { name: 'clientId', kind: 'text', secret: false, configured: false, writable: true },
+        { name: 'clientSecret', kind: 'secret', secret: true, configured: false, writable: true },
+      ],
+    };
+    expect(hasAlternativeCredentials(CHANNEL_WEB.dingtalk!, dingtalk)).toBe(true);
+    expect(channelDocsPlacement(CHANNEL_WEB.dingtalk!, dingtalk)).toBe('auth');
+    expect(hasAlternativeCredentials(CHANNEL_WEB.lark!, larkIncomplete)).toBe(false);
+    expect(channelDocsPlacement(CHANNEL_WEB.lark!, larkIncomplete)).toBe('setup');
   });
 
   it('gates hybrid auth on registry-declared prerequisite fields', () => {

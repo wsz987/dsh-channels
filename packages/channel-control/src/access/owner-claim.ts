@@ -18,7 +18,7 @@
  *   4. Single-use: one challenge maps to at most one session, and only the
  *      first valid candidate is captured.
  *   5. Concurrent claims: one active claim per channel/account at a time —
- *      a second begin() rejects (fail-closed) rather than silently replacing.
+ *      a repeated local begin() resumes that session rather than replacing it.
  *   6. Only DM conversations are accepted; group claims are silently ignored.
  *   7. A valid canonical sender.id (non-empty, !== 'unknown') is required.
  *   8. Exact challenge-code match.
@@ -105,9 +105,9 @@ export class OwnerClaimSessionManager {
   /**
    * Begin a NEW owner-claim session for a channel/account (local Web/API only).
    * Rejects CLAIM_NOT_SUPPORTED when the channel does not declare
-   * `ownerDiscovery='claim'`, and CLAIM_INVALID when a claim is already active
-   * for the same channel/account (fail-closed; the holder must cancel or let
-   * it expire first rather than silently invalidating a prior in-flight claim).
+   * `ownerDiscovery='claim'`. A repeated local begin for the same
+   * channel/account resumes the active session so a Web remount can recover
+   * its claim id without replacing the challenge or weakening single-use.
    */
   begin(channelId: string, accountId = 'main'): PublicOwnerClaimSession {
     const definition = this.registry.get(channelId);
@@ -125,11 +125,15 @@ export class OwnerClaimSessionManager {
     }
     const key = this.key(channelId, accountId);
     const existing = this.sessions.get(key);
-    if (existing && existing.phase !== 'expired' && existing.phase !== 'cancelled') {
-      throw new ControlError(
-        'CLAIM_INVALID',
-        `an owner claim is already active for '${channelId}:${accountId}'`,
-      );
+    if (existing) {
+      if (this.isExpired(existing)) {
+        existing.phase = 'expired';
+      } else if (existing.phase === 'waiting-message' || existing.phase === 'candidate') {
+        this.logger.info(
+          `[channel-control] owner claim resumed (channel=${channelId}, account=${accountId}, operation=claim-resume, phase=${existing.phase}, expiresAt=${existing.expiresAt})`,
+        );
+        return this.publicView(existing);
+      }
     }
 
     const challenge = randomBytes(OWNER_CLAIM_CHALLENGE_BYTES).toString('hex');

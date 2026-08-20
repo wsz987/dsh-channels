@@ -134,12 +134,34 @@ describe('OwnerClaimSessionManager.begin', () => {
     );
   });
 
-  it('rejects CLAIM_INVALID when a claim is already active for channel/account', () => {
+  it('resumes the active claim without replacing its id or challenge', () => {
+    const { manager, logger } = makeManager();
+    const first = manager.begin('qq');
+    const resumed = manager.begin('qq');
+    expect(resumed).toEqual(first);
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('owner claim resumed'));
+    expect(logger.info.mock.calls.flat().join(' ')).not.toContain(first.challengeCode);
+  });
+
+  it('starts a new claim when the prior session expired without being polled', () => {
+    let now = 0;
+    const { manager } = makeManager({ now: () => now });
+    const first = manager.begin('qq');
+    now = first.expiresAt + 1;
+    const next = manager.begin('qq');
+    expect(next.id).not.toBe(first.id);
+    expect(next.challengeCode).not.toBe(first.challengeCode);
+  });
+
+  it('starts a new claim after the prior session was confirmed', async () => {
     const { manager } = makeManager();
-    manager.begin('qq');
-    expect(() => manager.begin('qq')).toThrowError(
-      expect.objectContaining({ code: 'CLAIM_INVALID' }),
-    );
+    const first = manager.begin('qq');
+    manager.observe(claimWithCode(manager, first.challengeCode!));
+    await manager.confirm('qq', first.id);
+
+    const next = manager.begin('qq');
+    expect(next.id).not.toBe(first.id);
+    expect(next.phase).toBe('waiting-message');
   });
 
   it('allows a new claim after the prior was cancelled', () => {

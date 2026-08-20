@@ -385,7 +385,6 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
                     ['open', t('dmOpen')],
                   ] as Array<[DirectMessageAccessMode, string]>
                 ).map(([value, label]) => {
-                  const disabled = value === 'owner-only' && !ownerId;
                   return (
                     <label
                       key={value}
@@ -394,20 +393,17 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
                         alignItems: 'center',
                         gap: 6,
                         fontSize: 13,
-                        cursor: disabled ? 'not-allowed' : 'pointer',
+                        cursor: 'pointer',
                         color:
                           value === 'open'
                             ? 'var(--dsw-alias-state-warn-primary)'
-                            : disabled
-                              ? 'var(--dsw-alias-label-tertiary)'
-                              : 'var(--dsw-alias-label-primary)',
+                            : 'var(--dsw-alias-label-primary)',
                       }}
                     >
                       <input
                         type="radio"
                         name="dm-access-mode"
                         checked={dmAccess === value}
-                        disabled={disabled}
                         onChange={() => setDmAccess(value)}
                         data-testid={'dm-' + value}
                       />
