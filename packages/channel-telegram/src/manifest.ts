@@ -9,6 +9,8 @@
  * Offline contract and fixture coverage is not a live-platform verification,
  * so the adapter remains experimental until the Telegram live gate passes.
  */
+import pkg from '../package.json' with { type: 'json' };
+
 export interface TelegramUpstreamManifest {
   reference: string;
   testedVersion: string;
@@ -27,7 +29,7 @@ export interface TelegramManifest {
 /** M5 manifest: direct HTTP protocol, no SDK. */
 export const manifest: TelegramManifest = {
   id: 'telegram',
-  adapterVersion: '0.4.0',
+  adapterVersion: pkg.version,
   upstream: {
     reference: 'Telegram Bot API (https://core.telegram.org/bots/api)',
     testedVersion: '7.10',
