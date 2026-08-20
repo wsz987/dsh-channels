@@ -24,6 +24,7 @@ import {
 } from '../src/index.ts';
 import type { HttpTransport, HttpRequestInit } from '../src/index.ts';
 import type { TelegramConfig } from '../src/config.ts';
+import pkg from '../package.json' with { type: 'json' };
 
 /** Anonymous placeholder token — never a real credential (fixture rule). */
 const TOKEN = 'TEST_BOT_TOKEN_123';
@@ -997,7 +998,8 @@ describe('channel-telegram plugin', () => {
   });
 
   it('exposes an upstream compatibility manifest', () => {
-    expect(manifest).toMatchObject({ id: 'telegram', adapterVersion: '0.4.0', status: 'experimental' });
+    expect(manifest).toMatchObject({ id: 'telegram', status: 'experimental' });
+    expect(manifest.adapterVersion).toBe(pkg.version);
     expect(manifest.upstream.strategy).toBe('source');
     expect(manifest.upstream.reference).toContain('core.telegram.org');
   });
