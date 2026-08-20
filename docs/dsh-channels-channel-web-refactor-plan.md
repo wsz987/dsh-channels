@@ -415,7 +415,6 @@ packages/channel-web/
       ├─ ChannelRow.tsx
       ├─ ChannelSetup.tsx
       ├─ ChannelAuth.tsx
-      ├─ ChannelPermissions.tsx
       ├─ useChannelAuth.ts
       │
       └─ components/
@@ -687,7 +686,7 @@ QQ                    ○ 未配置
     连接状态
     ──────────────────────
 
-    应用配置
+    应用配置             [官方文档 ↗]
 
     App ID
     [__________________]
@@ -701,15 +700,6 @@ QQ                    ○ 未配置
     ──────────────────────
 
     [开始授权]
-
-    权限与事件
-    ──────────────────────
-
-    ✓ 消息接收
-    ✓ 消息发送
-    ! 机器人权限
-
-    [查看官方文档]
 
     高级操作
     ──────────────────────
@@ -766,10 +756,6 @@ Telegram              ○ 未配置
       definition={definition}
     />
 
-    <ChannelPermissions
-      channel={channel}
-      definition={definition}
-    />
   </div>
 )}
 ```
@@ -828,7 +814,7 @@ GET /dsh-channels/api/v2/channels
 0 GET setup
 0 beginAuth
 0 pollAuth
-0 permission probe
+0 access request
 ```
 
 ---
@@ -1511,31 +1497,13 @@ outline）。`channel-web` 据此在本地实现一个小的 `Switch`（
 
 ---
 
-# 26. Permissions UI
+# 26. Platform Permissions UI
 
-平台权限统一由：
+当前不展示平台权限状态。原先由 `channelRegistry.ts` 维护的静态 requirements
+无法证明平台已授权，配合绿色勾会造成误解，因此已删除。
 
-```text
-channel-web/channelRegistry.ts
-```
-
-维护展示信息。
-
-例如：
-
-```ts
-permissions: {
-  docsUrl: '...',
-
-  items: [
-    {
-      id: 'im.message',
-      labelKey: 'larkPermissionMessage',
-      required: true,
-    },
-  ],
-}
-```
+未来只有在 Host 提供真实 permission checker，并能区分 `granted`、`missing`、
+`unknown` 与 `not-applicable` 后，才恢复这一块 UI。
 
 ---
 
@@ -1585,13 +1553,8 @@ Harness Agent
 
 # 28. Permission 检查
 
-第一阶段：
-
-```text
-只展示官方要求
-+
-官方文档
-```
+当前不展示平台权限状态。设置页只在“应用配置”附近提供官方文档入口；没有配置字段的
+渠道将入口放在“授权”标题旁。链接本身不代表权限已经开通。
 
 以后平台支持 API introspection 时：
 
@@ -2113,19 +2076,7 @@ channelId === 'lark'
 
 ## Phase 6 — Permissions
 
-新增：
-
-```text
-ChannelPermissions.tsx
-```
-
-第一阶段：
-
-```text
-docs + static requirement
-```
-
-后续再按需要增加：
+静态 requirements UI 已移除。后续如需恢复，先增加：
 
 ```text
 host-side permission status
@@ -2169,7 +2120,7 @@ host-side permission status
 GET setup = 0
 POST auth = 0
 GET auth poll = 0
-permission probe = 0
+access request = 0
 ```
 
 ---
@@ -2362,7 +2313,7 @@ credential ref
 - [ ] Channel list 来源仅为 Host `/channels`
 - [ ] 使用 Workspace-style `ChannelRow`（ProjectRowItem 交互：role=button / aria-expanded / 箭头旋转 / 整行点击），复用官方 `IconTriangleRightFill14`、`StateDot` 等 primitives 与 `--dsw-*` tokens，不依赖 `ui-workspace` 内部组件
 - [ ] 主设置不再依赖 Dialog
-- [ ] Row 收起时无 setup/auth/permission 请求
+- [ ] Row 收起时无 setup/auth/access 请求
 - [ ] 打开 Row 不自动 beginAuth
 - [ ] Auth 必须用户显式触发
 - [ ] Poll 不使用 `setInterval`

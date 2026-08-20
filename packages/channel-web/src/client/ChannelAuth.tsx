@@ -14,11 +14,13 @@ import { useState } from 'react';
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives';
 import type { AuthMethod, ChannelSetupDescriptor, ChannelSummary } from './api.js';
 import {
+  channelDocsPlacement,
   needsConfigBeforeAuth,
   setupMethods,
   type ChannelWebDefinition,
 } from './channelRegistry.js';
 import { AuthProgress } from './components/AuthProgress.js';
+import { OfficialDocsLink } from './components/OfficialDocsLink.js';
 import { QrCodeDisplay } from './components/QrCodeDisplay.js';
 import { SectionHeading } from './components/SectionHeading.js';
 import { useChannelAuth } from './useChannelAuth.js';
@@ -62,7 +64,14 @@ export function ChannelAuth(props: ChannelAuthProps) {
 
   return (
     <section aria-label={t('authSection')} data-testid="channel-auth">
-      <SectionHeading title={t('authSection')} />
+      <SectionHeading
+        title={t('authSection')}
+        action={
+          descriptor && channelDocsPlacement(web, descriptor) === 'auth' && web.docsUrl
+            ? <OfficialDocsLink href={web.docsUrl} label={t('viewOfficialDocs')} />
+            : undefined
+        }
+      />
 
       {interactiveMethods.length > 1 && (
         <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>

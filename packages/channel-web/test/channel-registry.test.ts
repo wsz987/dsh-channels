@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CHANNEL_WEB,
+  channelDocsPlacement,
   channelWebDefinition,
   channelWebTitle,
   createGenericChannelWebDefinition,
@@ -32,6 +33,27 @@ describe('CHANNEL_WEB built-in metadata', () => {
     expect(channelWebTitle(CHANNEL_WEB.weixin!, t)).toBe('微信');
     expect(channelWebTitle(CHANNEL_WEB.dingtalk!, t)).toBe('钉钉');
     expect(channelWebTitle(CHANNEL_WEB.lark!, t)).toBe('飞书');
+  });
+
+  it('keeps official docs separate from permission status and places one link by setup or auth', () => {
+    expect(CHANNEL_WEB.weixin!.docsUrl).toBe('https://github.com/Tencent/openclaw-weixin');
+    expect(
+      channelDocsPlacement(CHANNEL_WEB.qq!, {
+        authMethods: ['credentials'],
+        fields: [
+          { name: 'appId', kind: 'text', secret: false, configured: false, writable: true },
+        ],
+      }),
+    ).toBe('setup');
+    expect(
+      channelDocsPlacement(CHANNEL_WEB.weixin!, { authMethods: ['qr'], fields: [] }),
+    ).toBe('auth');
+    expect(
+      channelDocsPlacement(createGenericChannelWebDefinition('custom'), {
+        authMethods: ['qr'],
+        fields: [],
+      }),
+    ).toBeNull();
   });
 
   it('falls back to the raw id for an unknown channel', () => {

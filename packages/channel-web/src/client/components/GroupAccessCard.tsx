@@ -8,7 +8,12 @@
  * (only when `descriptor.mentions === true`), and an enabled toggle. Sender
  * 'open' shows the danger warning.
  */
-import type { GroupAccessRule, GroupSenderPolicy } from '../api.js';
+import type { GroupAccessRule } from '../api.js';
+import {
+  groupSenderAccessMode,
+  withGroupSenderAccessMode,
+  type GroupSenderAccessMode,
+} from '../accessPolicyUi.js';
 import { AccessWarning } from './AccessWarning.js';
 import { IdentityListEditor } from './IdentityListEditor.js';
 import { Switch } from './Switch.js';
@@ -17,6 +22,7 @@ export interface GroupAccessCardProps {
   /** Canonical conversation/group id this card edits. */
   groupId: string;
   rule: GroupAccessRule;
+  ownerId?: string;
   mentions: boolean;
   /** Display label for the member identity (e.g. descriptor.identityLabels.user). */
   userLabel: string;
@@ -25,47 +31,42 @@ export interface GroupAccessCardProps {
   t: (key: string) => string;
 }
 
-type SenderOption = 'only-self' | 'specified' | 'all-members-danger';
+export function GroupAccessCard({ groupId, rule, ownerId, mentions, userLabel, onChange, onRemove, t }: GroupAccessCardProps) {
+  const sender = groupSenderAccessMode(rule, ownerId);
 
-function senderToOption(rule: GroupAccessRule): SenderOption {
-  if (rule.senderPolicy === 'open') return 'all-members-danger';
-  return rule.allowFrom.length === 0 ? 'only-self' : 'specified';
-}
-
-export function GroupAccessCard({ groupId, rule, mentions, userLabel, onChange, onRemove, t }: GroupAccessCardProps) {
-  const sender = senderToOption(rule);
-
-  const setSender = (next: SenderOption) => {
-    if (next === 'all-members-danger') {
-      onChange({ ...rule, senderPolicy: 'open' });
-    } else if (next === 'only-self') {
-      onChange({ ...rule, senderPolicy: 'allowlist', allowFrom: [] });
-    } else {
-      onChange({ ...rule, senderPolicy: 'allowlist' });
-    }
+  const setSender = (next: GroupSenderAccessMode) => {
+    onChange(withGroupSenderAccessMode(rule, next, ownerId));
   };
 
-  const radio = (value: SenderOption, label: string, danger = false) => (
-    <label
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        fontSize: 13,
-        cursor: 'pointer',
-        color: danger ? 'var(--dsw-alias-state-warn-primary)' : 'var(--dsw-alias-label-primary)',
-      }}
-    >
-      <input
-        type="radio"
-        name={'group-sender-' + groupId}
-        checked={sender === value}
-        onChange={() => setSender(value)}
-        data-testid={'group-sender-' + value}
-      />
-      {label}
-    </label>
-  );
+  const radio = (value: GroupSenderAccessMode, label: string, danger = false) => {
+    const disabled = value === 'owner-only' && !ownerId;
+    return (
+      <label
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          fontSize: 13,
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          color: danger
+            ? 'var(--dsw-alias-state-warn-primary)'
+            : disabled
+              ? 'var(--dsw-alias-label-tertiary)'
+              : 'var(--dsw-alias-label-primary)',
+        }}
+      >
+        <input
+          type="radio"
+          name={'group-sender-' + groupId}
+          checked={sender === value}
+          disabled={disabled}
+          onChange={() => setSender(value)}
+          data-testid={'group-sender-' + value}
+        />
+        {label}
+      </label>
+    );
+  };
 
   return (
     <div
@@ -124,15 +125,15 @@ export function GroupAccessCard({ groupId, rule, mentions, userLabel, onChange, 
       {rule.enabled && (
         <>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('memberOnly')}</span>
+            <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('memberAccess')}</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-              {radio('only-self', t('memberOnly'))}
-              {radio('specified', t('memberSpecified'))}
-              {radio('all-members-danger', t('memberAllDanger'), true)}
+              {radio('owner-only', t('memberOnly'))}
+              {radio('allowlist', t('memberSpecified'))}
+              {radio('open', t('memberAllDanger'), true)}
             </div>
           </div>
 
-          {sender === 'specified' && (
+          {sender === 'allowlist' && (
             <IdentityListEditor
               ids={rule.allowFrom}
               onChange={(ids) => onChange({ ...rule, allowFrom: ids })}
@@ -141,7 +142,7 @@ export function GroupAccessCard({ groupId, rule, mentions, userLabel, onChange, 
             />
           )}
 
-          {sender === 'all-members-danger' && (
+          {sender === 'open' && (
             <AccessWarning testId="group-open-danger">{t('memberAllDangerHint')}</AccessWarning>
           )}
 

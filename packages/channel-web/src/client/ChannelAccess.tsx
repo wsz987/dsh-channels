@@ -3,9 +3,9 @@
  * §37–§41).
  *
  * This is the access-control ACL editor: owner status + owner-claim flow, the
- * access-mode / preset chooser, DM controls and group controls. It stays
- * DELIBERATELY separate from `ChannelPermissions` (platform permissions) and
- * never touches the Agent model.
+ * independent DM and named-group controls. It stays
+ * DELIBERATELY separate from platform permissions and never touches the Agent
+ * model. The Web UI does not infer or display platform authorization status.
  *
  * Rendered only while the row is open (no collapsed-row access request, red
  * line W6). The only polling is a LOCAL ~2s loop while an owner-claim session
@@ -22,13 +22,19 @@ import {
   fetchAccess,
   fetchOwnerClaim,
   saveAccess,
-  type AccessPreset,
   type ChannelAccessPolicy,
   type ChannelAccessState,
   type ChannelSummary,
-  type DirectMessagePolicy,
   type PublicOwnerClaimSession,
 } from './api.js';
+import {
+  directMessageAccessMode,
+  hasEditableAccessControls,
+  isDirectMessageAccessEditable,
+  prepareAccessPolicyForSave,
+  withDirectMessageAccessMode,
+  type DirectMessageAccessMode,
+} from './accessPolicyUi.js';
 import { type ChannelWebDefinition } from './channelRegistry.js';
 import { AccessWarning } from './components/AccessWarning.js';
 import { GroupAccessCard } from './components/GroupAccessCard.js';
@@ -133,36 +139,25 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
 
   const descriptor = state.descriptor;
   const isAccountDiscovery = descriptor.ownerDiscovery === 'account';
+  const dmAccessEditable = isDirectMessageAccessEditable(descriptor.ownerDiscovery);
+  const accessControlsEditable = hasEditableAccessControls(descriptor.ownerDiscovery, descriptor.groups);
 
   const ownerId = draft.ownerId ?? state.owner.id;
   const ownerIdentified = state.owner.configured || Boolean(ownerId);
 
-  // Materialize the final policy for save based on the selected preset (the
-  // preset is a UX source of truth; enforcement never branches on it).
-  const materialized = (): ChannelAccessPolicy => {
-    if (draft.preset === 'owner-only') {
-      return {
-        ...draft,
-        dmPolicy: 'allowlist',
-        allowFrom: ownerId ? [ownerId] : [],
-        groupPolicy: 'disabled',
-        groups: {},
-      };
-    }
-    if (draft.preset === 'allowlist') {
-      return { ...draft, groupPolicy: 'disabled', groups: {} };
-    }
-    return draft;
-  };
+  const dmAccess = directMessageAccessMode(draft, ownerId);
+  const ownerRequiredBeforeSave = dmAccess === 'owner-only' && !ownerId;
+  const policyForSave = (): ChannelAccessPolicy => prepareAccessPolicyForSave(draft, ownerId);
 
   const submit = async () => {
     setSaving(true);
     setActionError(null);
     setSavedNotice(null);
     try {
-      const saved = await saveAccess(channel.id, materialized());
+      const candidate = policyForSave();
+      const saved = await saveAccess(channel.id, candidate);
       setState(saved);
-      setDraft(saved.policy ?? materialized());
+      setDraft(saved.policy ?? candidate);
       setSavedNotice(t('accessSaved'));
       onChanged();
     } catch (cause) {
@@ -217,13 +212,8 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
     }
   };
 
-  // ---- preset chooser -------------------------------------------------------
-  const setPreset = (preset: AccessPreset) => {
-    setDraft((current) => (current ? { ...current, preset } : current));
-  };
-
-  const setDmPolicy = (dmPolicy: DirectMessagePolicy) => {
-    setDraft((current) => (current ? { ...current, dmPolicy } : current));
+  const setDmAccess = (mode: DirectMessageAccessMode) => {
+    setDraft((current) => (current ? withDirectMessageAccessMode(current, mode, ownerId) : current));
   };
 
   const addGroup = () => {
@@ -235,7 +225,15 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
       return {
         ...current,
         groupPolicy: 'allowlist',
-        groups: { ...current.groups, [id]: { enabled: true, senderPolicy: 'allowlist', allowFrom: [], requireMention: false } },
+        groups: {
+          ...current.groups,
+          [id]: {
+            enabled: true,
+            senderPolicy: 'allowlist',
+            allowFrom: ownerId ? [ownerId] : [],
+            requireMention: false,
+          },
+        },
       };
     });
     setGroupDraft('');
@@ -261,41 +259,6 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
           <AccessWarning testId="access-invalid-policy">{t('readinessInvalidPolicy')}</AccessWarning>
         </div>
       )}
-
-      {/* ---- access mode / preset chooser (plan §39) ---- */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
-        <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('accessMode')}</span>
-        {isAccountDiscovery ? (
-          <div style={{ fontSize: 13, color: 'var(--dsw-alias-label-primary)' }} data-testid="access-mode-fixed">
-            {t('presetOwnerOnlyWeixin')}
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }} data-testid="access-preset">
-            {(
-              [
-                ['owner-only', t('presetOwnerOnly')],
-                ['allowlist', t('presetAllowlist')],
-                ['custom', t('presetCustom')],
-              ] as Array<[AccessPreset, string]>
-            ).map(([value, label]) => (
-              <label
-                key={value}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  fontSize: 13,
-                  cursor: 'pointer',
-                  color: 'var(--dsw-alias-label-primary)',
-                }}
-              >
-                <input type="radio" name="access-preset" checked={draft.preset === value} onChange={() => setPreset(value)} data-testid={'preset-' + value} />
-                {label}
-              </label>
-            ))}
-          </div>
-        )}
-      </div>
 
       {/* ---- owner area (plan §38) ---- */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }} data-testid="access-owner">
@@ -397,8 +360,7 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
       {!isAccountDiscovery || descriptor.directMessages ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }} data-testid="access-dm">
           <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('dmSection')}</span>
-
-          {draft.preset === 'owner-only' && (
+          {!dmAccessEditable ? (
             <div
               style={{
                 display: 'flex',
@@ -407,60 +369,62 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
                 fontSize: 13,
                 color: 'var(--dsw-alias-label-primary)',
               }}
-              data-testid="dm-owner-only"
+              data-testid="dm-owner-only-fixed"
             >
               <span style={{ color: 'var(--dsw-alias-state-success-primary)' }}>✓</span>
-              {t('dmEnabled')} · {t('dmOwnerOnly')}
+              {t('dmOwnerOnly')}
             </div>
-          )}
-
-          {draft.preset === 'allowlist' && (
-            <IdentityListEditor
-              ids={draft.allowFrom}
-              onChange={(ids) => setDraft((c) => (c ? { ...c, allowFrom: ids } : c))}
-              label={t('allowUsers')}
-              t={t}
-            />
-          )}
-
-          {draft.preset === 'custom' && (
+          ) : (
             <>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }} data-testid="dm-policy">
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }} data-testid="dm-access-mode">
                 {(
                   [
                     ['disabled', t('dmDisabled')],
+                    ['owner-only', t('dmOwnerOnly')],
                     ['allowlist', t('dmAllowlist')],
                     ['open', t('dmOpen')],
-                  ] as Array<[DirectMessagePolicy, string]>
-                ).map(([value, label]) => (
-                  <label
-                    key={value}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      fontSize: 13,
-                      cursor: 'pointer',
-                      color:
-                        value === 'open'
-                          ? 'var(--dsw-alias-state-warn-primary)'
-                          : 'var(--dsw-alias-label-primary)',
-                    }}
-                  >
-                    <input type="radio" name="dm-policy" checked={draft.dmPolicy === value} onChange={() => setDmPolicy(value)} data-testid={'dm-' + value} />
-                    {label}
-                  </label>
-                ))}
+                  ] as Array<[DirectMessageAccessMode, string]>
+                ).map(([value, label]) => {
+                  const disabled = value === 'owner-only' && !ownerId;
+                  return (
+                    <label
+                      key={value}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        fontSize: 13,
+                        cursor: disabled ? 'not-allowed' : 'pointer',
+                        color:
+                          value === 'open'
+                            ? 'var(--dsw-alias-state-warn-primary)'
+                            : disabled
+                              ? 'var(--dsw-alias-label-tertiary)'
+                              : 'var(--dsw-alias-label-primary)',
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="dm-access-mode"
+                        checked={dmAccess === value}
+                        disabled={disabled}
+                        onChange={() => setDmAccess(value)}
+                        data-testid={'dm-' + value}
+                      />
+                      {label}
+                    </label>
+                  );
+                })}
               </div>
-              {draft.dmPolicy === 'allowlist' && (
+              {dmAccess === 'allowlist' && (
                 <IdentityListEditor
                   ids={draft.allowFrom}
-                  onChange={(ids) => setDraft((c) => (c ? { ...c, allowFrom: ids } : c))}
+                  onChange={(ids) => setDraft((c) => (c ? { ...c, preset: 'custom', allowFrom: ids } : c))}
                   label={t('allowUsers')}
                   t={t}
                 />
               )}
-              {draft.dmPolicy === 'open' && (
+              {dmAccess === 'open' && (
                 <AccessWarning testId="dm-open-danger">{t('dmOpenDanger')}</AccessWarning>
               )}
             </>
@@ -516,6 +480,7 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
                       key={groupId}
                       groupId={groupId}
                       rule={rule}
+                      ownerId={ownerId}
                       mentions={descriptor.mentions === true}
                       userLabel={descriptor.identityLabels.user}
                       onChange={(next) =>
@@ -537,28 +502,30 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
             </>
           )}
         </div>
-      ) : (
+      ) : dmAccessEditable ? (
         <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)', marginBottom: 16 }} data-testid="access-no-groups">
           {t('noGroupSupport')}
         </div>
-      )}
+      ) : null}
 
       {/* ---- save ---- */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start' }}>
-        <Button variant="primary" size="sm" onClick={() => void submit()} disabled={saving} data-testid="access-save">
-          {saving ? t('saving') : t('saveAccess')}
-        </Button>
-        {savedNotice && (
-          <div style={{ fontSize: 12, color: 'var(--dsw-alias-state-success-primary)' }} data-testid="access-saved">
-            {savedNotice}
-          </div>
-        )}
-        {actionError && (
-          <div style={{ fontSize: 12, color: 'var(--dsw-alias-state-error-primary)' }} data-testid="access-error">
-            {actionError}
-          </div>
-        )}
-      </div>
+      {accessControlsEditable && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start' }}>
+          <Button variant="primary" size="sm" onClick={() => void submit()} disabled={saving || ownerRequiredBeforeSave} data-testid="access-save">
+            {saving ? t('saving') : t('saveAccess')}
+          </Button>
+          {savedNotice && (
+            <div style={{ fontSize: 12, color: 'var(--dsw-alias-state-success-primary)' }} data-testid="access-saved">
+              {savedNotice}
+            </div>
+          )}
+          {actionError && (
+            <div style={{ fontSize: 12, color: 'var(--dsw-alias-state-error-primary)' }} data-testid="access-error">
+              {actionError}
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }

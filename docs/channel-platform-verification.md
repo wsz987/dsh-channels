@@ -164,47 +164,15 @@ weixin:credential:<accountId>
 
 ---
 
-## 5. channel-web 权限面板：必须正确理解
+## 5. channel-web 平台权限展示
 
-当前：
+当前 Web 不展示平台权限状态。原 `ChannelPermissions.tsx` 与
+`channelRegistry.permissions` 只包含静态 presentation metadata，没有平台
+permission probe，已从 UI 和 registry 删除。
 
-```text
-packages/channel-web/src/client/channelRegistry.ts
-packages/channel-web/src/client/ChannelPermissions.tsx
-```
-
-中的 `permissions.items` 是**静态 presentation metadata**。
-
-当前 UI metadata：
-
-| 渠道 | UI permission id |
-|---|---|
-| Weixin | `message.receive`, `message.send` |
-| QQ | `message.receive`, `message.send` |
-| DingTalk | `message.receive`, `message.send` |
-| Lark | `im.message.read`, `im.message.write` |
-| Telegram | `message.receive`, `message.send` |
-
-### 禁止错误推论
-
-看到 UI：
-
-```text
-✓ 接收消息（必需）
-✓ 发送消息（必需）
-```
-
-**不能**推导：
-
-```text
-平台权限已经检测成功
-平台 scope 已开通
-Bot intents 已放行
-App 已发布
-真实消息一定可以收发
-```
-
-当前 `ChannelPermissions.tsx` 没有平台 permission probe。
+设置页因此不会用绿色勾暗示平台 scope、Bot intent、事件订阅、应用发布或真实消息
+收发已经验证。平台配置要求仍记录在本核验文档、README 和各平台官方文档中；
+`channelRegistry.docsUrl` 只提供官方资料入口，不表示任何授权状态。
 
 ### 建议后续架构
 
@@ -442,13 +410,9 @@ getupdates / sendmessage / getuploadurl / getconfig / sendtyping
 
 ## 7. 当前优先级最高的核验发现
 
-### P0 — 不要把静态权限 UI 当成权限检测
+### P0 — 平台权限状态必须来自真实检测
 
-`channel-web` 当前 permission ✓ 是静态渲染。
-
-发布文案应避免让用户误以为“已授权”。
-
-推荐 UI 状态至少区分：
+`channel-web` 已删除静态 permission ✓。未来恢复平台权限 UI 时，状态至少区分：
 
 ```text
 Required（需求说明）
@@ -501,43 +465,14 @@ status        = experimental
 
 Tencent 官方 `openclaw-weixin` 参考协议存在，但 DSH 是 source-port，必须通过真实 iLink gate 后再升级状态。
 
-### P2 — Weixin channel-web docsUrl 不适合作为 iLink 协议核验入口
+### Web 官方文档入口
 
-当前 registry 指向：
+`channelRegistry.docsUrl` 与权限状态完全分离：有配置字段的渠道在“应用配置”标题旁显示，
+微信等无配置字段但有交互授权的渠道在“授权”标题旁显示。微信当前指向腾讯官方
+`https://github.com/Tencent/openclaw-weixin`，不再使用无关的视频号入口。
 
-```text
-https://channels.weixin.qq.com/
-```
-
-这不是当前 DSH iLink source-port 的协议/开发参考。
-
-后续应优先链接：
-
-```text
-https://github.com/Tencent/openclaw-weixin
-```
-
-或腾讯未来发布的正式 host-neutral iLink 开发文档。
-
-### P2 — Lark UI permission ids 过于抽象
-
-当前 registry：
-
-```text
-im.message.read
-im.message.write
-```
-
-平台真实权限至少应映射到：
-
-```text
-im:message.p2p_msg:readonly
-im:message.group_at_msg:readonly
-im:message:send_as_bot
-+ im.message.receive_v1
-```
-
-如果 UI 继续只做说明，应明确叫“能力需求”；如果未来做检测，则必须保存真实 platform scope/event ids。
+未来若实现真实检测，Lark 等渠道必须使用准确的 platform scope/event id，不能复用
+抽象的展示 id。
 
 ---
 
@@ -761,7 +696,7 @@ Stable Core
 
 优先顺序：
 
-1. 修正/重命名 `channel-web` 静态 permission 展示语义
+1. 保持 `channel-web` 不展示静态 permission 状态；恢复前先实现真实 permission checker
 2. QQ 显式最小 intents
 3. Telegram 从 Bot API 7.10 基线升级核验到当前 10.2
 4. Weixin 完成真实 iLink live gate 并 pin version/commit
@@ -1189,7 +1124,6 @@ Control/Web:
 
 - https://github.com/wsz987/dsh-channels/blob/main/packages/channel-control/src/types.ts
 - https://github.com/wsz987/dsh-channels/blob/main/packages/channel-web/src/client/channelRegistry.ts
-- https://github.com/wsz987/dsh-channels/blob/main/packages/channel-web/src/client/ChannelPermissions.tsx
 
 ## DingTalk
 

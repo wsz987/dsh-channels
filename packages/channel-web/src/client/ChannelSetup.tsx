@@ -14,8 +14,9 @@ import {
   type ChannelSetupDescriptor,
   type ChannelSummary,
 } from './api.js';
-import { setupIntroKey, type ChannelWebDefinition } from './channelRegistry.js';
+import { channelDocsPlacement, setupIntroKey, type ChannelWebDefinition } from './channelRegistry.js';
 import { CredentialField } from './components/CredentialField.js';
+import { OfficialDocsLink } from './components/OfficialDocsLink.js';
 import { SectionHeading } from './components/SectionHeading.js';
 
 export interface ChannelSetupProps {
@@ -59,7 +60,14 @@ export function ChannelSetup(props: ChannelSetupProps) {
 
   return (
     <section aria-label={t('setupSection')} data-testid="channel-setup">
-      <SectionHeading title={t('setupSection')} />
+      <SectionHeading
+        title={t('setupSection')}
+        action={
+          channelDocsPlacement(web, descriptor) === 'setup' && web.docsUrl
+            ? <OfficialDocsLink href={web.docsUrl} label={t('viewOfficialDocs')} />
+            : undefined
+        }
+      />
       <SetupForm
         channelId={channel.id}
         descriptor={descriptor}

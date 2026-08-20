@@ -4,7 +4,7 @@
  *
  * This is NOT business logic: the channel list itself comes from the host
  * `GET /channels`; this module only adds display metadata (title copy keys,
- * ordering, accent, field labels, auth prerequisites, permissions, docs links).
+ * ordering, accent, field labels, auth prerequisites and official docs links).
  * Unknown future channels fall back to [createGenericChannelWebDefinition]
  * instead of crashing (plan §7).
  *
@@ -13,13 +13,6 @@
  * registry metadata, never from a `channelId === 'lark'` check.
  */
 import type { AuthMethod, ChannelSetupDescriptor } from './api.js';
-
-export interface ChannelPermissionItem {
-  id: string;
-  /** Locale key for the permission copy. */
-  labelKey: string;
-  required: boolean;
-}
 
 export interface ChannelWebDefinition {
   id: string;
@@ -33,6 +26,9 @@ export interface ChannelWebDefinition {
   /** Locale key for the setup intro copy. */
   introKey?: string;
 
+  /** Official platform or protocol documentation. Never implies permission status. */
+  docsUrl?: string;
+
   /** Brand accent color (used as a subtle tint behind the brand logo). */
   accent?: string;
 
@@ -45,11 +41,6 @@ export interface ChannelWebDefinition {
    */
   authRequiresConfigured?: Partial<Record<AuthMethod, string[]>>;
 
-  /** Static platform permission requirements + official docs link. */
-  permissions?: {
-    docsUrl?: string;
-    items: ChannelPermissionItem[];
-  };
 }
 
 /**
@@ -62,13 +53,7 @@ export const CHANNEL_WEB: Record<string, ChannelWebDefinition> = {
     order: 10,
     titleKey: 'channelWeixin',
     accent: '#07c160',
-    permissions: {
-      docsUrl: 'https://channels.weixin.qq.com/',
-      items: [
-        { id: 'message.receive', labelKey: 'permissionMessageReceive', required: true },
-        { id: 'message.send', labelKey: 'permissionMessageSend', required: true },
-      ],
-    },
+    docsUrl: 'https://github.com/Tencent/openclaw-weixin',
   },
 
   qq: {
@@ -76,13 +61,7 @@ export const CHANNEL_WEB: Record<string, ChannelWebDefinition> = {
     order: 20,
     titleKey: 'channelQq',
     introKey: 'setupIntro',
-    permissions: {
-      docsUrl: 'https://q.qq.com/qqbot/',
-      items: [
-        { id: 'message.receive', labelKey: 'permissionMessageReceive', required: true },
-        { id: 'message.send', labelKey: 'permissionMessageSend', required: true },
-      ],
-    },
+    docsUrl: 'https://q.qq.com/qqbot/',
   },
 
   dingtalk: {
@@ -90,13 +69,7 @@ export const CHANNEL_WEB: Record<string, ChannelWebDefinition> = {
     order: 30,
     titleKey: 'channelDingtalk',
     introKey: 'setupIntroDingtalk',
-    permissions: {
-      docsUrl: 'https://open.dingtalk.com/document/',
-      items: [
-        { id: 'message.receive', labelKey: 'permissionMessageReceive', required: true },
-        { id: 'message.send', labelKey: 'permissionMessageSend', required: true },
-      ],
-    },
+    docsUrl: 'https://open.dingtalk.com/document/',
   },
 
   lark: {
@@ -104,17 +77,10 @@ export const CHANNEL_WEB: Record<string, ChannelWebDefinition> = {
     order: 40,
     titleKey: 'channelLark',
     introKey: 'setupIntroLark',
+    docsUrl: 'https://open.feishu.cn/document/',
 
     authRequiresConfigured: {
       hybrid: ['appId', 'appSecret'],
-    },
-
-    permissions: {
-      docsUrl: 'https://open.feishu.cn/document/',
-      items: [
-        { id: 'im.message.read', labelKey: 'permissionScopeImRead', required: true },
-        { id: 'im.message.write', labelKey: 'permissionScopeImWrite', required: true },
-      ],
     },
   },
 
@@ -123,13 +89,7 @@ export const CHANNEL_WEB: Record<string, ChannelWebDefinition> = {
     order: 50,
     titleKey: 'channelTelegram',
     introKey: 'setupIntroTelegram',
-    permissions: {
-      docsUrl: 'https://core.telegram.org/bots',
-      items: [
-        { id: 'message.receive', labelKey: 'permissionMessageReceive', required: true },
-        { id: 'message.send', labelKey: 'permissionMessageSend', required: true },
-      ],
-    },
+    docsUrl: 'https://core.telegram.org/bots',
   },
 } satisfies Record<string, ChannelWebDefinition>;
 
@@ -208,4 +168,14 @@ export function needsConfigBeforeAuth(
 /** Setup intro copy key: channel-specific when declared, generic otherwise. */
 export function setupIntroKey(web: ChannelWebDefinition): string {
   return web.introKey ?? 'setupIntro';
+}
+
+/** Keep one docs link near the first channel-specific setup/auth interaction. */
+export function channelDocsPlacement(
+  web: ChannelWebDefinition,
+  descriptor: ChannelSetupDescriptor,
+): 'setup' | 'auth' | null {
+  if (!web.docsUrl) return null;
+  if (descriptor.fields.length > 0) return 'setup';
+  return setupMethods(descriptor).some((method) => method !== 'credentials') ? 'auth' : null;
 }

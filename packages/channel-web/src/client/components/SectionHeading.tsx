@@ -3,18 +3,25 @@
  * Extracted so every expanded-channel section uses identical chrome instead of
  * four local copies (plan §38 Phase 7 cleanup).
  */
-export function SectionHeading({ title }: { title: string }) {
+import type { ReactNode } from 'react';
+
+export function SectionHeading({ title, action }: { title: string; action?: ReactNode }) {
   return (
     <div
       style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
         fontSize: 12,
         fontWeight: 600,
-        letterSpacing: 0.4,
+        letterSpacing: 0,
         color: 'var(--dsw-alias-label-secondary)',
         marginBottom: 12,
       }}
     >
-      {title}
+      <span>{title}</span>
+      {action}
     </div>
   );
 }

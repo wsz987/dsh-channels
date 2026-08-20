@@ -12,7 +12,7 @@
  *
  * Exactly one channel is expanded at a time (`openChannelId` in
  * ChannelsSection); the expanded body renders only while `open`, so a collapsed
- * row issues 0 setup / 0 auth / 0 permission requests (red line W6).
+ * row issues 0 setup / 0 auth / 0 access requests (red line W6).
  *
  * The row owns the shared setup descriptor + draft state (so the Auth section
  * can gate its begin button on the same descriptor — plan §17.2) and the
@@ -34,7 +34,6 @@ import { Switch } from './components/Switch.js';
 import { ChannelSetup } from './ChannelSetup.js';
 import { ChannelAuth } from './ChannelAuth.js';
 import { ChannelAccess } from './ChannelAccess.js';
-import { ChannelPermissions } from './ChannelPermissions.js';
 
 /**
  * Row-level hover background via a real CSS `:hover` rule. The official
@@ -320,8 +319,6 @@ export function ChannelRow(props: ChannelRowProps) {
           />
 
           <ChannelAccess channel={channel} web={web} t={t} onChanged={onChanged} />
-
-          <ChannelPermissions channel={channel} web={web} t={t} />
         </div>
       )}
 

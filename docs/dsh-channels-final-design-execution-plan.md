@@ -153,42 +153,24 @@ channels bundle -> plugin composition only
 ✅ 配置主入口不再是旧 Dialog
 ✅ ChannelRow 使用整行 Disclosure
 ✅ 每次仅展开一个渠道
-✅ collapsed row 不发 setup/auth/permission 请求
+✅ collapsed row 不发 setup/auth/access 请求
 ✅ 行内已有直接启用/停用 Switch
-✅ Setup/Auth/Permissions 已拆为通用组件
+✅ Setup/Auth/Access 已拆为通用组件
 ✅ authRequiresConfigured 等平台 UI 差异集中到 registry
 ```
 
-因此本次 Web 工作不是再重构目录，而是在当前：
+当前展开结构为：
 
 ```text
 ChannelRow
   ├─ ChannelSetup
   ├─ ChannelAuth
-  └─ ChannelPermissions
+  └─ ChannelAccess
 ```
 
-基础上新增：
-
-```text
-ChannelRow
-  ├─ ChannelSetup
-  ├─ ChannelAuth
-  ├─ ChannelAccess       # new
-  └─ ChannelPermissions
-```
-
-其中：
-
-```text
-ChannelAccess
-= 谁可以驱动本机 Agent
-
-ChannelPermissions
-= 平台侧 Bot/API 权限说明
-```
-
-两者必须保持概念分离。
+其中 `ChannelAccess` 表示谁可以驱动本机 Agent。平台侧 Bot/API 权限仍与本地
+Agent Access 保持概念分离，但 Web 当前没有真实 permission probe，因此不展示
+静态“权限与事件”状态。
 
 ---
 
@@ -475,7 +457,7 @@ senderPolicy: 'allowlist' | 'open'
 
 ## 3.5 修订五：V1 不保留顶层 open preset
 
-Preset 只作为 Web UX 抽象：
+Preset 保留为持久化兼容分类，不再作为 Web 中可直接选择的“访问模式”：
 
 ```ts
 type AccessPreset =
@@ -484,7 +466,8 @@ type AccessPreset =
   | 'custom'
 ```
 
-需要开放时必须在具体维度显式表达：
+Web 直接编辑 `dmPolicy` / `allowFrom` / named groups，保存时再按实际规则归类
+`preset`。需要开放时必须在具体维度显式表达：
 
 ```text
 DM 对所有人开放
@@ -766,7 +749,7 @@ export interface ChannelAccessPolicy {
 
 ---
 
-# 6. Preset materialization
+# 6. Preset compatibility classification
 
 Runtime 不判断：
 
@@ -774,7 +757,16 @@ Runtime 不判断：
 if (preset === 'owner-only')
 ```
 
-Preset 只在保存时 materialize。
+Web 也不让用户直接选择 preset。它根据实际的私聊与群聊规则保存 policy，随后按以下规则生成兼容分类：
+
+```text
+仅 owner 私聊 + 群聊关闭 -> owner-only
+指定用户私聊 + 群聊关闭 -> allowlist
+其他组合                     -> custom
+```
+
+其中 `custom` 是内部分类，不是用户可见的重复入口。简单分类仍可由 Control 在保存时 materialize，
+但必须与当前实际规则一致，不能清空用户刚编辑的群规则。
 
 ## owner-only
 
@@ -2240,34 +2232,18 @@ wake word
 
 ---
 
-# 36. Platform Permission 与 Agent Access 必须分离
+# 36. Platform Permission 与 Agent Access 必须保持概念分离
 
-当前 `ChannelPermissions.tsx` 只是平台权限静态说明。
+平台权限表示 Bot/应用在 QQ / Lark / DingTalk / Telegram / Weixin 平台上需要的
+能力；安全访问表示哪些远程 human identity 能驱动本机 Agent。二者仍然是独立概念。
 
-继续保持：
+当前 Web **不展示**平台权限状态。原 `ChannelPermissions.tsx` 只渲染 registry 中
+写死的“消息接收 / 消息发送 / 必需”和绿色勾，没有调用平台 permission probe，
+容易让用户误认为权限已经开通，因此已删除。
 
-```text
-平台权限
-= Bot/应用在 QQ / Lark / DingTalk / Telegram / Weixin 平台上需要什么能力
-
-安全访问
-= 哪些远程 human identity 能驱动本机 Agent
-```
-
-不要把：
-
-```text
-✓ message.receive
-✓ message.send
-```
-
-解释成：
-
-```text
-当前平台已真实授权
-```
-
-更不能把它们当成本地 Agent ACL。
+平台所需配置继续由 README、平台核验文档和官方平台文档说明。设置页仅在“应用配置”
+标题旁提供官方文档入口；无配置字段但有交互授权的渠道（当前为微信）在“授权”标题旁
+显示。该链接不表示实时状态，更不能把平台权限当成本地 Agent ACL。
 
 未来如果实现 platform permission probe，
 使用独立 DTO：
@@ -2331,6 +2307,22 @@ interface ChannelPermissionStatus {
 [识别我的账号]
 ```
 
+这里必须明确区分 UI 草稿和已生效 policy：
+
+```text
+页面预选“仅自己使用”
+    ≠ 已保存 owner-only policy
+    ≠ 当前消息已获授权
+
+owner 尚未识别
+    -> owner-only 保存校验失败
+    -> ordinary inbound DENY
+    -> 不创建 Session / Binding，不执行 Command / /stop，不驱动 Agent
+```
+
+渠道仍可保持连接，以便完成下面的 Owner Claim。唯一可在缺少 policy 时被观察的入站内容是
+`/dsh-claim <challengeCode>` 保留控制消息；该消息由 Harness 吞掉，不进入 Agent。
+
 点击后：
 
 ```text
@@ -2353,53 +2345,46 @@ Telegram User ID 8734062810
 
 ---
 
-# 39. Web：DM 设置
+# 39. Web：私聊访问
 
-默认：
+对于 `ownerDiscovery=claim/manual` 的渠道，Web 不再显示 `owner-only / allowlist / custom`
+preset chooser，直接显示私聊的真实授权结果：
 
 ```text
-访问模式
-● 仅自己使用
+私聊访问
+○ 禁用
+● 仅自己
 ○ 指定用户
-○ 自定义
+○ 所有人（危险）
 ```
 
-owner-only 下：
+`仅自己`：
 
 ```text
-私聊
-✓ 启用
-允许：仅所有者
+dmPolicy = allowlist
+allowFrom = [ownerId]
 ```
 
-allowlist：
+owner 尚未识别时保持该推荐项，但禁用保存，先完成 Owner Claim。
+
+`指定用户`：
 
 ```text
-私聊
-✓ 启用
-
 允许用户
 [123]
 [456]
 [+ 添加]
 ```
 
-custom：
-
-```text
-私聊
-○ 禁用
-○ 指定用户
-○ 所有人（危险）
-```
-
-选择所有人：
+`所有人（危险）`：
 
 ```text
 dmPolicy=open
 ```
 
 必须出现 warning。
+
+私聊选择与群聊规则是两个独立维度。切换私聊选项不得清空、禁用或改写已配置的 named groups。
 
 ---
 
@@ -2432,7 +2417,15 @@ descriptor.groups === true
 所有群
 ```
 
-按钮。
+每个指定群的“仅自己”必须 materialize 为：
+
+```text
+senderPolicy = allowlist
+allowFrom = [ownerId]
+```
+
+`allowFrom=[]` 始终表示拒绝所有成员，绝不能在 UI 中显示为“仅自己”。owner 尚未识别时，
+群内“仅自己”不可选择。
 
 添加群：
 
@@ -2474,19 +2467,17 @@ ownerDiscovery=account
 ```text
 安全访问
 
-访问模式
-● 仅当前扫码微信账号
-
 所有者
 当前扫码微信账号
 已识别
 
-会话范围
-✓ 私聊
-
-群聊
-当前渠道不支持群聊
+私聊访问
+✓ 仅自己
 ```
+
+微信的 `ownerDiscovery=account` 决定其私聊访问固定为当前扫码账号。这里是只读状态，
+不显示“禁用 / 仅自己 / 指定用户 / 所有人”的可编辑单选项。由于微信没有其他 Access
+Policy 可编辑项，也不显示“不支持群聊”的占位说明和“保存访问配置”按钮。
 
 不显示：
 
@@ -2495,6 +2486,8 @@ Group ID
 Group member allowlist
 requireMention
 Owner Claim
+当前渠道不支持群聊
+保存访问配置
 ```
 
 ---
@@ -3332,6 +3325,8 @@ groups=false 不显示 group controls
 mentions=false 不显示 requireMention
 dmPolicy=open 显示 danger warning
 group senderPolicy=open 显示 danger warning
+空 group allowFrom 不显示为 owner-only
+私聊模式切换不丢失 named groups
 ```
 
 保持现有：
@@ -3875,7 +3870,7 @@ disabled by default
 [ ] requireMention 只在可靠 activation fact 存在时开放
 [ ] Access 保存无需 restart adapter
 [ ] ChannelSummary 能显示 access readiness
-[ ] ChannelAccess 与 ChannelPermissions UI 分离
+[ ] Web 不展示未经真实检测的平台权限状态
 [ ] docs/security 两份 canonical 文档落库
 [ ] architecture 新增外部主体先授权红线
 [ ] pnpm ci:check 通过

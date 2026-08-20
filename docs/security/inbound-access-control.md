@@ -31,8 +31,8 @@
 独立使用 `encodeURIComponent` 编码，避免 opaque ID 中的 `:` 造成 key 碰撞。
 
 - `version: 1`；未知版本视为 invalid → DENY。
-- `preset`（owner-only / allowlist / custom）仅用于 Web UX / materialization，
-  **运行时不再按 preset 分支**。
+- `preset`（owner-only / allowlist / custom）是持久化兼容分类；Web 直接编辑真实的
+  DM/group 规则，保存时再归类 preset，**运行时不按 preset 分支**。
 - `dmPolicy`: disabled | allowlist | open。
 - `groupPolicy`: disabled | allowlist（V1 无全局 open）。
 - `groups[conversationId]`: `{ enabled, senderPolicy(allowlist|open), allowFrom[], requireMention }`。
@@ -79,6 +79,24 @@
 - 无 policy + `ownerDiscovery=claim` → `needs-owner`，普通 inbound DENY，
   仅 `/dsh-claim` 被 Claim Manager 观察。
 
+### 首次配置期间的精确语义
+
+- Web 在没有已保存 policy 时会以“私聊仅自己”初始化本地编辑草稿；这只是推荐选项，**不是已生效的授权策略**。
+- 所有者尚未识别时，`owner-only` 不能保存：Control validation 要求有效的 `ownerId`。
+- `needs-owner` / `missing-policy` / `invalid-policy` 均保持 fail-closed。渠道连接可以继续运行，但普通消息、`/stop`、其他命令以及任何 Session / Binding / Workspace / Agent 副作用都被拒绝。
+- 本地用户主动开始 Owner Claim 后，只有形如 `/dsh-claim <challengeCode>` 的保留控制消息可以被 Claim Manager 观察；它始终由 Harness 吞掉，不进入 Agent。候选账号仍需在本地 Web 确认后才成为 owner。
+- 确认 claim 且此前没有 policy 时，Control 写入标准 `owner-only` policy：`dmPolicy=allowlist`、`allowFrom=[ownerId]`、`groupPolicy=disabled`。
+
+### Web 映射不变量
+
+- 私聊访问直接映射为 `disabled` / owner allowlist / explicit allowlist / `open`，不通过可见的“自定义”二次选择。
+- `ownerDiscovery=account`（当前为微信）的私聊访问固定显示 owner-only，不提供可编辑的 DM 选项；上述四选项仅用于 `claim/manual` 渠道。
+- 当 `ownerDiscovery=account` 且渠道不支持 groups 时，Access 区域是完全只读状态，不显示无群聊占位文案或保存按钮。
+- 私聊与 named-group 规则彼此独立；修改私聊规则不得清空群规则。
+- 群内“仅自己”必须写成 `senderPolicy=allowlist` + `allowFrom=[ownerId]`。
+- 空 `allowFrom` 在 DM 和 group 中都表示 DENY ALL，UI 不得把它标成 owner-only。
+- “所有人”只允许出现在明确维度：DM 的 `dmPolicy=open`，或某个已显式添加群的 `senderPolicy=open`；不存在全局 open preset。
+
 ## Owner Claim
 
 保留命令 `/dsh-claim <challengeCode>`（channel-core 提供常量/解析器）。
@@ -105,7 +123,7 @@
 
 ## 边界
 
-- Platform permission（Bot/API 需要什么能力）与 Agent Access（谁能驱动本机 Agent）**概念分离**，
-  见 `docs/architecture/common-design.md` 与 Web `ChannelPermissions` / `ChannelAccess` 两区。
+- Platform permission（Bot/API 需要什么能力）与 Agent Access（谁能驱动本机 Agent）**概念分离**。
+  Web 当前只展示真实的 `ChannelAccess`；在没有平台 permission probe 前，不展示静态平台权限状态。
 - 未来任何能触发 Agent/Command/Session/Binding/Workspace/本地副作用的 inbound 事件，
   都必须复用同一 Access Controller（红线 13）。

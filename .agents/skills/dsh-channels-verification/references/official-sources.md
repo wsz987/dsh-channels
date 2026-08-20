@@ -19,7 +19,6 @@ Control/Web:
 
 - https://github.com/wsz987/dsh-channels/blob/main/packages/channel-control/src/types.ts
 - https://github.com/wsz987/dsh-channels/blob/main/packages/channel-web/src/client/channelRegistry.ts
-- https://github.com/wsz987/dsh-channels/blob/main/packages/channel-web/src/client/ChannelPermissions.tsx
 
 ## DingTalk
 
