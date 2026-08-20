@@ -2,7 +2,7 @@
 title: 架构总览
 summary: 分层、依赖方向、monorepo 结构、架构红线与最终架构。
 when_to_use: 架构 | 依赖方向 | 红线 | 分层 | 依赖关系
-authoritative: 架构原则、monorepo 结构、依赖方向、架构红线（12 条）。
+authoritative: 架构原则、monorepo 结构、依赖方向、架构红线（13 条）。
 see_also: [architecture/common-design.md, architecture/channel-roadmap.md, architecture/adr/]
 status: as-built
 ---

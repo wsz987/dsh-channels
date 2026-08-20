@@ -1,7 +1,6 @@
 # Inbound Access Control
 
-> 权威 as-built 安全参考。实现依据：`docs/dsh-channels-final-design-execution-plan.md`
-> （final-proposed）。本文档在实现完成后成为长期权威来源。
+> 权威 as-built 安全参考。历史实现计划已归档至 `docs/archive/`；本文档是长期权威来源。
 
 ## 目标与不变量
 

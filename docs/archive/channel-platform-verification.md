@@ -16,6 +16,10 @@ metadata:
 
 # DSH Channels Verification Skill
 
+> **归档：** 本文是 `.agents/skills/dsh-channels-verification/`（含 `SKILL.md` 与
+> `references/*`）的**过时冗余副本**，仓库内不再引用。核验流程请以当前安装的 Skill
+> 目录为准。
+
 > **快照基线**：`main@78655a40a266c4122ecd0c030b0a882fdb92f2df`（2026-08-19）。
 >
 > 这个 Skill 的目的不是描述“理想设计”，而是让 AI 在后续维护时能区分：

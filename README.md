@@ -204,9 +204,12 @@ pnpm ci:check
 - [公共/统一代码设计](docs/architecture/common-design.md)
 - [多渠道规划](docs/architecture/channel-roadmap.md)
 - [架构决策记录（ADR）](docs/architecture/adr/)
+- [入站访问控制（安全）](docs/security/inbound-access-control.md)
+- [渠道身份映射（安全）](docs/security/channel-identity-map.md)
 - [第三方渠道接入指南](docs/adapter-authoring.md)
 - [发布流程](docs/release.md)
 - [微信 live 验证手册](docs/weixin-live-verification-runbook.md)
+- [归档文档（历史计划/已取代记录）](docs/archive/)
 - [第三方版权声明](THIRD_PARTY_NOTICES.md)
 - 各子包 README：`packages/*/README.md`（每个包的安装、配置、开发说明）
 

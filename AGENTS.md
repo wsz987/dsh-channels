@@ -136,6 +136,7 @@ DeepSeek Harness 官方文档站点（**优先查这里**）：
 10. **凭据与 DTO**：浏览器只允许 `PublicAuthSession` 等净化 DTO；Secret/token/deviceCode 永不出进程。
 11. **持久化边界**：适配器禁止读写 Harness persistence；SessionBinding 持久化只由 `channel-harness` 的 store 接口负责。
 12. **只用 Harness public package API**：禁止 private/internal source；Harness breaking change 优先只改 `channel-harness`。
+13. **外部主体必须授权才能产生本地副作用**：任何能触发 Agent / Command / Session / Binding / Workspace / Interaction 或其他本地特权行为的外部入站事件，必须先过 `channel-harness` 的统一 Access Gate（缺失/损坏 policy、未知 sender/group 一律 Fail-Closed）；Adapter 只产出 canonical identity 与 activation facts，不得实现渠道私有 ACL。`requireMention` 是 Activation，不是 Authorization。详见 `docs/security/inbound-access-control.md` 与 `docs/security/channel-identity-map.md`。
 
 ### 5.2 官方 Harness 约束
 

@@ -3,7 +3,7 @@ title: 公共/统一代码设计
 summary: Channel Contract、ChannelService、Harness Bridge、通用控制面、DSH Bundle 的已落地设计。
 when_to_use: 改共享代码 | Contract | Bridge | 控制面 | Bundle | channel-core | channel-harness
 authoritative: 统一 Contract（Adapter/Event/MessagePart/Capabilities/Reply）、Bridge、控制面、Bundle、已落地补充。
-see_also: [../architecture.md, ../adapter-authoring.md, adr/0002-image-model-fallback.md]
+see_also: [../architecture.md, ../adapter-authoring.md, adr/0002-image-model-fallback.md, adr/0003-image-compatibility-pre-step.md]
 status: as-built
 ---
 
@@ -907,7 +907,7 @@ Harness latest-compatible
 ```json
 {
   "name": "@wsz987/dsh-channels",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "type": "module",
   "exports": {
     ".": "./lib/index.js",
@@ -919,6 +919,7 @@ Harness latest-compatible
     "./qq": "./lib/qq.js",
     "./dingtalk": "./lib/dingtalk.js",
     "./lark": "./lib/lark.js",
+    "./telegram": "./lib/telegram.js",
     "./client": "./lib/client.js"
   },
   "dsh": {
@@ -936,7 +937,7 @@ patch 只引用该 bundle 自己的 exports；实现包是 bundle 的内部依�
 pnpm 将传递依赖提升到 profile 根目录。根入口同时承载 Web host 插件，
 `./client` 是同一包的 Harness Web 客户端产物。
 
-实际 patch（`packages/channels/cordis.patch.yml`，共 9 个插件，可逐项在 profile patch 中删除/禁用）：
+实际 patch（`packages/channels/cordis.patch.yml`，共 10 个插件，可逐项在 profile patch 中删除/禁用）：
 
 ```yaml
 - insert:
@@ -969,6 +970,10 @@ pnpm 将传递依赖提升到 profile 根目录。根入口同时承载 Web host
 
     - id: channels-lark
       name: '@wsz987/dsh-channels/lark'
+      inject: [channels, credentials, channelControl]
+
+    - id: channels-telegram
+      name: '@wsz987/dsh-channels/telegram'
       inject: [channels, credentials, channelControl]
 
     - id: channels-web
@@ -1031,7 +1036,7 @@ workspace:
 [ADR 0002](adr/0002-image-model-fallback.md)（产品策略）与
 [ADR 0003](adr/0003-image-compatibility-pre-step.md)（实现 seam：`agent/pre-step`
 logged surface replace，按官方 Model-visible ⇔ durably referenced 不变式；
-当前 `llm/stream` 改写仍是 shipped 实现，迁移未落地前不得扩展）。
+已 shipped，`llm/stream` 改写已删除、迁移已完成，不得重新引入）。
 
 ### 入站日志与媒体诊断规范
 

@@ -205,9 +205,12 @@ pnpm ci:check
 - [Common/unified code design](docs/architecture/common-design.md)
 - [Multi-channel planning](docs/architecture/channel-roadmap.md)
 - [Architecture decision records (ADR)](docs/architecture/adr/)
+- [Inbound access control (security)](docs/security/inbound-access-control.md)
+- [Channel identity map (security)](docs/security/channel-identity-map.md)
 - [Third-party adapter authoring guide](docs/adapter-authoring.md)
 - [Release pipeline](docs/release.md)
 - [Weixin live verification runbook](docs/weixin-live-verification-runbook.md)
+- [Archived docs (historical plans / superseded records)](docs/archive/)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 - Per-package READMEs: `packages/*/README.md` (install / config / dev notes for each package)
 

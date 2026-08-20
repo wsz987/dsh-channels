@@ -74,6 +74,9 @@ export const manifest: WeixinManifest = {
     versionRange: '<verified-range>',            // 例如 '=<40-char-real-sha>' 或具体版本范围
     strategy: 'source-port',
     protocol: 'weixin-ilink',
+    packageName: '@tencent-weixin/openclaw-weixin',
+    sourceRepository: 'Tencent/openclaw-weixin',
+    contractFixtures: ['fixtures/upstream/weixin/2.4.6/'],
   },
   sdk: undefined,
   status: 'tested',

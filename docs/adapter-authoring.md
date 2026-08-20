@@ -87,9 +87,9 @@ export default defineChannelAdapter({
     file: true,
     audio: true,
     video: true,
-    markdown: true,
+    markdown: false,
     cards: false,
-    reactions: true,
+    reactions: false,
     threads: true,
     streaming: 'edit',   // 'native' | 'edit' | 'buffered'
   },
@@ -290,10 +290,10 @@ are caught without a live platform:
 }
 ```
 
-Fixture format: `name`, `channel` (matching the directory name),
-`upstreamVersion`, `payload` and `expected`. Load them in tests with
-`loadFixture(channel, name)` from `@wsz987/channel-testkit`; the verifier
-validates them with `validateFixture`.
+Fixture format: `name`, `channel` (optional in-file, but when present must match
+the directory name), `upstreamVersion`, `payload` and `expected`. Load them in
+tests with `loadFixture(channel, name)` from `@wsz987/channel-testkit`; the
+verifier validates them with `validateFixture`.
 
 ## 7. The compatibility manifest
 
@@ -309,13 +309,16 @@ const manifest = {
     reference: 'telegram bot api (official)',
     testedVersion: '7.10',
     versionRange: '>=7.0 <8.0',
-    // official-sdk | official-host-neutral-subpath | minimal-official-api-port | source-port
-    strategy: 'official-sdk',
+    // per-adapter strategy: mostly 'sdk' (official SDK), 'source' (direct
+    // protocol) or 'source-port'. The four-value enum below is reserved for
+    // channel-compat's upstream manifest:
+    //   official-sdk | official-host-neutral-subpath | minimal-official-api-port | source-port
+    strategy: 'source',
     // optional: exact upstream commit SHA, required only for source-port channels
     // after the live gate passes (see the Weixin manifest).
     testedCommit: undefined,
   },
-  status: 'untested', // tested | compatible | untested | unsupported | experimental
+  status: 'experimental', // tested | compatible | untested | unsupported | experimental
 };
 ```
 
