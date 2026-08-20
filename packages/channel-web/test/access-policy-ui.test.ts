@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 import type { ChannelAccessPolicy, GroupAccessRule } from '../src/client/api.js';
 import {
   directMessageAccessMode,
+  groupAccessMode,
   groupSenderAccessMode,
   hasEditableAccessControls,
   isDirectMessageAccessEditable,
   prepareAccessPolicyForSave,
   withDirectMessageAccessMode,
+  withGroupAccessMode,
   withGroupSenderAccessMode,
 } from '../src/client/accessPolicyUi.js';
 
@@ -109,5 +111,24 @@ describe('named-group sender UI mapping', () => {
       senderPolicy: 'open',
       allowFrom: [],
     });
+  });
+});
+
+describe('group access mode mapping', () => {
+  it('materializes global group access with an explicit all-members default rule', () => {
+    const opened = withGroupAccessMode(policy(), 'open', ownerId);
+    expect(groupAccessMode(opened)).toBe('open');
+    expect(opened).toMatchObject({
+      version: 1,
+      groupPolicy: 'open',
+      groups: {},
+      defaultGroupRule: { enabled: true, senderPolicy: 'open', allowFrom: [] },
+    });
+  });
+
+  it('removes the global default rule when switching to named groups', () => {
+    const named = withGroupAccessMode(withGroupAccessMode(policy(), 'open', ownerId), 'allowlist', ownerId);
+    expect(named.groupPolicy).toBe('allowlist');
+    expect(named.defaultGroupRule).toBeUndefined();
   });
 });

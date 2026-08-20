@@ -29,18 +29,20 @@ import {
 } from './api.js';
 import {
   directMessageAccessMode,
+  groupAccessMode,
   hasEditableAccessControls,
   isDirectMessageAccessEditable,
   prepareAccessPolicyForSave,
   withDirectMessageAccessMode,
+  withGroupAccessMode,
   type DirectMessageAccessMode,
+  type GroupAccessMode,
 } from './accessPolicyUi.js';
 import { type ChannelWebDefinition } from './channelRegistry.js';
 import { AccessWarning } from './components/AccessWarning.js';
 import { GroupAccessCard } from './components/GroupAccessCard.js';
 import { IdentityListEditor } from './components/IdentityListEditor.js';
 import { SectionHeading } from './components/SectionHeading.js';
-import { Switch } from './components/Switch.js';
 
 export interface ChannelAccessProps {
   channel: ChannelSummary;
@@ -146,6 +148,7 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
   const ownerIdentified = state.owner.configured || Boolean(ownerId);
 
   const dmAccess = directMessageAccessMode(draft, ownerId);
+  const groupAccess = groupAccessMode(draft);
   const ownerRequiredBeforeSave = dmAccess === 'owner-only' && !ownerId;
   const policyForSave = (): ChannelAccessPolicy => prepareAccessPolicyForSave(draft, ownerId);
 
@@ -431,14 +434,40 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
       {/* ---- group controls (plan §40) — only when the channel supports them ---- */}
       {descriptor.groups === true ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }} data-testid="access-groups">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('groupSection')}</span>
-            <Switch
-              checked={draft.groupPolicy === 'allowlist'}
-              onChange={(v) => setDraft((c) => (c ? { ...c, groupPolicy: v ? 'allowlist' : 'disabled' } : c))}
-              aria-label={t('groupEnable')}
-              testId="group-enable"
-            />
+          <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('groupSection')}</span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }} data-testid="group-access-mode">
+            {(
+              [
+                ['disabled', t('groupDisabled')],
+                ['allowlist', t('groupSpecified')],
+                ['open', t('groupAllDanger')],
+              ] as Array<[GroupAccessMode, string]>
+            ).map(([value, label]) => (
+              <label
+                key={value}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 13,
+                  cursor: 'pointer',
+                  color: value === 'open'
+                    ? 'var(--dsw-alias-state-warn-primary)'
+                    : 'var(--dsw-alias-label-primary)',
+                }}
+              >
+                <input
+                  type="radio"
+                  name="group-access-mode"
+                  checked={groupAccess === value}
+                  onChange={() => setDraft((c) => c
+                    ? withGroupAccessMode(c, value, ownerId, descriptor.defaults?.requireMention === true)
+                    : c)}
+                  data-testid={'group-' + value}
+                />
+                {label}
+              </label>
+            ))}
           </div>
 
           {draft.groupPolicy === 'allowlist' && (
@@ -495,6 +524,21 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
                   ))}
                 </div>
               )}
+            </>
+          )}
+          {draft.groupPolicy === 'open' && draft.defaultGroupRule && (
+            <>
+              <AccessWarning testId="all-groups-danger">{t('groupAllDangerHint')}</AccessWarning>
+              <GroupAccessCard
+                groupId={t('allGroups')}
+                rule={draft.defaultGroupRule}
+                ownerId={ownerId}
+                mentions={descriptor.mentions === true}
+                userLabel={descriptor.identityLabels.user}
+                onChange={(next) => setDraft((c) => c ? { ...c, defaultGroupRule: next } : c)}
+                fixedEnabled
+                t={t}
+              />
             </>
           )}
         </div>

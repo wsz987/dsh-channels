@@ -129,10 +129,10 @@ export interface ChannelAccessDescriptor {
 
 export type AccessPreset = 'owner-only' | 'allowlist' | 'custom';
 export type DirectMessagePolicy = 'disabled' | 'allowlist' | 'open';
-export type GroupPolicy = 'disabled' | 'allowlist';
+export type GroupPolicy = 'disabled' | 'allowlist' | 'open';
 export type GroupSenderPolicy = 'allowlist' | 'open';
 
-/** One named-group rule (V1: named groups only, no global open). */
+/** Sender and activation rule for a named group or the all-groups default. */
 export interface GroupAccessRule {
   enabled: boolean;
   senderPolicy: GroupSenderPolicy;
@@ -149,6 +149,7 @@ export interface ChannelAccessPolicy {
   allowFrom: string[];
   groupPolicy: GroupPolicy;
   groups: Record<string, GroupAccessRule>;
+  defaultGroupRule?: GroupAccessRule;
 }
 
 /** Full access picture for one channel+account (plan §27). */

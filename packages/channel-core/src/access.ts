@@ -14,8 +14,9 @@
  * Web concerns. Those live in channel-control / channel-harness / channel-web,
  * all of which share ONLY this contract.
  *
- * V1 policy model (per the final design):
- *   - `GroupPolicy` is only `disabled | allowlist` — V1 has NO global group open.
+ * Policy model:
+ *   - Groups support disabled, named allowlist, or global access through an
+ *     explicit `defaultGroupRule`.
  *   - `allowFrom: []` means DENY ALL, never "open".
  *   - `requireMention` is an ACTIVATION fact, not authorization, and only
  *     applies in group conversations.
@@ -33,8 +34,7 @@ export type AccessPreset = 'owner-only' | 'allowlist' | 'custom';
 
 export type DirectMessagePolicy = 'disabled' | 'allowlist' | 'open';
 
-/** V1 groups are named explicitly — there is no global "all groups open". */
-export type GroupPolicy = 'disabled' | 'allowlist';
+export type GroupPolicy = 'disabled' | 'allowlist' | 'open';
 
 /**
  * Within an already explicitly-allowed group:
@@ -74,10 +74,12 @@ export interface ChannelAccessPolicy {
   dmPolicy: DirectMessagePolicy;
   /** DM canonical sender.id allowlist (V1 only exists for dmPolicy=allowlist). */
   allowFrom: string[];
-  /** V1 only supports disabled / named-group allowlist. */
+  /** Whether groups are disabled, explicitly named, or governed by a default rule. */
   groupPolicy: GroupPolicy;
   /** canonical conversation.id -> rule. */
   groups: Record<string, GroupAccessRule>;
+  /** Required only when groupPolicy=open; applies to every inbound group. */
+  defaultGroupRule?: GroupAccessRule;
 }
 
 // ---------------------------------------------------------------------------
@@ -93,7 +95,7 @@ const idSchema = z
 
 export const accessPresetSchema = z.enum(['owner-only', 'allowlist', 'custom']);
 export const directMessagePolicySchema = z.enum(['disabled', 'allowlist', 'open']);
-export const groupPolicySchema = z.enum(['disabled', 'allowlist']);
+export const groupPolicySchema = z.enum(['disabled', 'allowlist', 'open']);
 export const groupSenderPolicySchema = z.enum(['allowlist', 'open']);
 
 export const groupAccessRuleSchema = z.object({
@@ -117,8 +119,24 @@ export const channelAccessPolicySchema = z
     allowFrom: z.array(idSchema),
     groupPolicy: groupPolicySchema,
     groups: z.record(z.string().trim(), groupAccessRuleSchema),
+    defaultGroupRule: groupAccessRuleSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((policy, ctx) => {
+    if (policy.groupPolicy === 'open') {
+      if (!policy.defaultGroupRule) {
+        ctx.addIssue({ code: 'custom', path: ['defaultGroupRule'], message: 'required when groupPolicy is open' });
+      }
+      if (Object.keys(policy.groups).length > 0) {
+        ctx.addIssue({ code: 'custom', path: ['groups'], message: 'must be empty when groupPolicy is open' });
+      }
+      if (policy.defaultGroupRule?.enabled !== true) {
+        ctx.addIssue({ code: 'custom', path: ['defaultGroupRule', 'enabled'], message: 'must be enabled when groupPolicy is open' });
+      }
+    } else if (policy.defaultGroupRule) {
+      ctx.addIssue({ code: 'custom', path: ['defaultGroupRule'], message: 'only allowed when groupPolicy is open' });
+    }
+  });
 
 // ---------------------------------------------------------------------------
 // Storage key codec

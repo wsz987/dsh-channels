@@ -407,15 +407,9 @@ canonical owner id
 
 ---
 
-## 3.4 修订四：V1 不支持“所有群全局 Open”
+## 3.4 修订四：所有群必须携带默认群规则
 
-旧方案：
-
-```ts
-groupPolicy: 'disabled' | 'allowlist' | 'open'
-```
-
-会造成一个危险且语义模糊的问题：
+仅增加 `groupPolicy=open` 会造成危险且语义模糊的问题：
 
 ```text
 所有群 open 后
@@ -424,34 +418,23 @@ requireMention 默认是什么？
 如何表达例外？
 ```
 
-最终 V1 改成：
+最终表达为：
 
 ```ts
 type GroupPolicy =
   | 'disabled'
   | 'allowlist'
+  | 'open'
 ```
 
-也就是说：
-
-> **群聊必须按 conversation.id 显式添加。**
-
-群内是否开放所有成员，由该群自己的规则表达：
+`allowlist` 按 conversation.id 显式添加；`open` 必须携带启用的
+`defaultGroupRule`，并保持 `groups={}`。群内是否开放所有成员始终由规则表达：
 
 ```ts
 senderPolicy: 'allowlist' | 'open'
 ```
 
-因此：
-
-```text
-所有群全局 open
-```
-
-不属于 V1。
-
-如果以后确实需要，应在新 schema version 中设计 `defaultGroupRule`，
-而不是让 `groupPolicy=open` 隐式制造默认规则。
+因此 `groupPolicy=open` 只表示所有群匹配 `defaultGroupRule`，绝不隐式表示群内所有成员开放。
 
 ---
 
@@ -678,7 +661,8 @@ export type DirectMessagePolicy =
 
 export type GroupPolicy =
   | 'disabled'
-  | 'allowlist';
+  | 'allowlist'
+  | 'open';
 
 export type GroupSenderPolicy =
   | 'allowlist'
@@ -736,7 +720,7 @@ export interface ChannelAccessPolicy {
   allowFrom: string[];
 
   /**
-   * V1 只支持 disabled / named-group allowlist。
+   * disabled / named-group allowlist / all-groups default rule。
    */
   groupPolicy: GroupPolicy;
 
@@ -744,6 +728,9 @@ export interface ChannelAccessPolicy {
    * canonical conversation.id -> rule
    */
   groups: Record<string, GroupAccessRule>;
+
+  /** groupPolicy=open 时必填，其他模式禁止出现。 */
+  defaultGroupRule?: GroupAccessRule;
 }
 ```
 
@@ -1527,6 +1514,10 @@ groupPolicy === disabled
 groupPolicy === allowlist
     ↓
 必须存在 groups[conversation.id]
+
+groupPolicy === open
+    ↓
+使用 defaultGroupRule
 ```
 
 不存在：
@@ -2405,17 +2396,13 @@ descriptor.groups === true
 [ ] 启用
 ```
 
-启用后 V1 只支持：
+群聊访问支持：
 
 ```text
-仅指定群
+禁用 / 指定群组 / 所有群组
 ```
 
-没有：
-
-```text
-所有群
-```
+“所有群组”必须继续显示默认成员规则，不得把群范围开放等同于群成员全部开放。
 
 每个指定群的“仅自己”必须 materialize 为：
 

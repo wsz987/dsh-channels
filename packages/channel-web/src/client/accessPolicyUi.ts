@@ -2,6 +2,42 @@ import type { ChannelAccessPolicy, GroupAccessRule, OwnerDiscoveryMode } from '.
 
 export type DirectMessageAccessMode = 'disabled' | 'owner-only' | 'allowlist' | 'open';
 export type GroupSenderAccessMode = 'owner-only' | 'allowlist' | 'open';
+export type GroupAccessMode = 'disabled' | 'allowlist' | 'open';
+
+export function groupAccessMode(policy: ChannelAccessPolicy): GroupAccessMode {
+  return policy.groupPolicy;
+}
+
+export function withGroupAccessMode(
+  policy: ChannelAccessPolicy,
+  mode: GroupAccessMode,
+  ownerId: string | undefined,
+  requireMention = false,
+): ChannelAccessPolicy {
+  if (mode === 'open') {
+    return {
+      ...policy,
+      version: 1,
+      preset: 'custom',
+      groupPolicy: 'open',
+      groups: {},
+      defaultGroupRule: policy.defaultGroupRule ?? {
+        enabled: true,
+        senderPolicy: 'open',
+        allowFrom: [],
+        requireMention,
+      },
+    };
+  }
+
+  const { defaultGroupRule: _defaultGroupRule, ...rest } = policy;
+  return {
+    ...rest,
+    preset: 'custom',
+    groupPolicy: mode,
+    groups: mode === 'disabled' ? {} : rest.groups,
+  };
+}
 
 export function isDirectMessageAccessEditable(ownerDiscovery: OwnerDiscoveryMode): boolean {
   return ownerDiscovery !== 'account';

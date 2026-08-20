@@ -37,7 +37,7 @@ import { ChannelDefinitionRegistry } from '../definitions/registry.js';
 import { ControlError } from '../errors.js';
 import type { OwnerClaimPhase, PublicOwnerClaimSession } from '../types.js';
 import type { ChannelAccessPolicyStore } from './policy-store.js';
-import { ownerOnlyPolicy } from './materialize.js';
+import { ownerOnlyPolicy, rebindOwner as rebindPolicyOwner } from './materialize.js';
 
 export const OWNER_CLAIM_TTL_MS = 5 * 60_000;
 export const OWNER_CLAIM_CHALLENGE_BYTES = 16;
@@ -258,20 +258,10 @@ export class OwnerClaimSessionManager {
     if (!current) {
       // No policy: materialize a fresh owner-only.
       next = ownerOnlyPolicy(ownerId);
-    } else if (current.preset === 'owner-only') {
-      // Owner-only: re-materialize allowFrom=[newOwner], group disabled.
-      next = {
-        ...current,
-        ownerId,
-        allowFrom: [ownerId],
-        groupPolicy: 'disabled',
-        groups: {},
-      };
     } else {
-      // allowlist/custom: only the ownerId changes; allowFrom/groups preserved.
-      next = { ...current, ownerId };
+      next = rebindPolicyOwner(current, ownerId);
     }
-    await this.store.set(channelId, accountId, { ...next, version: 1 });
+    await this.store.set(channelId, accountId, next);
   }
 
   private findSession(channelId: string, claimId: string): InternalOwnerClaimSession {

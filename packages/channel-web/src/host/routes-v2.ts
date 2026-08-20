@@ -32,7 +32,7 @@ import type {
   PublicOwnerClaimSession,
 } from '@wsz987/channel-control';
 import type { ChannelAccessPolicy } from '@wsz987/channel-core';
-import { isChannelError } from '@wsz987/channel-core';
+import { channelAccessPolicySchema, isChannelError } from '@wsz987/channel-core';
 import { isControlError } from '@wsz987/channel-control';
 import { z } from 'zod';
 import { errorBody } from './security.js';
@@ -547,35 +547,13 @@ const enabledPatchSchema = z.object({
 // Access control body schema (plan §31)
 // ---------------------------------------------------------------------------
 
-/** Canonical sender/group id: non-empty, trimmed. IDs are opaque (no lowercase). */
-const accessIdSchema = z.string().min(1).trim();
-
 /**
- * Strict `ChannelAccessPolicy` body for PUT /channels/:id/access. Mirrors the
- * shared `channel-access-policy` contract in @wsz987/channel-core exactly:
- * version pinned to 1, every field enforced, unknown keys rejected. The parsed
- * value is passed verbatim to `control.saveAccess`, which re-validates it
+ * PUT /channels/:id/access reuses the shared strict policy schema so every
+ * process boundary accepts exactly the same policy versions and semantics.
+ * The parsed value is passed to `control.saveAccess`, which re-validates it
  * against the channel's declared descriptor (mentions/groups/DM capability).
  */
-const accessPolicySchema = z
-  .object({
-    version: z.literal(1),
-    preset: z.enum(['owner-only', 'allowlist', 'custom']),
-    ownerId: accessIdSchema.optional(),
-    dmPolicy: z.enum(['disabled', 'allowlist', 'open']),
-    allowFrom: z.array(accessIdSchema),
-    groupPolicy: z.enum(['disabled', 'allowlist']),
-    groups: z.record(
-      z.string().trim(),
-      z.object({
-        enabled: z.boolean(),
-        senderPolicy: z.enum(['allowlist', 'open']),
-        allowFrom: z.array(accessIdSchema),
-        requireMention: z.boolean(),
-      }),
-    ),
-  })
-  .strict();
+const accessPolicySchema = channelAccessPolicySchema;
 
 /** Human-friendly message for the first zod issue of an access policy body. */
 function accessPolicyMessage(err: z.ZodError): string {

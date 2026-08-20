@@ -2,8 +2,8 @@
  * Harness-side Access Policy Resolver (execution plan §17, §15).
  *
  * Failure-closed resolution over the shared ChannelStorage. The Harness DOES
- * NOT depend on channel-control: it reads the same `access:policy:v1:*` KV
- * entries via the shared `accessPolicyStorageKey` codec and validates them with
+ * NOT depend on channel-control: it reads the shared versioned policy KV via
+ * `accessPolicyStorageKey` and validates it with
  * the shared `channelAccessPolicySchema` (both live in @wsz987/channel-core).
  *
  * Reading rules (§15):
@@ -11,7 +11,7 @@
  *   - malformed JSON   -> `invalid`
  *   - unknown version / schema failure -> `invalid`
  *
- * Per §16 there is NO policy caching in V1: every inbound reads once, so Web
+ * There is no policy caching: every inbound reads once, so Web
  * saves and permission revocations take effect immediately with no invalidation
  * machinery and no stale-ACL window.
  */
@@ -37,8 +37,7 @@ export class StoredChannelAccessPolicyResolver implements ChannelAccessPolicyRes
 
   async resolve(channelId: string, accountId: string): Promise<ResolvedAccessPolicy> {
     const storage = this.getStorage();
-    const key = accessPolicyStorageKey(channelId, accountId);
-    const raw = await storage.get(key);
+    const raw = await storage.get(accessPolicyStorageKey(channelId, accountId));
     if (raw === undefined) return { state: 'missing' };
 
     let parsed: unknown;

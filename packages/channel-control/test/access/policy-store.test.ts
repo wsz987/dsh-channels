@@ -53,6 +53,30 @@ describe('ChannelStorageAccessPolicyStore', () => {
     expect(await store.get('qq', 'main')).toBeDefined();
   });
 
+  it('round-trips an all-groups policy through the single policy namespace', async () => {
+    const storage: ChannelStorage = new MemoryStorage();
+    const store = new ChannelStorageAccessPolicyStore(() => storage);
+    await store.set('qq', 'main', makePolicy());
+    const policy: ChannelAccessPolicy = {
+      version: 1,
+      preset: 'custom',
+      ownerId: 'owner-1',
+      dmPolicy: 'allowlist',
+      allowFrom: ['owner-1'],
+      groupPolicy: 'open',
+      groups: {},
+      defaultGroupRule: {
+        enabled: true,
+        senderPolicy: 'open',
+        allowFrom: [],
+        requireMention: false,
+      },
+    };
+    await store.set('qq', 'main', policy);
+
+    expect(await store.get('qq', 'main')).toEqual(policy);
+  });
+
   it('invalid stored JSON is treated as absent by get but visible via getRaw', async () => {
     const storage: ChannelStorage = new MemoryStorage();
     const store = new ChannelStorageAccessPolicyStore(() => storage);

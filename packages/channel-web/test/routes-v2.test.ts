@@ -641,6 +641,30 @@ describe('PUT /channels/:id/access (plan §31)', () => {
     expect(body).toMatchObject({ readiness: 'ready' });
   });
 
+  it('saves an all-groups policy with its explicit default rule', async () => {
+    const fresh = makeControl();
+    const handler = wireV2(fresh.control);
+    const policy: ChannelAccessPolicy = {
+      ...VALID_POLICY,
+      version: 1,
+      groupPolicy: 'open',
+      groups: {},
+      defaultGroupRule: {
+        enabled: true,
+        senderPolicy: 'open',
+        allowFrom: [],
+        requireMention: false,
+      },
+    };
+    const { status } = await invokeDirect(handler, {
+      method: 'PUT',
+      url: '/dsh-channels/api/v2/channels/qq/access',
+      body: JSON.stringify(policy),
+    });
+    expect(status).toBe(200);
+    expect(fresh.calls.saveAccess).toEqual([[KNOWN, policy]]);
+  });
+
   it('malformed policy → 400 INVALID_INPUT (never reaches control)', async () => {
     const fresh = makeControl();
     const handler = wireV2(fresh.control);

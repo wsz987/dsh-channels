@@ -14,10 +14,12 @@ import type { ChannelAccessPolicy } from '@wsz987/channel-core';
 /** Keep the persisted policy aligned with its user-facing preset. */
 export function materializeAccessPolicy(policy: ChannelAccessPolicy): ChannelAccessPolicy {
   if (policy.preset === 'owner-only') {
-    return { ...policy, dmPolicy: 'allowlist', allowFrom: policy.ownerId ? [policy.ownerId] : [], groupPolicy: 'disabled', groups: {} };
+    const { defaultGroupRule: _defaultGroupRule, ...rest } = policy;
+    return { ...rest, dmPolicy: 'allowlist', allowFrom: policy.ownerId ? [policy.ownerId] : [], groupPolicy: 'disabled', groups: {} };
   }
   if (policy.preset === 'allowlist') {
-    return { ...policy, dmPolicy: 'allowlist', groupPolicy: 'disabled', groups: {} };
+    const { defaultGroupRule: _defaultGroupRule, ...rest } = policy;
+    return { ...rest, dmPolicy: 'allowlist', groupPolicy: 'disabled', groups: {} };
   }
   return policy;
 }
@@ -48,8 +50,9 @@ export function rebindOwner(
 
   if (policy.preset === 'owner-only') {
     // Owner-only: the owner was the sole grantee — re-materialize allowFrom.
+    const { defaultGroupRule: _defaultGroupRule, ...base } = policy;
     return {
-      ...policy,
+      ...base,
       ownerId: newOwner,
       allowFrom: [newOwner],
       groupPolicy: 'disabled',

@@ -27,11 +27,12 @@ export interface GroupAccessCardProps {
   /** Display label for the member identity (e.g. descriptor.identityLabels.user). */
   userLabel: string;
   onChange: (next: GroupAccessRule) => void;
-  onRemove: () => void;
+  onRemove?: () => void;
+  fixedEnabled?: boolean;
   t: (key: string) => string;
 }
 
-export function GroupAccessCard({ groupId, rule, ownerId, mentions, userLabel, onChange, onRemove, t }: GroupAccessCardProps) {
+export function GroupAccessCard({ groupId, rule, ownerId, mentions, userLabel, onChange, onRemove, fixedEnabled = false, t }: GroupAccessCardProps) {
   const sender = groupSenderAccessMode(rule, ownerId);
 
   const setSender = (next: GroupSenderAccessMode) => {
@@ -96,7 +97,7 @@ export function GroupAccessCard({ groupId, rule, ownerId, mentions, userLabel, o
         >
           {groupId}
         </span>
-        <button
+        {onRemove && <button
           type="button"
           onClick={onRemove}
           aria-label={t('rmGroup')}
@@ -113,13 +114,13 @@ export function GroupAccessCard({ groupId, rule, ownerId, mentions, userLabel, o
           }}
         >
           ×
-        </button>
-        <Switch
+        </button>}
+        {!fixedEnabled && <Switch
           checked={rule.enabled}
           onChange={(v) => onChange({ ...rule, enabled: v })}
           aria-label={t('groupEnable')}
           testId="group-enabled"
-        />
+        />}
       </div>
 
       {rule.enabled && (

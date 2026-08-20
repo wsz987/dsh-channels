@@ -10,7 +10,8 @@
  *  - DM: disabled -> DENY; open -> ALLOW; allowlist -> allowFrom includes
  *    senderId ? ALLOW : DENY (empty allowFrom == DENY ALL, never open).
  *  - Group: groupPolicy disabled -> DENY; allowlist -> groups[conversationId]
- *    must exist (else group_not_allowed); rule.enabled must be true; then the
+ *    must exist; open -> defaultGroupRule must exist. The selected rule
+ *    must be enabled; then the
  *    sender gate (allowlist/open); finally the ACTIVATION gate: requireMention
  *    without mentionedBot === true is NOT activated (`undefined !== true`, no
  *    fail-open — plan §14).
@@ -61,8 +62,9 @@ export class InboundAccessController {
       return { authorized: false, activated: false, reason: 'group_disabled' };
     }
 
-    // groupPolicy === 'allowlist': the group must be named explicitly.
-    const rule = policy.groups[conversationId];
+    const rule = policy.groupPolicy === 'open'
+      ? policy.defaultGroupRule
+      : policy.groups[conversationId];
     if (!rule) {
       return { authorized: false, activated: false, reason: 'group_not_allowed' };
     }

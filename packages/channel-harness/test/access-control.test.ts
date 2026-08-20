@@ -160,6 +160,20 @@ describe('InboundAccessController — Group (plan §19.2, §53)', () => {
     );
     expect(d).toEqual({ authorized: true, activated: true, reason: 'allowed' });
   });
+
+  it('global groups use the explicit default sender rule', () => {
+    const policy: ChannelAccessPolicy = {
+      version: 1,
+      preset: 'custom',
+      dmPolicy: 'allowlist',
+      allowFrom: ['owner'],
+      groupPolicy: 'open',
+      groups: {},
+      defaultGroupRule: groupRule({ senderPolicy: 'allowlist', allowFrom: ['owner'] }),
+    };
+    expect(authorizeGroup('owner', 'previously-unknown', policy).reason).toBe('allowed');
+    expect(authorizeGroup('intruder', 'previously-unknown', policy).reason).toBe('group_user_not_allowed');
+  });
 });
 
 describe('InboundAccessController — Activation / requireMention (plan §14, §53)', () => {

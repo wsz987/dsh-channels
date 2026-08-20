@@ -13,7 +13,7 @@
 2. **Empty allowlist != open**（空 `allowFrom` 表示拒绝所有人，绝不表示开放）。
 3. **Unknown sender = DENY**。
 4. **Groups 默认 disabled**。
-5. **V1 groups 必须显式 named**（无「所有群全局 open」）。
+5. **群范围与群成员范围分离**：所有群模式必须携带明确的默认成员规则。
 6. **Authorization 先于 /stop、Command、Binding、Workspace、Session、Agent**。
 7. **Adapter 产出 identity / activation facts；Harness 执行授权**。
 8. **Harness 永不解析平台 raw payload 做 ACL**。
@@ -34,8 +34,9 @@
 - `preset`（owner-only / allowlist / custom）是持久化兼容分类；Web 直接编辑真实的
   DM/group 规则，保存时再归类 preset，**运行时不按 preset 分支**。
 - `dmPolicy`: disabled | allowlist | open。
-- `groupPolicy`: disabled | allowlist（V1 无全局 open）。
+- `groupPolicy`: disabled | allowlist | open。
 - `groups[conversationId]`: `{ enabled, senderPolicy(allowlist|open), allowFrom[], requireMention }`。
+- `groupPolicy=open` 时必须设置启用的 `defaultGroupRule`，且 `groups` 必须为空；该规则应用于 Bot 能接收消息的每个群。
 - `ownerId`: canonical sender.id（可暂缺，claim 前）。
 
 ## Fail-Closed 枚举
@@ -49,7 +50,7 @@
 | dmPolicy=disabled | DENY（dm_disabled） |
 | dm allowlist 不包含 sender | DENY（user_not_allowed） |
 | groupPolicy=disabled | DENY（group_disabled） |
-| 群未在 allowlist | DENY（group_not_allowed） |
+| 指定群模式下群未在 allowlist | DENY（group_not_allowed） |
 | 群 sender allowlist 不包含 sender | DENY（group_user_not_allowed） |
 | requireMention=true 且无可靠 mention | NOT_ACTIVATED（mention_required） |
 
@@ -95,7 +96,7 @@
 - 私聊与 named-group 规则彼此独立；修改私聊规则不得清空群规则。
 - 群内“仅自己”必须写成 `senderPolicy=allowlist` + `allowFrom=[ownerId]`。
 - 空 `allowFrom` 在 DM 和 group 中都表示 DENY ALL，UI 不得把它标成 owner-only。
-- “所有人”只允许出现在明确维度：DM 的 `dmPolicy=open`，或某个已显式添加群的 `senderPolicy=open`；不存在全局 open preset。
+- “所有人”只允许出现在明确维度：DM 的 `dmPolicy=open`，或群规则的 `senderPolicy=open`。`groupPolicy=open` 只表示所有群匹配 `defaultGroupRule`，不隐含群内所有成员开放。
 
 ## Owner Claim
 

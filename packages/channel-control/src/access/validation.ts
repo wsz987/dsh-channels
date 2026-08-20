@@ -55,7 +55,13 @@ export function validateAccessPolicy(
   }
 
   // requireMention=true is only expressible when the channel can detect mentions.
-  for (const [groupId, rule] of Object.entries(policy.groups)) {
+  const groupRules = [
+    ...Object.entries(policy.groups),
+    ...(policy.defaultGroupRule
+      ? [['*', policy.defaultGroupRule] as const]
+      : []),
+  ];
+  for (const [groupId, rule] of groupRules) {
     if (rule.requireMention && descriptor.mentions !== true) {
       return {
         ok: false,
@@ -94,6 +100,9 @@ export function validateAccessPolicy(
     ...policy,
     allowFrom: dedupeExact(policy.allowFrom),
     groups,
+    ...(policy.defaultGroupRule
+      ? { defaultGroupRule: { ...policy.defaultGroupRule, allowFrom: dedupeExact(policy.defaultGroupRule.allowFrom) } }
+      : {}),
   };
 
   return { ok: true, policy: materializeAccessPolicy(normalized) };

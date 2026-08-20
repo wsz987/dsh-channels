@@ -47,6 +47,25 @@ describe('channelAccessPolicySchema', () => {
     expect(channelAccessPolicySchema.safeParse(policy).success).toBe(true);
   });
 
+  it('accepts global groups only with an explicit enabled default rule', () => {
+    const policy = {
+      ...validPolicy,
+      version: 1,
+      preset: 'custom',
+      groupPolicy: 'open',
+      groups: {},
+      defaultGroupRule: {
+        enabled: true,
+        senderPolicy: 'allowlist',
+        allowFrom: ['123'],
+        requireMention: false,
+      },
+    };
+    expect(channelAccessPolicySchema.safeParse(policy).success).toBe(true);
+    expect(channelAccessPolicySchema.safeParse({ ...policy, defaultGroupRule: undefined }).success).toBe(false);
+    expect(channelAccessPolicySchema.safeParse({ ...policy, groups: { g1: policy.defaultGroupRule } }).success).toBe(false);
+  });
+
   it('rejects an unknown schema version', () => {
     expect(
       channelAccessPolicySchema.safeParse({ ...validPolicy, version: 2 }).success,
@@ -56,12 +75,6 @@ describe('channelAccessPolicySchema', () => {
   it('rejects an invalid dmPolicy', () => {
     expect(
       channelAccessPolicySchema.safeParse({ ...validPolicy, dmPolicy: 'global-open' }).success,
-    ).toBe(false);
-  });
-
-  it('rejects an invalid groupPolicy', () => {
-    expect(
-      channelAccessPolicySchema.safeParse({ ...validPolicy, groupPolicy: 'open' }).success,
     ).toBe(false);
   });
 
@@ -95,6 +108,7 @@ describe('accessPolicyStorageKey', () => {
     expect(second).toBe('access:policy:v1:a:b%3Ac');
     expect(first).not.toBe(second);
   });
+
 });
 
 describe('owner claim command', () => {
