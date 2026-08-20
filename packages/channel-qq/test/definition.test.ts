@@ -110,6 +110,11 @@ describe('createQQDefinition', () => {
     expect(definition.id).toBe('qq');
     expect(definition.enabled).toBe(true);
     expect(definition.autoStart).toBe(true);
+    expect(definition.access).toMatchObject({
+      directMessages: true,
+      groups: true,
+      ownerDiscovery: 'platform',
+    });
     expect(definition.setup.authMethods).toEqual(['credentials']);
     // The configured appId deep-links into the QQ openclaw console.
     expect(definition.setup.setupUrl).toBe('https://q.qq.com/qqbot/openclaw/?appid=dummy-app-id');

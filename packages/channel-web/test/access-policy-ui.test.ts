@@ -35,8 +35,9 @@ const groupRule: GroupAccessRule = {
 };
 
 describe('direct-message access UI mapping', () => {
-  it('keeps account-discovered channels fixed while claim/manual channels remain editable', () => {
+  it('keeps account/platform-discovered channels fixed while claim/manual channels remain editable', () => {
     expect(isDirectMessageAccessEditable('account')).toBe(false);
+    expect(isDirectMessageAccessEditable('platform')).toBe(false);
     expect(isDirectMessageAccessEditable('claim')).toBe(true);
     expect(isDirectMessageAccessEditable('manual')).toBe(true);
   });
@@ -44,6 +45,7 @@ describe('direct-message access UI mapping', () => {
   it('hides editor-only actions when an account channel has no group controls', () => {
     expect(hasEditableAccessControls('account', false)).toBe(false);
     expect(hasEditableAccessControls('account', true)).toBe(true);
+    expect(hasEditableAccessControls('platform', true)).toBe(true);
     expect(hasEditableAccessControls('claim', false)).toBe(true);
   });
 

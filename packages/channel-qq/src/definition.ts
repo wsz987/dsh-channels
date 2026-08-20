@@ -184,13 +184,14 @@ export function createQQDefinition(options: QQDefinitionOptions): ChannelDefinit
     },
     setup,
     autoStart: true,
-    // Declared access capability (plan §11). QQ supports DM + named groups; no
-    // mention activation in V1; owner is identified via the /dsh-claim flow.
+    // QQ platform restricts C2C private messages to the bot creator. The
+    // control plane materializes that narrow private grant; groups stay closed
+    // until the operator explicitly configures them.
     access: {
       directMessages: true,
       groups: true,
       mentions: false,
-      ownerDiscovery: 'claim',
+      ownerDiscovery: 'platform',
       identityLabels: { user: 'QQ User OpenID', group: 'QQ Group OpenID' },
     },
 

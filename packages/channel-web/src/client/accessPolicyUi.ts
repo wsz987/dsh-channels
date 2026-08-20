@@ -40,7 +40,7 @@ export function withGroupAccessMode(
 }
 
 export function isDirectMessageAccessEditable(ownerDiscovery: OwnerDiscoveryMode): boolean {
-  return ownerDiscovery !== 'account';
+  return ownerDiscovery === 'claim' || ownerDiscovery === 'manual';
 }
 
 export function hasEditableAccessControls(

@@ -141,6 +141,7 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
 
   const descriptor = state.descriptor;
   const isAccountDiscovery = descriptor.ownerDiscovery === 'account';
+  const isPlatformDiscovery = descriptor.ownerDiscovery === 'platform';
   const dmAccessEditable = isDirectMessageAccessEditable(descriptor.ownerDiscovery);
   const accessControlsEditable = hasEditableAccessControls(descriptor.ownerDiscovery, descriptor.groups);
 
@@ -264,6 +265,7 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
       )}
 
       {/* ---- owner area (plan §38) ---- */}
+      {!isPlatformDiscovery && (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }} data-testid="access-owner">
         <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('ownerSection')}</span>
         {isAccountDiscovery ? (
@@ -358,9 +360,10 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
           </div>
         )}
       </div>
+      )}
 
       {/* ---- DM controls (plan §39) ---- */}
-      {!isAccountDiscovery || descriptor.directMessages ? (
+      {!isPlatformDiscovery && (!isAccountDiscovery || descriptor.directMessages) ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }} data-testid="access-dm">
           <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('dmSection')}</span>
           {!dmAccessEditable ? (

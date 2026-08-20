@@ -18,6 +18,7 @@ import { channelDocsPlacement, setupIntroKey, type ChannelWebDefinition } from '
 import { CredentialField } from './components/CredentialField.js';
 import { OfficialDocsLink } from './components/OfficialDocsLink.js';
 import { SectionHeading } from './components/SectionHeading.js';
+import { canSaveSetup, changedSetupFields } from './setupFormState.js';
 
 export interface ChannelSetupProps {
   channel: ChannelSummary;
@@ -117,11 +118,8 @@ function SetupForm({
   // this includes DELETING the value (empty draft = clear that credential on
   // save). Untouched fields are never resent, so a configured secret keeps its
   // stored value unless the user explicitly clears it.
-  const changed = descriptor.fields.filter((field) => edited.has(field.name));
-  const missing = descriptor.fields.filter(
-    (field) => field.writable && !field.configured && !(drafts[field.name] ?? '').trim(),
-  );
-  const canSubmit = changed.length > 0 && missing.length === 0 && !saving;
+  const changed = changedSetupFields(descriptor, edited);
+  const canSubmit = canSaveSetup(saving);
 
   const submit = async () => {
     const config: Record<string, unknown> = {};
@@ -184,16 +182,13 @@ function SetupForm({
             value={drafts[field.name] ?? ''}
             onChange={(value) => {
               onDraftsChange((current) => ({ ...current, [field.name]: value }));
-              if (!field.secret) onEditedChange((current) => new Set(current).add(field.name));
+              onEditedChange((current) => new Set(current).add(field.name));
             }}
             t={t}
             disabled={saving}
           />
         ))}
       </div>
-      {missing.length > 0 && changed.length > 0 && (
-        <div style={{ fontSize: 12, color: 'var(--dsw-alias-state-warn-primary)' }}>{t('incompleteSetup')}</div>
-      )}
       {error && <div style={{ fontSize: 12, color: 'var(--dsw-alias-state-error-primary)' }}>{t('saveError')}: {error}</div>}
       {savedNotice && (
         <div style={{ fontSize: 12, color: 'var(--dsw-alias-state-success-primary)' }} data-testid="setup-saved-notice">

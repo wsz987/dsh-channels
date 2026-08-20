@@ -72,13 +72,15 @@
 
 ## Owner
 
-- `ownerDiscovery`：`account`（微信可自动识别）| `claim`（其余四种）| `manual`。
+- `ownerDiscovery`：`account`（微信可自动识别）| `claim`（钉钉、飞书、Telegram）| `manual` | `platform`（QQ 私聊仅创建者）。
 - Weixin：`resolveOwnerIdentity(accountId)` 读取扫码 `userId`，机制封装在
   `channel-weixin` 内部，Control/Harness 不看 `weixin:credential:*`。
 - 无 policy + `ownerDiscovery=account` + resolveOwnerIdentity 有值 → 安全 materialize
   `owner-only`（微信升级迁移）。
 - 无 policy + `ownerDiscovery=claim` → `needs-owner`，普通 inbound DENY，
   仅 `/dsh-claim` 被 Claim Manager 观察。
+- 无 policy + `ownerDiscovery=platform` → 持久化 `dmPolicy=open`、`groupPolicy=disabled`。
+  该窄授权只适用于平台保证私聊仅由创建者发起的 QQ Bot；群聊绝不自动开放。
 
 ### 首次配置期间的精确语义
 
@@ -119,8 +121,9 @@
 
 - 升级前已有连接但无 policy → 不能自动 open。
 - Weixin：已有 `credential.userId` + 缺 policy → 自动 owner-only。
-- QQ / DingTalk / Lark / Telegram：无已验证 owner → `needs-owner`，网络连接可继续以便接收 claim，
+- DingTalk / Lark / Telegram：无已验证 owner → `needs-owner`，网络连接可继续以便接收 claim，
   但 Harness 普通 inbound DENY，Web 提示完成「识别我的账号」。
+- QQ：平台私聊只允许创建者，自动获得私聊授权；群聊仍需在本地显式配置。
 
 ## 边界
 

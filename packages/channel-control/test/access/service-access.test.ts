@@ -68,6 +68,14 @@ const accountDescriptor: ChannelAccessDescriptor = {
   identityLabels: { user: 'Weixin User ID' },
 };
 
+const platformPrivateDescriptor: ChannelAccessDescriptor = {
+  directMessages: true,
+  groups: true,
+  mentions: false,
+  ownerDiscovery: 'platform',
+  identityLabels: { user: 'QQ User OpenID', group: 'QQ Group OpenID' },
+};
+
 describe('ChannelControlService.getAccess', () => {
   it('returns needs-owner for a claim channel with no policy', async () => {
     const { service } = harness([makeDef('qq', claimDescriptor)]);
@@ -105,6 +113,23 @@ describe('ChannelControlService.getAccess', () => {
     ]);
     const state = await service.getAccess('weixin');
     expect(state.readiness).toBe('missing-policy');
+  });
+
+  it('bootstraps platform-private DM access without opening groups or requiring a claim', async () => {
+    const { service } = harness([makeDef('qq', platformPrivateDescriptor)]);
+    const state = await service.getAccess('qq');
+
+    expect(state.readiness).toBe('ready');
+    expect(state.owner.configured).toBe(false);
+    expect(state.policy).toMatchObject({
+      preset: 'custom',
+      dmPolicy: 'open',
+      groupPolicy: 'disabled',
+      groups: {},
+    });
+    expect(() => service.beginOwnerClaim('qq')).toThrowError(
+      expect.objectContaining({ code: 'CLAIM_NOT_SUPPORTED' }),
+    );
   });
 });
 

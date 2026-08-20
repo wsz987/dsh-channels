@@ -218,8 +218,10 @@ export interface ChannelRuntimeStatus {
  * - `claim`: no upfront identity; the owner identifies themselves via the
  *   reserved `/dsh-claim` flow.
  * - `manual`: the owner is assigned manually by the operator.
+ * - `platform`: the platform restricts private messages to the bot creator;
+ *   no local owner claim is needed.
  */
-export type OwnerDiscoveryMode = 'account' | 'claim' | 'manual';
+export type OwnerDiscoveryMode = 'account' | 'claim' | 'manual' | 'platform';
 
 /**
  * Declared access capability of a channel (plan §10). Adapters publish it; the

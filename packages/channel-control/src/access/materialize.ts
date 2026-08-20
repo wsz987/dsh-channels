@@ -38,6 +38,21 @@ export function ownerOnlyPolicy(ownerId: string): ChannelAccessPolicy {
 }
 
 /**
+ * Private messages are platform-restricted to the bot creator. Group access
+ * remains disabled until the local operator explicitly configures it.
+ */
+export function platformPrivatePolicy(): ChannelAccessPolicy {
+  return {
+    version: 1,
+    preset: 'custom',
+    dmPolicy: 'open',
+    allowFrom: [],
+    groupPolicy: 'disabled',
+    groups: {},
+  };
+}
+
+/**
  * Rebind a policy to a new owner identity (plan §25). Returns a NEW policy
  * object; the input is never mutated. When `newOwner` is empty this is a no-op
  * returning the input unchanged (callers guard upstream).

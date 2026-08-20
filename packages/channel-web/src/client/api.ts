@@ -115,7 +115,7 @@ export type ChannelAccessReadiness =
   | 'invalid-policy';
 
 /** How a channel determines its local operator / owner identity (plan §10). */
-export type OwnerDiscoveryMode = 'account' | 'claim' | 'manual';
+export type OwnerDiscoveryMode = 'account' | 'claim' | 'manual' | 'platform';
 
 /** Declared access capability of a channel (plan §10). */
 export interface ChannelAccessDescriptor {

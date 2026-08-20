@@ -24,7 +24,7 @@ import type {
   ChannelAccessState,
 } from '../types.js';
 import type { ChannelAccessPolicyStore } from './policy-store.js';
-import { ownerOnlyPolicy } from './materialize.js';
+import { ownerOnlyPolicy, platformPrivatePolicy } from './materialize.js';
 import { validateAccessPolicy } from './validation.js';
 
 /** A store that can also expose the raw stored string (for missing-vs-invalid). */
@@ -92,6 +92,15 @@ export class ChannelAccessManager {
       }
       // Account channel but no owner resolvable yet (e.g. no credential).
       return this.buildState(descriptor, 'missing-policy', undefined);
+    }
+
+    // Platform-private channels guarantee that C2C messages can only originate
+    // from the bot creator. Materialize that narrow grant, never opening groups.
+    if (descriptor.ownerDiscovery === 'platform') {
+      const policy = platformPrivatePolicy();
+      await this.store.set(channelId, accountId, policy);
+      this.logger.info(`[channel-control] access policy bootstrapped (channel=${channelId}, account=${accountId}, operation=platform-bootstrap, preset=custom, readiness=ready)`);
+      return this.buildState(descriptor, 'ready', policy);
     }
 
     // Non-account owner discovery with no policy.

@@ -19,7 +19,7 @@ mention 支持。所有 ID 一律作为 **opaque string** 处理（在 Harness a
 - canonical sender.id：C2C `senderId`；Group `senderId`
 - canonical conversation.id：C2C `senderId`（= sender.id）；Group `groupOpenid`
 - dm/group：C2C → dm；Group → group
-- owner discovery：`claim`
+- owner discovery：`platform`（QQ 私聊仅创建者；不显示本地 claim）
 - mention：descriptor 先 `false`，完成 activation contract 后再置 `true`
 - fact：映射稳定；按 plan §11
 
