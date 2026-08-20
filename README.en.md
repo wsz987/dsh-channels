@@ -61,6 +61,8 @@ Once installed, configure and authorize channels via QR code in the Harness Web 
 - Channel sessions normally use `Workspace Write`; enable `Full access` only when the task must access files outside the Workspace and you trust it.
 - The project is evolving quickly; back up your data before upgrading.
 
+> **Upgrading from 0.3.x or earlier?** Channel access controls are stricter starting with 0.4.1. After upgrading, open **Harness Web → Settings → Channels → an enabled channel → Secure access** and confirm which accounts and group chats may use the bot. Until this is configured, a channel may appear connected while ordinary messages remain blocked.
+
 ## Installation
 
 ```bash
@@ -74,7 +76,7 @@ npx @deepseek-ai/dsh --profile web --dump-config
 npx @deepseek-ai/dsh web
 ```
 
-After installation, configure or log in to the channels you need in Harness Web "Settings → Channels".
+After installation, configure or log in to the channels you need in Harness Web **Settings → Channels**, then complete the **Secure access** setup.
 
 ### Update and uninstall
 
@@ -100,23 +102,26 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 
 Harness manages secrets; put only references such as `appSecretRef` in `cordis.patch.yml`. See [minimal-profile](apps/example/minimal-profile/) for a complete example. A config patch replaces the whole `config`; it is not a deep merge.
 
-### First use: identify your chat account
+### Required: configure secure access
 
-After a channel connects, use **Secure access** to confirm who may use the local Agent through the bot. The system never treats everyone who can message the bot as authorized by default.
+After a first installation or an upgrade from 0.3.x, use **Secure access** to confirm who may use the local Agent through the bot. The system never treats everyone who can message the bot as authorized by default.
 
 - WeChat automatically selects the account used for the current QR-code login and limits access to that account.
-- For QQ, DingTalk, Lark, and Telegram, select **Identify my account**, send the one-time identification command to the bot in a private chat, then confirm the detected account on the local page.
+- For DingTalk, Lark, and Telegram, select **Identify my account**, send the one-time identification command to the bot in a private chat, then confirm the detected account on the local page.
+- QQ private chats are restricted by the platform to the bot creator, so QQ does not show **Identify my account**. Group access must still be configured locally.
 - After confirmation, the default mode is **Owner only**: only the confirmed account may drive the Agent in a private chat, and group access remains disabled.
 
 While the owner is unidentified, or when the access policy is missing or invalid, the channel may stay connected so account identification can work. All ordinary messages and commands are blocked before they reach the Agent, create a session, or execute operations such as `/stop`. A preselected **Owner only** option is only a suggested draft; it does not take effect until an owner has been identified and confirmed.
 
-Direct-message access can be set to **Disabled**, **Owner only**, **Specific users**, or **Everyone (danger)**. Group-chat access is configured separately and requires each allowed group to be added explicitly. Selecting **Everyone** for direct messages never opens any group chat automatically.
+Except for QQ, direct-message access can be set to **Disabled**, **Owner only**, **Specific users**, or **Everyone (danger)**. QQ private chats remain limited to the bot creator and do not expose local direct-message controls. Group-chat access is configured separately: add specific Group IDs, or explicitly select **All groups (danger)** and configure one shared member rule. Selecting **Everyone** for direct messages never opens any group chat automatically. WeChat currently supports private chats only, so it does not show group settings.
 
 ## Common operations
 
 ### Channel commands
 
 In any channel conversation you can send slash commands, parsed and executed by Harness's official command system:
+
+> Some commands are not currently available in group chats. Availability depends on the channel and conversation.
 
 | Command | Description |
 | --- | --- |

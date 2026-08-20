@@ -59,6 +59,8 @@
 - 渠道会话通常使用 `Workspace Write`；仅在确需访问 Workspace 外文件且信任当前任务时启用 `Full access`。
 - 项目仍在快速迭代，升级前请备份数据。
 
+> **从 0.3.x 或更早版本升级？** 0.4.1 起收紧了渠道访问权限。升级后请前往 **Harness Web → 设置 → 渠道 → 选择已启用的渠道 → 安全访问**，重新确认允许使用 Bot 的账号和群聊。完成前，即使渠道显示连接正常，普通消息也可能无法进入 Agent。
+
 ## 安装
 
 ```bash
@@ -72,7 +74,7 @@ npx @deepseek-ai/dsh --profile web --dump-config
 npx @deepseek-ai/dsh web
 ```
 
-安装完成后，在 Harness Web 的“设置 → 渠道”中配置或登录需要使用的渠道。
+安装完成后，在 Harness Web 的“设置 → 渠道”中配置或登录需要使用的渠道，并完成“安全访问”设置。
 
 ### 更新与卸载
 
@@ -98,9 +100,9 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 
 密钥由 Harness 凭据管理，`cordis.patch.yml` 只填写 `appSecretRef` 等引用。完整示例见 [minimal-profile](apps/example/minimal-profile/)；配置 patch 会整体替换 `config`，不会深度合并。
 
-### 首次使用：识别你的聊天账号
+### 必做：配置安全访问
 
-渠道连接成功后，还需要在“安全访问”中确认谁可以通过 Bot 使用本机 Agent。系统默认不会把“能给 Bot 发消息的人”自动视为已授权用户。
+首次安装或从 0.3.x 升级后，需要在“安全访问”中确认谁可以通过 Bot 使用本机 Agent。系统默认不会把“能给 Bot 发消息的人”自动视为已授权用户。
 
 - 微信会根据当前扫码账号自动设置为“仅当前扫码微信账号”。
 - 钉钉、飞书和 Telegram 请点击“识别我的账号”，按页面提示私聊 Bot 发送一次识别指令，然后回到本地页面确认检测到的账号。
@@ -116,6 +118,8 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 ### 渠道指令
 
 任意渠道会话内可直接发斜杠指令，由 Harness 官方命令系统解析执行：
+
+> 部分指令暂不支持在群聊中使用，具体可用范围以当前渠道和会话为准。
 
 | 指令 | 说明 |
 | --- | --- |
