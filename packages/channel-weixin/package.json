@@ -1,6 +1,6 @@
 {
   "name": "@wsz987/channel-weixin",
-  "version": "0.4.1-beta.0",
+  "version": "0.4.1",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/wsz987/dsh-channels.git"
