@@ -171,6 +171,34 @@ function sdkUpstream(client: LarkSdkClient, outbound: LarkUpstream): LarkSdkUpst
 }
 
 describe('toGatewayRaw (v1 message event → gateway raw shape)', () => {
+  it('accepts null optional identity fields from live Feishu events', () => {
+    const raw = toGatewayRaw(flatEvent({
+      sender: {
+        sender_id: { open_id: 'ou_user123', union_id: null, user_id: null },
+        sender_type: 'user',
+        tenant_key: null,
+      },
+      message: {
+        message_id: 'om_dm_nulls',
+        chat_id: 'oc_dm_chat',
+        chat_type: 'p2p',
+        message_type: 'text',
+        content: JSON.stringify({ text: 'hi' }),
+        create_time: '1700000000000',
+        root_id: null,
+        parent_id: null,
+        thread_id: null,
+      },
+    }));
+
+    expect(raw).toMatchObject({
+      msgId: 'om_dm_nulls',
+      senderId: 'ou_user123',
+      conversationId: 'oc_dm_chat',
+      chatType: 'p2p',
+    });
+  });
+
   it('maps a text dm event to the gateway raw shape', () => {
     const raw = toGatewayRaw(flatEvent({
       message: {

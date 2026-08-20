@@ -410,7 +410,7 @@ describe('mapper (fixture-driven)', () => {
 
   it('rejects inbound payloads without an authoritative chatType', () => {
     expect(() => mapInbound({ type: 'text', senderId: 'ou_1', conversationId: 'oc_1' }, meta))
-      .toThrow('lark inbound payload is invalid');
+      .toThrow('lark inbound payload is invalid: chatType');
   });
 });
 

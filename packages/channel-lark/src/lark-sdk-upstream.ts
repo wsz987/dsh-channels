@@ -74,32 +74,32 @@ export interface LarkSdkUpstreamOptions {
  * delivers to the `im.message.receive_v1` handler (header + event fields
  * merged, per the SDK's RequestHandle.parse).
  */
-const optionalIdSchema = z.string().optional();
+const optionalStringSchema = z.string().nullish().transform((value) => value ?? undefined);
 const larkMessageEventDataSchema = z.object({
-  event_id: optionalIdSchema,
-  event_type: z.string().optional(),
-  token: z.string().optional(),
-  create_time: z.string().optional(),
+  event_id: optionalStringSchema,
+  event_type: optionalStringSchema,
+  token: optionalStringSchema,
+  create_time: optionalStringSchema,
   sender: z.object({
     sender_id: z.object({
-      union_id: optionalIdSchema,
-      user_id: optionalIdSchema,
-      open_id: optionalIdSchema,
+      union_id: optionalStringSchema,
+      user_id: optionalStringSchema,
+      open_id: optionalStringSchema,
     }).passthrough().optional(),
-    sender_type: z.string().optional(),
-    tenant_key: z.string().optional(),
+    sender_type: optionalStringSchema,
+    tenant_key: optionalStringSchema,
   }).passthrough().optional(),
   message: z.object({
-    message_id: optionalIdSchema,
-    root_id: optionalIdSchema,
-    parent_id: optionalIdSchema,
-    thread_id: optionalIdSchema,
-    create_time: z.string().optional(),
-    chat_id: optionalIdSchema,
+    message_id: optionalStringSchema,
+    root_id: optionalStringSchema,
+    parent_id: optionalStringSchema,
+    thread_id: optionalStringSchema,
+    create_time: optionalStringSchema,
+    chat_id: optionalStringSchema,
     chat_type: z.enum(['p2p', 'group']),
-    message_type: z.string().optional(),
+    message_type: optionalStringSchema,
     /** JSON-encoded message body per the v1 schema, e.g. '{"text":"hi"}'. */
-    content: z.string().optional(),
+    content: optionalStringSchema,
   }).passthrough().optional(),
 }).passthrough();
 
@@ -117,7 +117,10 @@ type MessageContent = Record<string, unknown>;
 export function toGatewayRaw(input: unknown): Record<string, unknown> | undefined {
   const parsed = larkMessageEventDataSchema.safeParse(input);
   if (!parsed.success) {
-    throw new ChannelError('CHANNEL_ERROR', 'lark message event payload is invalid');
+    throw new ChannelError(
+      'CHANNEL_ERROR',
+      `lark message event payload is invalid: ${zodIssueSummary(parsed.error)}`,
+    );
   }
   const data = parsed.data;
   const message = data.message;
@@ -283,6 +286,13 @@ function parseContent(content: string | undefined): MessageContent {
   } catch {
     return {};
   }
+}
+
+function zodIssueSummary(error: z.ZodError): string {
+  return error.issues
+    .slice(0, 3)
+    .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
+    .join('; ');
 }
 
 /** Best-effort plain-text extraction from a rich-text 'post' body. */

@@ -77,7 +77,9 @@ type LarkRaw = z.infer<typeof larkRawSchema>;
 function parseLarkRaw(raw: unknown): LarkRaw {
   const parsed = larkRawSchema.safeParse(raw);
   if (!parsed.success) {
-    throw new ChannelError('CHANNEL_ERROR', 'lark inbound payload is invalid');
+    const issue = parsed.error.issues[0];
+    const detail = issue ? `${issue.path.join('.') || '<root>'}: ${issue.message}` : 'unknown validation error';
+    throw new ChannelError('CHANNEL_ERROR', `lark inbound payload is invalid: ${detail}`);
   }
   return parsed.data;
 }
