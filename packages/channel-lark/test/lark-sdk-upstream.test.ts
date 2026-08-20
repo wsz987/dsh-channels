@@ -175,7 +175,7 @@ describe('toGatewayRaw (v1 message event → gateway raw shape)', () => {
     const raw = toGatewayRaw(flatEvent({
       message: {
         message_id: 'om_dm1',
-        chat_id: 'ou_dm_user',
+        chat_id: 'oc_dm_chat',
         chat_type: 'p2p',
         message_type: 'text',
         content: JSON.stringify({ text: 'hi' }),
@@ -187,7 +187,7 @@ describe('toGatewayRaw (v1 message event → gateway raw shape)', () => {
       msgId: 'om_dm1',
       eventId: 'evt-1',
       senderId: 'ou_user123',
-      conversationId: 'ou_dm_user',
+      conversationId: 'oc_dm_chat',
       chatType: 'p2p',
       content: 'hi',
     });
@@ -380,7 +380,7 @@ describe('LarkSdkUpstream.receive', () => {
     await client.emit(v1Event(flatEvent({
       message: {
         message_id: 'om_dm2',
-        chat_id: 'ou_dm_user',
+        chat_id: 'oc_dm_chat',
         chat_type: 'p2p',
         message_type: 'text',
         content: JSON.stringify({ text: 'dm hi' }),
@@ -397,7 +397,7 @@ describe('LarkSdkUpstream.receive', () => {
     const event = listener.mock.calls
       .map((call) => call[0] as MessageReceived)
       .find((candidate) => candidate.type === 'message.received')!;
-    expect(event.conversation.id).toBe('ou_dm_user');
+    expect(event.conversation.id).toBe('oc_dm_chat');
     expect(event.conversation.type).toBe('dm');
     expect(event.conversation.threadId).toBeUndefined();
 

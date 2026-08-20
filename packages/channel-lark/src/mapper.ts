@@ -32,7 +32,8 @@ import type {
   ThreadId,
   VideoPart,
 } from '@wsz987/channel-core';
-import { textParts } from '@wsz987/channel-core';
+import { ChannelError, textParts } from '@wsz987/channel-core';
+import { z } from 'zod';
 
 
 /**
@@ -49,25 +50,36 @@ export interface LarkInboundMeta {
   accountId: AccountId;
 }
 
-interface LarkRaw {
-  type?: string;
-  msgId?: string;
+const larkRawSchema = z.object({
+  type: z.string().optional(),
+  msgId: z.string().optional(),
   /** Webhook event id; used as a dedup fallback when `msgId` is absent. */
-  eventId?: string;
-  senderId?: string;
-  conversationId?: string;
+  eventId: z.string().optional(),
+  senderId: z.string().optional(),
+  conversationId: z.string().optional(),
+  /** Platform chat kind from im.message.receive_v1. */
+  chatType: z.enum(['p2p', 'group']),
   /** Optional thread id within the conversation (e.g. a reply to a topic). */
-  threadId?: string;
-  content?: string;
-  picUrl?: string;
-  mediaUrl?: string;
-  durationMs?: number;
-  title?: string;
+  threadId: z.string().optional(),
+  content: z.string().optional(),
+  picUrl: z.string().optional(),
+  mediaUrl: z.string().optional(),
+  durationMs: z.number().optional(),
+  title: z.string().optional(),
   /** Interaction callback fields (card button press). */
-  interactionId?: string;
-  action?: string;
-  value?: unknown;
-  [key: string]: unknown;
+  interactionId: z.string().optional(),
+  action: z.string().optional(),
+  value: z.unknown().optional(),
+}).passthrough();
+
+type LarkRaw = z.infer<typeof larkRawSchema>;
+
+function parseLarkRaw(raw: unknown): LarkRaw {
+  const parsed = larkRawSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new ChannelError('CHANNEL_ERROR', 'lark inbound payload is invalid');
+  }
+  return parsed.data;
 }
 
 /** Stable hash for ids when the gateway omits a msgId. */
@@ -80,11 +92,11 @@ export function simpleHash(input: string): string {
 }
 
 /**
- * Conversation kind from the platform id. Lark conventions: `oc_` prefixes an
- * open chat id (group), anything else (e.g. `ou_` open user id) is a DM.
+ * Conversation kind from the platform event. Feishu uses `oc_` chat ids for
+ * both p2p and group conversations, so the id prefix is not an identity fact.
  */
-function conversationTypeFor(conversationId: string): 'dm' | 'group' {
-  return conversationId.startsWith('oc_') ? 'group' : 'dm';
+function conversationTypeFor(value: LarkRaw): 'dm' | 'group' {
+  return value.chatType === 'p2p' ? 'dm' : 'group';
 }
 
 /**
@@ -94,7 +106,7 @@ function conversationTypeFor(conversationId: string): 'dm' | 'group' {
 function conversationFor(value: LarkRaw, conversationId: ConversationId): MessageReceived['conversation'] {
   const conversation: MessageReceived['conversation'] = {
     id: conversationId,
-    type: conversationTypeFor(conversationId),
+    type: conversationTypeFor(value),
   };
   if (value.threadId) {
     conversation.threadId = value.threadId as ThreadId;
@@ -104,7 +116,7 @@ function conversationFor(value: LarkRaw, conversationId: ConversationId): Messag
 
 /** Map one raw lark message into the stable channel event shape. */
 export function mapInbound(raw: unknown, meta: LarkInboundMeta): MessageReceived {
-  const value = raw as LarkRaw;
+  const value = parseLarkRaw(raw);
   const sender: SenderId = (value.senderId ?? 'unknown') as SenderId;
   // Lark payloads carry a conversation id; fall back to the sender when the
   // gateway omits it (direct/one-off payloads).
@@ -135,7 +147,7 @@ export function mapInbound(raw: unknown, meta: LarkInboundMeta): MessageReceived
  * ref preserves `conversationId` + optional `threadId` exactly like messages.
  */
 export function mapInteraction(raw: unknown, meta: LarkInboundMeta): InteractionReceived {
-  const value = raw as LarkRaw;
+  const value = parseLarkRaw(raw);
   const sender: SenderId = (value.senderId ?? 'unknown') as SenderId;
   const conversationId: ConversationId = (value.conversationId ?? sender) as ConversationId;
 
@@ -251,6 +263,6 @@ export function toTextPayload(target: { conversationId: string }, message: Outbo
 
 /** Dedup identity for raw payloads (webhook retries share one msgId/eventId). */
 export function dedupKey(raw: unknown): string {
-  const value = raw as LarkRaw;
+  const value = parseLarkRaw(raw);
   return value.msgId ?? value.eventId ?? `lk-${simpleHash(JSON.stringify(value))}`;
 }

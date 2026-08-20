@@ -7,6 +7,7 @@
     "msgId": "msg_thread_1",
     "senderId": "ou_123",
     "conversationId": "oc_456",
+    "chatType": "group",
     "threadId": "om_789",
     "content": "threaded hello"
   },

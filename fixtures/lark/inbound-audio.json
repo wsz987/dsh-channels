@@ -7,6 +7,7 @@
     "msgId": "msg_aud_1",
     "senderId": "ou_123",
     "conversationId": "oc_456",
+    "chatType": "group",
     "mediaUrl": "https://example.com/a.ogg",
     "durationMs": 5200
   },

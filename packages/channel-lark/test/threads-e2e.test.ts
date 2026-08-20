@@ -151,6 +151,7 @@ function rawText(msgId: string, conversationId: string, threadId?: string, conte
     msgId,
     senderId: 'ou_123',
     conversationId,
+    chatType: 'group',
     ...(threadId ? { threadId } : {}),
     content,
   };

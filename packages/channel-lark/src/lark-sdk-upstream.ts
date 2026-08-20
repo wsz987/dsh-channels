@@ -25,6 +25,8 @@
  * client and drive a real `EventDispatcher` with v1 event envelopes.
  */
 import { EventDispatcher, LoggerLevel } from '@larksuiteoapi/node-sdk';
+import { ChannelError } from '@wsz987/channel-core';
+import { z } from 'zod';
 import type { CardCreateResult, LarkFileRef, LarkMediaRef, LarkOutbound, LarkUpstream } from './upstream.js';
 
 /** Event type key for inbound message delivery (v1 event). */
@@ -72,30 +74,36 @@ export interface LarkSdkUpstreamOptions {
  * delivers to the `im.message.receive_v1` handler (header + event fields
  * merged, per the SDK's RequestHandle.parse).
  */
-export interface LarkMessageEventData {
-  event_id?: string;
-  event_type?: string;
-  token?: string;
-  create_time?: string;
-  sender?: {
-    sender_id?: { union_id?: string; user_id?: string; open_id?: string };
-    sender_type?: string;
-    tenant_key?: string;
-  };
-  message?: {
-    message_id?: string;
-    root_id?: string;
-    parent_id?: string;
-    thread_id?: string;
-    create_time?: string;
-    chat_id?: string;
-    chat_type?: string;
-    message_type?: string;
+const optionalIdSchema = z.string().optional();
+const larkMessageEventDataSchema = z.object({
+  event_id: optionalIdSchema,
+  event_type: z.string().optional(),
+  token: z.string().optional(),
+  create_time: z.string().optional(),
+  sender: z.object({
+    sender_id: z.object({
+      union_id: optionalIdSchema,
+      user_id: optionalIdSchema,
+      open_id: optionalIdSchema,
+    }).passthrough().optional(),
+    sender_type: z.string().optional(),
+    tenant_key: z.string().optional(),
+  }).passthrough().optional(),
+  message: z.object({
+    message_id: optionalIdSchema,
+    root_id: optionalIdSchema,
+    parent_id: optionalIdSchema,
+    thread_id: optionalIdSchema,
+    create_time: z.string().optional(),
+    chat_id: optionalIdSchema,
+    chat_type: z.enum(['p2p', 'group']),
+    message_type: z.string().optional(),
     /** JSON-encoded message body per the v1 schema, e.g. '{"text":"hi"}'. */
-    content?: string;
-  };
-  [key: string]: unknown;
-}
+    content: z.string().optional(),
+  }).passthrough().optional(),
+}).passthrough();
+
+export type LarkMessageEventData = z.infer<typeof larkMessageEventDataSchema>;
 
 /** Parsed message content JSON (best-effort; empty object when absent). */
 type MessageContent = Record<string, unknown>;
@@ -106,7 +114,12 @@ type MessageContent = Record<string, unknown>;
  * threadId, content, ... }`). Returns `undefined` when the event carries no
  * message body.
  */
-export function toGatewayRaw(data: LarkMessageEventData): Record<string, unknown> | undefined {
+export function toGatewayRaw(input: unknown): Record<string, unknown> | undefined {
+  const parsed = larkMessageEventDataSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new ChannelError('CHANNEL_ERROR', 'lark message event payload is invalid');
+  }
+  const data = parsed.data;
   const message = data.message;
   if (!message || typeof message !== 'object') return undefined;
   const raw: Record<string, unknown> = {
@@ -115,9 +128,8 @@ export function toGatewayRaw(data: LarkMessageEventData): Record<string, unknown
     eventId: data.event_id,
     senderId: senderIdOf(data.sender),
     conversationId: message.chat_id,
-    // Platform chat kind ('p2p' | 'group'); the mapper derives the
-    // conversation type from the chat id prefix ('oc_' → group), so this is
-    // kept for observability only.
+    // Platform chat kind ('p2p' | 'group') is authoritative for ACL identity;
+    // Feishu uses oc_ chat ids for both direct and group conversations.
     chatType: message.chat_type,
   };
   // Thread preservation: the mapper keys Harness sessions by
@@ -212,7 +224,7 @@ export class LarkSdkUpstream implements LarkUpstream {
     this.dispatcher.register({
       [MESSAGE_EVENT_KEY]: (data: unknown) => {
         if (!this.onMessage) return undefined;
-        const raw = toGatewayRaw(data as LarkMessageEventData);
+        const raw = toGatewayRaw(data);
         if (raw !== undefined) this.onMessage(raw);
         return undefined;
       },
@@ -266,8 +278,8 @@ function senderIdOf(sender: LarkMessageEventData['sender']): string | undefined 
 function parseContent(content: string | undefined): MessageContent {
   if (!content) return {};
   try {
-    const parsed = JSON.parse(content) as unknown;
-    return parsed && typeof parsed === 'object' ? (parsed as MessageContent) : {};
+    const parsed = z.record(z.string(), z.unknown()).safeParse(JSON.parse(content));
+    return parsed.success ? parsed.data : {};
   } catch {
     return {};
   }

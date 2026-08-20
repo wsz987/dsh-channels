@@ -168,6 +168,7 @@ describe('InboundProcessor hydration wiring', () => {
       msgId: 'om_in_5',
       senderId: 'ou_1',
       conversationId: 'oc_1',
+      chatType: 'group',
       picUrl: 'img_v2_abc',
     });
     const event = listener.mock.calls[0]?.[0] as MessageReceived;
@@ -195,6 +196,7 @@ describe('InboundProcessor hydration wiring', () => {
       msgId: 'om_in_6',
       senderId: 'ou_1',
       conversationId: 'oc_1',
+      chatType: 'group',
       picUrl: 'img_v2_boom',
     });
     // The event was still emitted despite the download failure.
@@ -219,6 +221,7 @@ describe('InboundProcessor hydration wiring', () => {
       msgId: 'om_in_7',
       senderId: 'ou_1',
       conversationId: 'oc_1',
+      chatType: 'group',
       picUrl: 'img_v2_noport',
     });
     const event = listener.mock.calls[0]?.[0] as MessageReceived;
@@ -319,6 +322,7 @@ describe('InboundProcessor file hydration wiring (M7A)', () => {
       msgId: 'om_file_5',
       senderId: 'ou_1',
       conversationId: 'oc_1',
+      chatType: 'group',
       mediaUrl: 'file_v2_xyz',
       title: 'contract.pdf',
     });
@@ -348,6 +352,7 @@ describe('InboundProcessor file hydration wiring (M7A)', () => {
       msgId: 'om_file_6',
       senderId: 'ou_1',
       conversationId: 'oc_1',
+      chatType: 'group',
       mediaUrl: 'file_v2_boom',
       title: 'broken.pdf',
     });

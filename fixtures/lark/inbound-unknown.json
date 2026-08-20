@@ -6,7 +6,8 @@
     "type": "sticker",
     "msgId": "msg_unk_1",
     "senderId": "ou_123",
-    "conversationId": "oc_456"
+    "conversationId": "oc_456",
+    "chatType": "group"
   },
   "expected": {
     "type": "message.received",

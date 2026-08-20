@@ -34,9 +34,9 @@ mention 支持。所有 ID 一律作为 **opaque string** 处理（在 Harness a
 
 ## Lark / Feishu
 
-- canonical sender.id：`senderId`
-- canonical conversation.id：`conversationId`；`oc_*` → group
-- dm/group：`oc_*` 前缀 → group；否则 dm
+- canonical sender.id：`senderId`（事件 `sender.sender_id.open_id`）
+- canonical conversation.id：`conversationId`（事件 `message.chat_id`）；私聊和群聊都可能是 `oc_*`
+- dm/group：使用事件 `message.chat_type`：`p2p` → dm，`group` → group；不得根据 `chat_id` 前缀推断
 - thread：`threadId` 只参与 Session routing，**不参与 group ACL identity**
 - owner discovery：`claim`
 - mention：descriptor 先 `false`

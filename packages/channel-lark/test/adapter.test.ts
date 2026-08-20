@@ -203,6 +203,19 @@ function v1Event(data: LarkMessageEventData = flatEvent()): Record<string, unkno
 const meta = { channel: 'lark' as never, accountId: 'main' as never };
 
 describe('mapper (fixture-driven)', () => {
+  it('uses platform chatType for p2p conversations with oc_ chat ids', () => {
+    const event = mapInbound({
+      type: 'text',
+      msgId: 'm_dm',
+      senderId: 'ou_1',
+      conversationId: 'oc_dm_chat',
+      chatType: 'p2p',
+      content: 'private',
+    }, meta);
+
+    expect(event.conversation).toEqual({ id: 'oc_dm_chat', type: 'dm' });
+  });
+
   it('maps inbound text fixture', async () => {
     const fixture = await loadFixture('lark', 'inbound-text');
     const event = mapInbound(fixture.payload, meta);
@@ -231,6 +244,7 @@ describe('mapper (fixture-driven)', () => {
       msgId: 'm_img_key',
       senderId: 'ou_1',
       conversationId: 'oc_1',
+      chatType: 'group',
       picUrl: 'img_v2_abcdef',
       title: 'opaque key image',
     };
@@ -247,19 +261,19 @@ describe('mapper (fixture-driven)', () => {
 
   it('keeps audio/video/file mapped to url when mediaUrl is a genuine URL', () => {
     const audio = mapInbound(
-      { type: 'audio', msgId: 'm1', senderId: 'ou_1', conversationId: 'oc_1', mediaUrl: 'https://x/a.ogg', durationMs: 1000 },
+      { type: 'audio', msgId: 'm1', senderId: 'ou_1', conversationId: 'oc_1', chatType: 'group', mediaUrl: 'https://x/a.ogg', durationMs: 1000 },
       meta,
     );
     expect((audio.message.content[0] as { url?: string }).url).toBe('https://x/a.ogg');
 
     const video = mapInbound(
-      { type: 'video', msgId: 'm2', senderId: 'ou_1', conversationId: 'oc_1', mediaUrl: 'https://x/v.mp4' },
+      { type: 'video', msgId: 'm2', senderId: 'ou_1', conversationId: 'oc_1', chatType: 'group', mediaUrl: 'https://x/v.mp4' },
       meta,
     );
     expect((video.message.content[0] as { url?: string }).url).toBe('https://x/v.mp4');
 
     const file = mapInbound(
-      { type: 'file', msgId: 'm3', senderId: 'ou_1', conversationId: 'oc_1', mediaUrl: 'https://x/doc.pdf', title: 'doc' },
+      { type: 'file', msgId: 'm3', senderId: 'ou_1', conversationId: 'oc_1', chatType: 'group', mediaUrl: 'https://x/doc.pdf', title: 'doc' },
       meta,
     );
     expect((file.message.content[0] as { url?: string }).url).toBe('https://x/doc.pdf');
@@ -275,6 +289,7 @@ describe('mapper (fixture-driven)', () => {
       msgId: 'm_file_key',
       senderId: 'ou_1',
       conversationId: 'oc_1',
+      chatType: 'group',
       mediaUrl: 'file_v2_abcdef',
       title: 'report.pdf',
     };
@@ -293,20 +308,20 @@ describe('mapper (fixture-driven)', () => {
     // SDK audio/video bodies carry opaque file_keys; mirror the file rule
     // (plan §28). Genuine http(s) URLs stay in url (plan §9).
     const audio = mapInbound(
-      { type: 'audio', msgId: 'a1', senderId: 'ou_1', conversationId: 'oc_1', mediaUrl: 'file_v2_voice', durationMs: 1200 },
+      { type: 'audio', msgId: 'a1', senderId: 'ou_1', conversationId: 'oc_1', chatType: 'group', mediaUrl: 'file_v2_voice', durationMs: 1200 },
       meta,
     );
     expect(audio.message.content[0]).toEqual({ type: 'audio', resourceRef: 'file_v2_voice', durationMs: 1200 });
 
     const video = mapInbound(
-      { type: 'video', msgId: 'v1', senderId: 'ou_1', conversationId: 'oc_1', mediaUrl: 'file_v2_movie' },
+      { type: 'video', msgId: 'v1', senderId: 'ou_1', conversationId: 'oc_1', chatType: 'group', mediaUrl: 'file_v2_movie' },
       meta,
     );
     expect(video.message.content[0]).toEqual({ type: 'video', resourceRef: 'file_v2_movie' });
 
     // A genuine URL for audio/video continues to use the url carrier.
     const audioUrl = mapInbound(
-      { type: 'audio', msgId: 'a2', senderId: 'ou_1', conversationId: 'oc_1', mediaUrl: 'https://x/a.ogg' },
+      { type: 'audio', msgId: 'a2', senderId: 'ou_1', conversationId: 'oc_1', chatType: 'group', mediaUrl: 'https://x/a.ogg' },
       meta,
     );
     expect((audioUrl.message.content[0] as { url?: string }).url).toBe('https://x/a.ogg');
@@ -338,7 +353,7 @@ describe('mapper (fixture-driven)', () => {
 
   it('drops threadId from the conversation when the payload has none', () => {
     const event = mapInbound(
-      { type: 'text', msgId: 'm1', senderId: 'ou_1', conversationId: 'oc_2', content: 'hi' },
+      { type: 'text', msgId: 'm1', senderId: 'ou_1', conversationId: 'oc_2', chatType: 'group', content: 'hi' },
       meta,
     );
     expect(event.conversation.threadId).toBeUndefined();
@@ -346,7 +361,7 @@ describe('mapper (fixture-driven)', () => {
 
   it('falls back to the sender id as conversation id when conversationId is missing', () => {
     const event = mapInbound(
-      { type: 'text', senderId: 'ou_7', content: 'hi' },
+      { type: 'text', senderId: 'ou_7', chatType: 'p2p', content: 'hi' },
       meta,
     );
     expect(event.conversation.id).toBe('ou_7');
@@ -385,12 +400,17 @@ describe('mapper (fixture-driven)', () => {
   });
 
   it('dedupKey is stable per msgId, falls back to eventId, then a content hash', () => {
-    const raw = { type: 'text', senderId: 'u1', msgId: 'm1', content: 'x' };
+    const raw = { type: 'text', senderId: 'u1', chatType: 'p2p', msgId: 'm1', content: 'x' };
     expect(dedupKey(raw)).toBe('m1');
-    const noId = { type: 'text', senderId: 'u1', content: 'x' };
+    const noId = { type: 'text', senderId: 'u1', chatType: 'p2p', content: 'x' };
     expect(dedupKey(noId)).toBe(dedupKey({ ...noId }));
-    const eventIdOnly = { type: 'text', senderId: 'u1', eventId: 'e9', content: 'x' };
+    const eventIdOnly = { type: 'text', senderId: 'u1', chatType: 'p2p', eventId: 'e9', content: 'x' };
     expect(dedupKey(eventIdOnly)).toBe('e9');
+  });
+
+  it('rejects inbound payloads without an authoritative chatType', () => {
+    expect(() => mapInbound({ type: 'text', senderId: 'ou_1', conversationId: 'oc_1' }, meta))
+      .toThrow('lark inbound payload is invalid');
   });
 });
 
@@ -489,7 +509,7 @@ describe('InboundProcessor dedup + interaction routing', () => {
     const listener = vi.fn();
     service.on(listener);
 
-    const raw = { type: 'text', senderId: 'ou_1', conversationId: 'oc_1', msgId: 'dup-1', content: 'hi' };
+    const raw = { type: 'text', senderId: 'ou_1', conversationId: 'oc_1', chatType: 'group', msgId: 'dup-1', content: 'hi' };
     await processor.handle(raw);
     await processor.handle(raw);
     expect(listener).toHaveBeenCalledTimes(1);
@@ -500,8 +520,8 @@ describe('InboundProcessor dedup + interaction routing', () => {
     const { service, processor } = makeProcessor();
     const listener = vi.fn();
     service.on(listener);
-    await processor.handle({ type: 'text', senderId: 'ou_1', msgId: 'a', content: '1' });
-    await processor.handle({ type: 'text', senderId: 'ou_1', msgId: 'b', content: '2' });
+    await processor.handle({ type: 'text', senderId: 'ou_1', chatType: 'p2p', msgId: 'a', content: '1' });
+    await processor.handle({ type: 'text', senderId: 'ou_1', chatType: 'p2p', msgId: 'b', content: '2' });
     expect(listener).toHaveBeenCalledTimes(2);
   });
 
@@ -515,6 +535,7 @@ describe('InboundProcessor dedup + interaction routing', () => {
       eventId: 'evt-1',
       senderId: 'ou_1',
       conversationId: 'oc_1',
+      chatType: 'group',
       interactionId: 'card_1',
       action: 'button_click',
       value: 'approve',
@@ -706,7 +727,7 @@ describe('LarkAdapter lifecycle', () => {
     transport.route('/stream', (_init, signal) => {
       calls += 1;
       if (calls === 1) {
-        return { type: 'text', msgId: 'm1', senderId: 'ou_123', conversationId: 'oc_1', content: 'hi' };
+        return { type: 'text', msgId: 'm1', senderId: 'ou_123', conversationId: 'oc_1', chatType: 'group', content: 'hi' };
       }
       controller.abort();
       void ctx.dispose();

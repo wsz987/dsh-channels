@@ -316,6 +316,7 @@ describe('M3 acceptance: editable-card streaming through the generic ReplyRouter
       msgId: 'dup-m1',
       senderId: 'ou_1',
       conversationId: 'oc_1',
+      chatType: 'group',
       content: 'hello',
     };
     transport.route('/stream', (_init, signal) => {

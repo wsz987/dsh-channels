@@ -7,6 +7,7 @@
     "msgId": "msg_text_1",
     "senderId": "ou_123",
     "conversationId": "oc_456",
+    "chatType": "group",
     "content": "hello harness"
   },
   "expected": {
