@@ -368,12 +368,22 @@ getUpdates allowed_updates=['message', 'callback_query']
 
 因此：
 
-- webhook 与 long poll 不应同时作为 active update receiver
+- `deleteWebhook` 不是只读探测：adapter 启动时会移除该 Bot 已配置的 webhook，并接管
+  update receiver；同一 Bot 不得同时交给其他 webhook consumer
 - 群聊如果开启 Privacy Mode，Bot 不会自动看到所有普通群消息
 - 如果产品目标是“所有群消息都进入 Agent”，必须显式核验 BotFather privacy / 管理员状态
 - 当前 20 MiB inbound download cap 与 Telegram cloud Bot API `getFile` 的 20 MB 下载限制对齐
 
 **CODE-CONFIRMED**：仓库 manifest 与 fixtures 已迁移到 **Bot API 10.2**，`auto` 使用 Rich Markdown；最低支持版本为 10.2，不维护旧 Bot API server。状态仍为 `experimental`，Rich output、draft streaming、callback 与 429 recovery 仍需真实 Bot live gate。
+
+**CODE-CONFIRMED / RELEASE-BLOCKING**：当前仍有三项不能由离线测试掩盖的实现缺口：
+
+1. `sendMedia()` 尚未像 text/edit 方法一样解析并检查 Bot API `{ ok, result, ... }`
+   envelope；`ok: false` 可能被上层当作 delivered。
+2. 普通 `message` mapper 与 `dedupKey()` 仍对不可信 update 使用 TypeScript cast，未建立
+   完整 zod trust-boundary schema。
+3. `callback_query.message/chat` 在 schema 中可缺失，mapper 却会回退为 sender-id DM；
+   inline-message callback 没有可靠 conversation identity，发布前应 fail closed 或建立单独 contract。
 
 ### 6.5 Weixin iLink
 
@@ -449,7 +459,14 @@ DSH minimum:  >=10.2
 官方当前:     10.2 (2026-07-14)
 ```
 
-优先执行：
+进入 live gate 前先修复：
+
+1. media response envelope 必须校验 `ok` 并保留结构化错误
+2. message/update payload 必须经 zod `safeParse` 后再进入 mapper
+3. 无 `message.chat` 的 callback query 必须 fail closed，禁止伪造成 DM
+4. 明确接受 polling 启动会删除已有 webhook 的运维语义
+
+随后执行：
 
 1. Rich Markdown / table / code / link live verification
 2. DM draft 与 group final edit live verification
@@ -1383,7 +1400,10 @@ For each target channel:
 - [ ] QQ: verify DSH does not accidentally rely on SDK `FULL_INTENTS`.
 - [ ] QQ: `markdownSupport=true` only when platform permission exists.
 - [x] Telegram: align manifest and fixtures to Bot API 10.2; live gate remains pending.
-- [ ] Telegram: verify webhook disabled before long polling.
+- [x] Telegram: document that polling startup deletes an existing webhook.
+- [ ] Telegram: validate media Bot API envelopes before reporting delivery.
+- [ ] Telegram: replace raw message/update casts with zod trust-boundary parsing.
+- [ ] Telegram: fail closed for callback queries without `message.chat`.
 - [ ] Weixin: keep file outbound unsupported until concrete upstream supports it.
 - [ ] Weixin: replace pending live version/commit after real gate.
 - [ ] Weixin: do not treat `channels.weixin.qq.com` as iLink protocol documentation.

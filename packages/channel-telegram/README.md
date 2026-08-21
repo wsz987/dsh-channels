@@ -8,16 +8,17 @@ Telegram Bot API channel adapter for DeepSeek Harness.
 pnpm add @wsz987/channel-telegram
 ```
 
-## Official bundle channel
+## Bundled community channel
 
-This package is part of the official bundle (`@wsz987/dsh-channels`).
+This package is part of the community-maintained `@wsz987/dsh-channels` bundle.
+It is not an official DeepSeek Harness or Telegram package.
 It implements the same Channel Contract as weixin / qq / dingtalk / lark,
 with no changes to channel-core, channel-harness or the other adapters.
 Setup and credentials go through the Channel Control Plane; the bot token is
 stored via `ctx.credentials` (`tokenRef`), never in profile config.
 
 > The bundle patch inserts this adapter as `channels-telegram` and the Web settings
-> panel shows it under the official channels.
+> panel shows it with the other bundled channels.
 
 
 Contract coverage:
@@ -59,7 +60,9 @@ files.
 Inbound delivery currently uses Telegram Bot API long polling (`getUpdates`),
 matching OpenClaw's local-install default. Startup removes an existing webhook
 before polling because Telegram makes webhook and `getUpdates` delivery mutually
-exclusive. A hosted webhook transport is not implemented yet.
+exclusive. This is an operational takeover of the Bot's update receiver: do not
+reuse the same Bot for another webhook consumer. A hosted webhook transport is
+not implemented yet.
 
 ## Capabilities
 
@@ -77,6 +80,16 @@ exclusive. A hosted webhook transport is not implemented yet.
 - Minimum supported upstream is Telegram Bot API 10.2. Older or pinned custom
   Bot API servers are not supported; use `formatting.mode: plain` only as an
   explicit presentation choice, not as an old-server compatibility mode.
+- `getUpdates` subscribes to `message` and `callback_query`. Button interactions
+  are currently intended only for callback queries carrying `message.chat`;
+  inline-message callbacks without chat context are not a supported routing
+  surface and require a mapper hardening change before release.
+- The ordinary message mapper still needs a complete zod trust-boundary schema;
+  the current partial envelope validation and TypeScript casts are an identified
+  release blocker, not evidence that arbitrary Telegram updates are supported.
+- Media sends currently need the same `ok` envelope validation used by text and
+  edit methods. Until that is fixed and live-tested, an `ok: false` media response
+  must not be interpreted as verified delivery.
 - Inbound media hydration downloads image and document bytes through `getFile`; audio/video keep their `resourceRef` placeholder in V1.
 - Telegram albums (`media_group_id`) are intentionally delivered one update at
   a time. Each image is downloaded, dispatched, retried and acknowledged

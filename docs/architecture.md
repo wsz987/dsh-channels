@@ -107,7 +107,8 @@ Harness breaking change
 npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@latest
 ```
 
-一次安装首批官方渠道。
+一次安装首批社区维护的内置渠道。`dsh-channels` 不是 DeepSeek Harness 或各消息平台的
+官方项目。
 
 内部仍拆分：
 

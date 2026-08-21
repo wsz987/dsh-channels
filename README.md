@@ -19,7 +19,7 @@
 
 </div>
 
-> 本项目参考各平台面向 OpenClaw 提供的渠道接入方案，结合官方 SDK / API 适配到 DeepSeek Harness。运行时不依赖 OpenClaw。
+> 本项目是社区维护的 DeepSeek Harness 渠道扩展，不是 DeepSeek Harness 或各消息平台的官方项目。项目参考各平台面向 OpenClaw 提供的渠道接入方案，结合官方 SDK / API 适配到 DeepSeek Harness；运行时不依赖 OpenClaw。
 
 ## 效果预览
 
@@ -49,7 +49,7 @@
 | QQ | 支持 | 收发 | 收发 | 支持 | ✅ |
 | 钉钉 | 支持 | 收发 | 收发 | 支持 | ✅ |
 | 飞书 | 支持 | 收发 | 收发 | 支持 | ✅ |
-| Telegram | 支持 | 收发 | 收发 | 支持 | ✅ |
+| Telegram | 支持 | 收发 | 收发 | 支持 | 实验性，待 live gate |
 
 - 支持视觉的多模态模型可直接识别图片；PDF、DOCX、XLSX 和文本附件可提取内容供 Agent 读取（入站单文件上限 100 MiB）；音频和视频暂为降级处理。
 
@@ -103,6 +103,12 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 Telegram adapter 最低支持 Bot API 10.2；`formatting.mode: auto` 默认使用 Rich
 Markdown。项目不维护旧 Bot API server 的自动兼容，`plain` 仅作为显式输出模式或
 格式错误时的单次降级。
+
+Telegram 当前只实现 `getUpdates` 长轮询。启动时会调用 `deleteWebhook`，因此会移除
+该 Bot 已配置的 webhook；不要让同一 Bot 同时承担其他 webhook 消费者。当前实现订阅
+`message` 与 `callback_query`，但交互按钮只应视为支持带 `message.chat` 上下文的
+callback；Rich Message、draft streaming、callback、媒体错误处理与限流恢复在真实 Bot
+live gate 完成前均不视为生产验证通过。
 
 ### 必做：配置安全访问
 

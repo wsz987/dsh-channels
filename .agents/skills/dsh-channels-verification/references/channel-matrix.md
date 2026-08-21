@@ -216,7 +216,7 @@ token
 | QQ | sdk | `@tencent-connect/qqbot-nodejs` | `1.0.4` | tested |
 | DingTalk | sdk | `dingtalk-stream` | `2.1.5` | tested |
 | Lark | sdk | `@larksuiteoapi/node-sdk` | `1.73.0` | tested |
-| Telegram | source/direct HTTP | Telegram Bot API | `7.10` | experimental |
+| Telegram | source/direct HTTP + official types | Telegram Bot API / `@grammyjs/types` | `>=10.2` | experimental |
 
 ## 4. Actual interface surface
 
@@ -385,4 +385,3 @@ No reviewed official OAuth-style scope list.
 | image | `getuploadurl` + CDN + encrypted send live |
 | typing | getconfig / sendtyping |
 | file outbound | **DSH currently unsupported** |
-

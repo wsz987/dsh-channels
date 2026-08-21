@@ -59,7 +59,7 @@ DeepSeek Harness Agent / Session
 - QQ、钉钉、飞书：`tested`（通过 offline contract + fixtures）。
 - 微信：`experimental`，在真实平台 live gate 通过前不得标 `tested`（见
   [weixin-live-verification-runbook.md](../weixin-live-verification-runbook.md)）。
-- Telegram：`experimental`（已随官方 bundle 提供）；当前默认采用 Bot API `getUpdates`
+- Telegram：`experimental`（已随社区 bundle 提供）；当前默认采用 Bot API `getUpdates`
   长轮询，媒体入站 / 出站与 edit streaming 均已落地，真实平台 live gate
   通过后才能标记 `tested`。
 - 音频 / 视频当前降级处理；通用文件支持 PDF、DOCX、XLSX 和文本。

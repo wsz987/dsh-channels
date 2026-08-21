@@ -18,6 +18,9 @@ metadata:
 
 > **快照基线**：`main@78655a40a266c4122ecd0c030b0a882fdb92f2df`（2026-08-19）。
 >
+> **后续同步**：工作树 `2781f7a1b83613ea0c5675731bb6afbcb3ce4e12` 已将 Telegram
+> manifest、fixtures 与类型基线迁移到 Bot API 10.2；真实 Bot live gate 仍未完成。
+>
 > 这个 Skill 的目的不是描述“理想设计”，而是让 AI 在后续维护时能区分：
 >
 > 1. **当前代码真的做了什么**
@@ -121,7 +124,7 @@ DeepSeek Harness / Cordis
 | QQ | `@wsz987/channel-qq` | Tencent 官方 SDK | `@tencent-connect/qqbot-nodejs@1.0.4` | `tested`* | AppID + AppSecret | text/image/file/audio/video；C2C native stream |
 | DingTalk | `@wsz987/channel-dingtalk` | 官方 Stream SDK + OpenAPI | `dingtalk-stream@2.1.5` | `tested`* | ClientID + ClientSecret；device/credentials | text/image/file/audio/cards；edit stream |
 | Lark/Feishu | `@wsz987/channel-lark` | 官方 Node SDK | `@larksuiteoapi/node-sdk@1.73.0` | `tested`* | AppID + AppSecret；credentials/hybrid | text/image/file/audio/cards/reactions/threads；edit stream |
-| Telegram | `@wsz987/channel-telegram` | Bot API HTTP 直连 | manifest `Bot API 7.10` | `experimental` | Bot token | text/image/file/audio/video/threads；edit stream |
+| Telegram | `@wsz987/channel-telegram` | Bot API HTTP 直连 + `@grammyjs/types` | manifest `Bot API >=10.2` | `experimental` | Bot token | text/image/file/audio/video/threads；Rich Markdown；DM draft/group edit stream；callback actions |
 
 \* `tested` 当前主要指 contract/fixture/offline SDK tests 已通过；**不等于真实平台权限与账号 live gate 已通过**。
 
@@ -358,17 +361,23 @@ Bot 管理员权限（按操作）
 
 ```text
 deleteWebhook
-getUpdates allowed_updates=['message']
+getUpdates allowed_updates=['message', 'callback_query']
 ```
 
 因此：
 
-- webhook 与 long poll 不应同时作为 active update receiver
+- adapter 启动时会调用 `deleteWebhook` 并移除该 Bot 已配置的 webhook；同一 Bot 不得
+  同时交给其他 webhook consumer
 - 群聊如果开启 Privacy Mode，Bot 不会自动看到所有普通群消息
 - 如果产品目标是“所有群消息都进入 Agent”，必须显式核验 BotFather privacy / 管理员状态
 - 当前 20 MiB inbound download cap 与 Telegram cloud Bot API `getFile` 的 20 MB 下载限制对齐
 
-**DRIFT**：仓库 manifest 仍写 `Telegram Bot API 7.10`，而 2026-07-14 官方已发布 **Bot API 10.2**。当前实现使用的基础 API 仍可能兼容，但发布前必须重新做 API drift + live gate，不应继续把 7.10 当作当前平台版本。
+**CODE-CONFIRMED**：manifest 与 fixtures 已迁移到 **Bot API 10.2**，状态仍为
+`experimental`。Rich Message、draft streaming、callback 与 429 recovery 仍需真实 Bot live gate。
+
+**CODE-CONFIRMED / RELEASE-BLOCKING**：`sendMedia()` 尚未检查 Bot API `ok` envelope；
+普通 update mapper 仍使用 TypeScript cast 而非完整 zod schema；缺少 `message.chat` 的
+callback query 会被回退成 sender-id DM。三项必须在 live gate 前修复。
 
 ### 6.5 Weixin iLink
 
@@ -437,20 +446,20 @@ DSH 当前使用什么事件
 
 而不是请求所有 intents。
 
-### P1 — Telegram manifest 严重落后于当前 Bot API
+### P1 — Telegram 10.2 实现缺口与 live gate
 
 ```text
-DSH manifest: 7.10
+DSH minimum:  >=10.2
 官方当前:     10.2 (2026-07-14)
 ```
 
 优先执行：
 
-1. API breaking/change review
-2. fixture 更新
-3. offline test
+1. 修复 media response envelope 校验
+2. 对普通 message/update 建立完整 zod trust-boundary schema
+3. 无 `message.chat` callback fail closed
 4. real bot live verification
-5. 再更新 `testedVersion/versionRange/status`
+5. 再评估将 status 从 `experimental` 升级
 
 ### P1 — Weixin live pin 尚未完成
 
@@ -698,7 +707,7 @@ Stable Core
 
 1. 保持 `channel-web` 不展示静态 permission 状态；恢复前先实现真实 permission checker
 2. QQ 显式最小 intents
-3. Telegram 从 Bot API 7.10 基线升级核验到当前 10.2
+3. Telegram 修复 10.2 release blockers 并完成真实 Bot live gate
 4. Weixin 完成真实 iLink live gate 并 pin version/commit
 5. Lark/DingTalk 把真实平台 permission/event/API 要求整理成机器可读 metadata，未来再接真实 permission checker
 

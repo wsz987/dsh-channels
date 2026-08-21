@@ -123,11 +123,13 @@ Official:
 - Bot FAQ: https://core.telegram.org/bots/faq
 - Bot creation/config: https://t.me/BotFather
 
-Current platform drift observed:
+Current DSH baseline and live status:
 
 ```text
-DSH manifest testedVersion: 7.10
+DSH manifest testedVersion: 10.2
+DSH manifest versionRange: >=10.2
 Telegram Bot API current as of 2026-07-14: 10.2
+Real Bot live gate: pending
 ```
 
 ## Weixin

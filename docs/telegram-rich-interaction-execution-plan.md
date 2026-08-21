@@ -1,10 +1,10 @@
 ---
 title: Telegram Bot API 10.2 富文本与 IM User Questions 执行方案
-summary: 基于 dsh-channels HEAD 2781f7a、DeepSeek Harness 0.1.0-rc.7/rc.8 UserQuestionService 官方实现与 Telegram Bot API 10.2，对 Issue #1 / #2 的架构核验、目标设计、分阶段改造；强化 timeout/fallback、buffered/streaming、代码块/表格与半成品 Markdown Release Gate。
+summary: 基于 dsh-channels HEAD 2781f7a、DeepSeek Harness 0.1.0-rc.7/rc.8 UserQuestionService 官方实现与 Telegram Bot API 10.2，对 Issue #1 / #2 的架构核验、已落地设计与剩余 release blockers；强化 timeout/fallback、buffered/streaming、代码块/表格与半成品 Markdown Release Gate。
 when_to_use: Telegram | Rich Messages | ask_user_question | interaction.received | channel-harness | Bot API 10.2
-authoritative: 本文是 Issue #1 / #2 的目标执行方案；实现时仍以 DeepSeek Harness 与 Telegram 官方最新 contract 为最终依据。
+authoritative: 本文记录 Issue #1 / #2 的设计与执行历史；当前行为以代码、channel-platform-verification.md、DeepSeek Harness public API 与 Telegram 官方最新 contract 为最终依据。
 see_also: [architecture.md, architecture/common-design.md, adapter-authoring.md, channel-platform-verification.md, security/inbound-access-control.md]
-status: implementation-in-progress
+status: implemented-offline-live-gate-pending
 baseline:
   repo_head: 2781f7a1b83613ea0c5675731bb6afbcb3ce4e12
   dsh_project: 0.1.0-rc.7
@@ -19,6 +19,11 @@ baseline:
 > 对应 Issues：
 > - `#1 feat(channel-telegram): support Telegram parse_mode (HTML / MarkdownV2) for outbound messages`
 > - `#2 feat(channels): interactive user questions over IM (ask_user_question) are dropped on Telegram`
+>
+> **As-built 同步（2026-08-21）**：Rich renderer、Rich Draft、通用 actions、
+> `callback_query`、ApiProxy `ChannelQuestionBridge` 已落地并通过离线测试。本文前半部分
+> 保留的是实施前缺口分析，不应再当作当前代码事实。真实 Bot live gate 尚未完成，且
+> media envelope、普通 update zod 校验、无 `message.chat` callback fail-closed 仍是发布阻断项。
 
 ## 1. 结论
 
@@ -32,9 +37,11 @@ baseline:
 
 原因：
 
-1. 当前 Telegram adapter 明确声明 `markdown: false`。
-2. `sendMessage` / `editMessageText` / media caption 目前均未发送 `parse_mode` / `entities`。
-3. 当前 `TelegramStreamingReply` 按 4096 code point 生切，不能保证 MarkdownV2 / HTML / entity 边界。
+1. 实施前 Telegram adapter 声明 `markdown: false`；当前已声明并实现 Rich Markdown。
+2. 实施前 `sendMessage` / `editMessageText` / media caption 未发送格式字段；当前已有
+   Rich Markdown、HTML、MarkdownV2 与 plain renderer。
+3. 实施前 `TelegramStreamingReply` 按 4096 code point 生切；当前已使用结构感知分段，
+   但仍需真实 Bot 验证长文本、表格、代码块和半成品 Markdown。
 4. 当前实现以 Bot API `10.2` 为最低官方基线，不维护旧 Bot API server。
 5. Telegram Bot API 10.1 已加入面向结构化文本和 AI 流式生成的 Rich Messages：
    - `sendRichMessage`
@@ -346,30 +353,19 @@ parse_mode: 'MarkdownV2'
 
 ---
 
-## 3.4 Telegram inbound 只订阅 message
+## 3.4 Telegram inbound 订阅范围（已落地）
 
 当前 `getUpdates`：
 
 ```ts
-allowed_updates: ['message']
+allowed_updates: ['message', 'callback_query']
 ```
 
-因此：
+因此 `message_reaction`、`edited_message` 等仍不会进入 adapter。`callback_query` 已映射为
+`interaction.received`，但当前 schema 允许 `message/chat` 缺失并回退成 sender-id DM；
+inline-message callback 在 conversation identity 明确前必须 fail closed。
 
-```text
-callback_query
-message_reaction
-edited_message
-...
-```
-
-都不会进入 adapter。
-
-Issue #2 要使用 Inline Keyboard，最低限度必须加入：
-
-```text
-callback_query
-```
+这是发布前的 mapper/security 修复项，不属于 live gate 可以替代的验证。
 
 ---
 
@@ -1719,6 +1715,9 @@ DSH userQuestions rc.7 / rc.8 gap
 
 manifest 与 fixtures 同步迁移到 10.2；`experimental` 保留到 live gate 完成。
 
+As-built 状态：Phase 1 的 API 原语已经实现，但 media send 路径仍需统一走 Bot API
+envelope 校验；普通 message/update 仍需完整 zod schema，不能把类型断言视为边界校验。
+
 ---
 
 ## Phase 1 — Telegram 10.2 upstream primitives
@@ -2792,6 +2791,10 @@ Issue 不应要求：
 [x] ChannelQuestionBridge
 [x] pending request security
 [x] timeout / lifecycle cancel
+[ ] media send `ok` envelope validation
+[ ] full message/update zod trust-boundary parsing
+[ ] callback without `message.chat` fails closed
+[x] polling webhook takeover documented
 [ ] live gate
 ```
 
