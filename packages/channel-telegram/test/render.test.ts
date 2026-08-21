@@ -185,7 +185,8 @@ describe('segmentation gates', () => {
   });
 
   it('splits rich markdown so no message exceeds 32768', () => {
-    const rich = renderRichMarkdown('p\n\n'.repeat(20000), RICH_MESSAGE_MAX_UTF8);
+    const rich = renderRichMarkdown('p'.repeat(RICH_MESSAGE_MAX_UTF8 + 1000), RICH_MESSAGE_MAX_UTF8);
+    expect(rich).toHaveLength(2);
     for (const text of rich) expect(utf8Length(text)).toBeLessThanOrEqual(RICH_MESSAGE_MAX_UTF8);
   });
 

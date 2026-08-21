@@ -45,8 +45,15 @@ function tableCells(row: TableRow): string[] {
   return row.children.map((cell) => toString(cell));
 }
 
-function asBlock(node: RootContent): MarkdownBlock {
-  const markdown = serializeNode(node);
+function sourceMarkdown(source: string, node: RootContent): string {
+  const start = node.position?.start.offset;
+  const end = node.position?.end.offset;
+  if (start !== undefined && end !== undefined) return source.slice(start, end).trimEnd();
+  return serializeNode(node);
+}
+
+function asBlock(source: string, node: RootContent): MarkdownBlock {
+  const markdown = sourceMarkdown(source, node);
   switch (node.type) {
     case 'code':
       return { kind: 'code', lang: node.lang ?? '', code: node.value, node, markdown };
@@ -77,7 +84,7 @@ function asBlock(node: RootContent): MarkdownBlock {
 
 export function tokenizeMarkdown(source: string): MarkdownBlock[] {
   if (!source) return [];
-  return parseMarkdown(source).children.map(asBlock);
+  return parseMarkdown(source).children.map((node) => asBlock(source, node));
 }
 
 export function renderBlock(block: MarkdownBlock): string {
@@ -181,19 +188,20 @@ export function segmentRich(blocks: MarkdownBlock[], limit = RICH_MESSAGE_MAX_UT
   for (const block of blocks) {
     const stats = nodeStats(block.node);
     const rendered = block.markdown;
+    const renderedBytes = utf8Length(rendered);
     const separator = current.length > 0 ? 2 : 0;
     const unsafeStructure = stats.depth > RICH_MESSAGE_MAX_NESTING || stats.count > RICH_MESSAGE_MAX_BLOCKS;
-    if (unsafeStructure || utf8Length(rendered) > limit) {
+    if (unsafeStructure || renderedBytes > limit) {
       flush();
       messages.push(...splitBlock(block, limit));
       continue;
     }
     if (
-      bytes + separator + utf8Length(rendered) > limit ||
+      bytes + separator + renderedBytes > limit ||
       blocksInMessage + stats.count > RICH_MESSAGE_MAX_BLOCKS
     ) flush();
     current.push(rendered);
-    bytes += (current.length > 1 ? 2 : 0) + utf8Length(rendered);
+    bytes += (current.length > 1 ? 2 : 0) + renderedBytes;
     blocksInMessage += stats.count;
   }
   flush();
