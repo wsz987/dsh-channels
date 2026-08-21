@@ -3,7 +3,7 @@ title: 公共/统一代码设计
 summary: Channel Contract、ChannelService、Harness Bridge、通用控制面、DSH Bundle 的已落地设计。
 when_to_use: 改共享代码 | Contract | Bridge | 控制面 | Bundle | channel-core | channel-harness
 authoritative: 统一 Contract（Adapter/Event/MessagePart/Capabilities/Reply）、Bridge、控制面、Bundle、已落地补充。
-see_also: [../architecture.md, ../adapter-authoring.md, adr/0002-image-model-fallback.md, adr/0003-image-compatibility-pre-step.md]
+see_also: [../architecture.md, ../adapter-authoring.md, adr/0001-upstream-first-channel-platform-boundary.md]
 status: as-built
 ---
 
@@ -1032,12 +1032,10 @@ workspace:
 ```
 
 适配器负责各平台的下载/解密和上传，`channel-harness` 不复制平台 SDK 实现。
-文本-only 模型的图片兼容策略（`imageCompatibility.mode`：`degrade` 默认 /
-`reject`，属显式 Channel 策略而非 Web host parity）见
-[ADR 0002](adr/0002-image-model-fallback.md)（产品策略）与
-[ADR 0003](adr/0003-image-compatibility-pre-step.md)（实现 seam：`agent/pre-step`
-logged surface replace，按官方 Model-visible ⇔ durably referenced 不变式；
-已 shipped，`llm/stream` 改写已删除、迁移已完成，不得重新引入）。
+图片对模型是否可见由 Harness rc.2 官方 Image Pipeline 在 request projection
+层决定（vision model → image variant；text-only model → deterministic
+placeholder；append-only session history 保留原始 attachment reference），
+渠道侧**不做任何 pre-step 改写**，也不提供任何图片兼容配置。
 
 ### 入站日志与媒体诊断规范
 
@@ -1090,8 +1088,9 @@ ctx.logger.info(
 
 ### 通用文件是可替换扩展
 
-Harness `0.1.0-rc.7` 的 `ctx.attachments` 只提供栅格图片的验证、保存和读取，
-当前 `ContentBlock` 也没有通用 `FileBlock`。因此 PDF / DOCX / XLSX / 文本
+Harness `0.1.1-rc.2` 的 `ctx.attachments` 仍然只提供栅格图片的验证、保存和读取
+（`saveImage` / `saveImages`，无通用 `saveFile`），当前 `ContentBlock` 也没有通用
+`FileBlock`。因此 PDF / DOCX / XLSX / 文本
 暂由 `@wsz987/channel-files` 补充：
 
 ```text

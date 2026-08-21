@@ -7,37 +7,28 @@
  * current Session. There is no per-Agent owner pin, apiProxy identity cache,
  * first-turn prepare, or fallback state machine.
  */
+import { randomUUID } from 'node:crypto';
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent, ModelSelection, ModelSelectionRef } from '@deepseek-ai/dsh-agent';
 import { installModelSelection } from '@deepseek-ai/dsh-agent';
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm';
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model';
+import {
+  RpcId,
+  type ApiProxy,
+} from '@deepseek-ai/dsh-host-apiproxy/api';
 
 export type ChannelModelSelectionRef = ModelSelectionRef;
 export type ChannelModelSelectionMode = 'host' | 'local';
 
-export interface ChannelHostApiProxy {
-  sessions?: {
-    selectModel?(request: {
-      payload: { sessionId: string; provider: string; model: string; reasoningEffort?: string };
-    }): Promise<ChannelHostApiResult>;
-    models?(request: { payload: { sessionId: string } }): Promise<ChannelHostApiResult>;
-  };
-}
-
-export interface ChannelHostApiResult {
-  result?: {
-    ok: boolean;
-    value?: { current?: HostModelSelection; selected?: HostModelSelection };
-    error?: { code?: string; message?: string; details?: unknown };
-  };
-}
-
-export interface HostModelSelection {
-  provider: string;
-  model: string;
-  reasoningEffort?: string;
-}
+/**
+ * Narrow channel view over the official Host ApiProxy contract — only the
+ * session model surfaces this bridge consumes, derived from
+ * `@deepseek-ai/dsh-host-apiproxy/api` instead of a local duplicate.
+ */
+export type ChannelHostApiProxy = Pick<ApiProxy, 'sessions'> & {
+  sessions: Pick<ApiProxy['sessions'], 'models' | 'selectModel'>;
+};
 
 export class ChannelModelSelectionController {
   private readonly refs = new WeakMap<Context, ChannelModelSelectionRef>();
@@ -91,18 +82,21 @@ export class ChannelModelSelectionController {
 
   async select(agent: Agent, selection: ModelSelection): Promise<void> {
     if (this.strategyFor(agent) === 'host') {
-      const selectModel = this.hostApiProxy()?.sessions?.selectModel;
+      const selectModel = this.hostApiProxy()?.sessions.selectModel;
       if (!selectModel) throw new Error('host model selection is unavailable: session.selectModel is not mounted');
       const response = await selectModel({
+        // Locally minted correlation id: in-process calls only need the echo;
+        // the official RpcRequest contract requires it on every request.
+        rpcId: RpcId(randomUUID()),
         payload: {
-          sessionId: String(agent.id),
+          sessionId: agent.id,
           provider: selection.provider,
           model: selection.model,
           ...(selection.reasoningEffort ? { reasoningEffort: String(selection.reasoningEffort) } : {}),
         },
       });
-      if (response?.result?.ok === false) {
-        throw new Error(response.result.error?.message ?? 'model selection was rejected');
+      if (response.result.ok === false) {
+        throw new Error(response.result.error.message || 'model selection was rejected');
       }
       return;
     }
@@ -131,11 +125,14 @@ export class ChannelModelSelectionController {
   }
 
   private async readHostCurrent(agent: Agent): Promise<ModelSelection | undefined> {
-    const models = this.hostApiProxy()?.sessions?.models;
+    const models = this.hostApiProxy()?.sessions.models;
     if (!models) return undefined;
     try {
-      const response = await models({ payload: { sessionId: String(agent.id) } });
-      const current = response?.result?.ok ? response.result.value?.current : undefined;
+      const response = await models({
+        rpcId: RpcId(randomUUID()),
+        payload: { sessionId: agent.id },
+      });
+      const current = response.result.ok ? response.result.value.current : undefined;
       if (!current?.provider || !current.model) return undefined;
       return {
         provider: current.provider,

@@ -13,15 +13,29 @@ interface LoadedModule {
 
 let captured: LoadedModule | undefined;
 
-/** Minimal external stubs for react / react/jsx-runtime / @deepseek-ai/cordis / UI primitives. */
+/**
+ * Static shell identities of the rc.2 client module graph
+ * (`PLATFORM_MODULES` exported by @deepseek-ai/dsh-client-web): compiled into
+ * the Vite shell, shared into the frozen module table, and resolvable by
+ * every bundle factory's require(). They are NOT dynamic graph rows.
+ */
+const STATIC_SHELL_IDENTITIES = [
+  'react',
+  'react/jsx-runtime',
+  'react-dom',
+  'react-dom/client',
+  '@deepseek-ai/cordis',
+  '@deepseek-ai/dsh-client-ui-slots',
+  '@deepseek-ai/dsh-client-ui-primitives',
+];
+
+/** Minimal external stubs for the static identities the bundle requires. */
 function requireStub(id: string): unknown {
   switch (id) {
     case 'react':
       return { createElement: (t: unknown, p: unknown, ...c: unknown[]) => ({ type: t, props: p, children: c }) };
     case 'react/jsx-runtime':
       return { jsx: (t: unknown, p: unknown) => ({ type: t, props: p }), jsxs: (t: unknown, p: unknown) => ({ type: t, props: p }) };
-    case '@deepseek-ai/cordis':
-      return {};
     case '@deepseek-ai/dsh-client-ui-primitives':
       return {};
     default:
@@ -29,8 +43,12 @@ function requireStub(id: string): unknown {
   }
 }
 
+function loadClientCode(): string {
+  return readFileSync(join(root, 'lib', 'client.js'), 'utf8');
+}
+
 function loadClient(): LoadedModule {
-  const code = readFileSync(join(root, 'lib', 'client.js'), 'utf8');
+  const code = loadClientCode();
   captured = {};
   const sandbox: Record<string, unknown> = {};
   sandbox.window = {};
@@ -48,6 +66,14 @@ function loadClient(): LoadedModule {
   }
   const exports = captured.factory(requireStub) as Record<string, unknown>;
   return { id: captured.id, factory: captured.factory, exports };
+}
+
+/** Extract the require() specifiers the factory body actually emits. */
+function requiredSpecifiers(code: string): Set<string> {
+  const specs = new Set<string>();
+  const re = /require\((['"])((?:[^\\'"\n]|\\.)*)\1\)/g;
+  for (const match of code.matchAll(re)) specs.add(match[2]!);
+  return specs;
 }
 
 describe('@wsz987/channel-web client bundle', () => {
@@ -123,7 +149,7 @@ describe('@wsz987/channel-web client bundle', () => {
   });
 
   it('bundles qrcode inline instead of requiring it at runtime', () => {
-    const code = readFileSync(join(root, 'lib', 'client.js'), 'utf8');
+    const code = loadClientCode();
     // qrcode must be inlined: the Harness ModuleLoader does not provide it.
     expect(code).not.toContain('require("qrcode")');
     expect(code).not.toContain("require('qrcode')");
@@ -133,10 +159,81 @@ describe('@wsz987/channel-web client bundle', () => {
   });
 
   it('keeps the UI primitives external (runtime-provided)', () => {
-    const code = readFileSync(join(root, 'lib', 'client.js'), 'utf8');
+    const code = loadClientCode();
     // The Harness ModuleLoader registers the primitives under this bare id; the
     // bundle must require() it at runtime rather than inlining it.
     expect(code).toContain('require("@deepseek-ai/dsh-client-ui-primitives")');
     expect(code).toContain('@deepseek-ai/dsh-client-ui-primitives');
+  });
+});
+
+describe('@wsz987/channel-web rc.2 client module graph contract', () => {
+  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
+    dsh?: { client?: { platform?: string; inject?: string[] } };
+    peerDependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+    dependencies?: Record<string, string>;
+  };
+
+  it('declares dsh.client with platform web and only dynamic client packages in inject', () => {
+    expect(pkg.dsh?.client?.platform).toBe('web');
+    // The one dynamic client dependency of this entry: the provider of the
+    // "locale" service. Static shell identities must never appear here.
+    expect(pkg.dsh?.client?.inject).toEqual(['@deepseek-ai/dsh-client-locale']);
+  });
+
+  it('never lists a static shell identity in dsh.client.inject', () => {
+    const inject = pkg.dsh?.client?.inject ?? [];
+    for (const identity of STATIC_SHELL_IDENTITIES) {
+      expect(inject, `static identity ${identity} must not be a dynamic graph row`).not.toContain(identity);
+    }
+  });
+
+  it('layers dependencies per the rc.2 static/dynamic split', () => {
+    // Dynamic client dependency → peer + dev (compile input).
+    expect(pkg.peerDependencies?.['@deepseek-ai/dsh-client-locale']).toBe('0.1.1-rc.2');
+    expect(pkg.devDependencies?.['@deepseek-ai/dsh-client-locale']).toBe('0.1.1-rc.2');
+    // Static UI library → dev-only compilation input, never a peer.
+    expect(pkg.peerDependencies?.['@deepseek-ai/dsh-client-ui-primitives']).toBeUndefined();
+    expect(pkg.devDependencies?.['@deepseek-ai/dsh-client-ui-primitives']).toBe('0.1.1-rc.2');
+    // React is shell-owned: dev-only, not shipped as a dependency.
+    expect(pkg.dependencies?.react).toBeUndefined();
+    expect(pkg.peerDependencies?.react).toBeUndefined();
+    expect(pkg.devDependencies?.react).toBeTruthy();
+  });
+
+  it('registers through the rc.2 window.__ModuleLoader__.load protocol', () => {
+    const code = loadClientCode().replace(/\/\/# sourceMappingURL=[^\n]*(\s*)$/, '');
+    // Same wrapper shape as the official rc.2 dynamic client artifacts: the
+    // executing script only registers the factory; module body side effects
+    // live inside the factory closure.
+    expect(code.startsWith('window.__ModuleLoader__.load({\n  id: "@wsz987/channel-web",\n  factory: (require) => {')).toBe(true);
+    expect(code.trimEnd().endsWith('return module.exports;\n  }\n});')).toBe(true);
+  });
+
+  it('requires only declared externals (bundle purity gate)', () => {
+    const code = loadClientCode();
+    const allowed = new Set([
+      ...STATIC_SHELL_IDENTITIES,
+      ...(pkg.dsh?.client?.inject ?? []),
+    ]);
+    for (const spec of requiredSpecifiers(code)) {
+      expect(allowed.has(spec), `undeclared external require("${spec}")`).toBe(true);
+    }
+    // The externals the current client surface actually consumes:
+    expect(requiredSpecifiers(code)).toEqual(new Set(['react', 'react/jsx-runtime', '@deepseek-ai/dsh-client-ui-primitives']));
+  });
+
+  it('does not inline static shell identities into the bundle', () => {
+    const code = loadClientCode();
+    // Inlining ui-primitives would drag its dependency tree (shiki/katex/
+    // markdown) into the artifact; inlining react would duplicate the shell's
+    // React and break hooks. Their presence means the externals list drifted.
+    expect(code).not.toContain('katex');
+    expect(code).not.toContain('shiki');
+    expect(code).not.toContain('mdast-util-from-markdown');
+    expect(code).not.toContain('require("react-dom")');
+    expect(code).not.toContain('require("react-dom/client")');
+    expect(code).not.toContain('require("@deepseek-ai/cordis")');
   });
 });

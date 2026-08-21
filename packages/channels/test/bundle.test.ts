@@ -91,8 +91,10 @@ const EXPECTED_ITEMS: PatchItem[] = [
   { id: 'channels-service', name: '@wsz987/dsh-channels/service' },
   { id: 'channels-files', name: '@wsz987/dsh-channels/files' },
   // channel-harness injects the command-plane capabilities: the Harness
-  // `commands` registry, default model/preset composition, and the public Host question mux.
-  { id: 'channels-harness', name: '@wsz987/dsh-channels/harness', inject: ['channels', 'agents', 'agentDefaultModel', 'agentPresets', 'llm', 'commands', 'apiProxy'] },
+  // `commands` registry, default model/preset composition. `apiProxy` is
+  // deliberately NOT injected: the question backend probes it via `ctx.get()`
+  // so the bundle also boots headless (plan §5 / §21 P0-3).
+  { id: 'channels-harness', name: '@wsz987/dsh-channels/harness', inject: ['channels', 'agents', 'agentDefaultModel', 'agentPresets', 'llm', 'commands'] },
   // channel-control is the universal control plane: it must load before the
   // channel plugins so ctx.channelControl exists when they register definitions.
   { id: 'channels-control', name: '@wsz987/dsh-channels/control', inject: ['channels', 'credentials'] },
@@ -184,11 +186,11 @@ describe('bundle-owned Web client face', () => {
 
     expect(manifest.dsh?.client).toMatchObject({
       platform: 'web',
+      // rc.2 client module graph: `dsh.client.inject` lists only dynamic
+      // client packages. react / cordis / ui-primitives / ui-slots are static
+      // shell identities (PLATFORM_MODULES seeds) and must never appear here.
       inject: [
-        '@deepseek-ai/dsh-client-runtime',
         '@deepseek-ai/dsh-client-locale',
-        '@deepseek-ai/dsh-client-ui-settings',
-        '@deepseek-ai/dsh-client-ui-primitives',
       ],
     });
     expect(manifest.exports?.['./client']).toBeTruthy();
@@ -259,9 +261,10 @@ describe('optional generic-file package boundary', () => {
       // Tool definitions carry private runtime symbols. A bundled dsh-tools
       // copy cannot register with the host registry that executes the tool.
       expect(manifest.dependencies).not.toHaveProperty('@deepseek-ai/dsh-tools');
-      expect(manifest.peerDependencies?.['@deepseek-ai/dsh-tools']).toBe('^0.1.0-rc.7');
+      // §16 tested compatibility band: exact pinned rc.2 (no wide prerelease ^).
+      expect(manifest.peerDependencies?.['@deepseek-ai/dsh-tools']).toBe('0.1.1-rc.2');
       expect(manifest.peerDependenciesMeta?.['@deepseek-ai/dsh-tools']?.optional).toBe(true);
-      expect(manifest.devDependencies?.['@deepseek-ai/dsh-tools']).toBe('0.1.0-rc.7');
+      expect(manifest.devDependencies?.['@deepseek-ai/dsh-tools']).toBe('0.1.1-rc.2');
     }
   });
 

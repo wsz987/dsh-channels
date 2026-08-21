@@ -88,10 +88,12 @@ ever install `@wsz987/dsh-channels`**:
 | `@wsz987/channel-web`    | Web dashboard (`Settings > Channels`) for GUI setup |
 | `@wsz987/channel-weixin/qq/dingtalk/lark/telegram` | The five channel adapters |
 
-The Web dashboard (`@wsz987/channel-web`) injects the Harness web client
-surfaces (`@deepseek-ai/dsh-client-runtime`, `-locale`, `-ui-settings`,
-`-ui-primitives`), which the Harness itself provides at runtime — nothing extra
-to install for that panel beyond a Harness version that ships them.
+The Web dashboard (`@wsz987/channel-web`) declares one dynamic client
+dependency (`@deepseek-ai/dsh-client-locale`, provider of the `locale`
+service); React, `@deepseek-ai/cordis` and the static UI libraries
+(`-ui-primitives`, `-ui-slots`) are shell-owned identities the Harness web app
+compiles in — nothing extra to install for that panel beyond a Harness
+version that ships them.
 
 ## Selecting adapters
 

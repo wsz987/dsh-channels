@@ -5,7 +5,7 @@
   "description": "Connect WeChat, QQ, DingTalk, Lark and Telegram to DeepSeek Harness — unified config, QR-code auth, chat with your Agent from IM",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": "^22.19.0 || >=24.0.0"
   },
   "packageManager": "pnpm@9.15.3",
   "scripts": {
@@ -23,6 +23,8 @@
     "web:debug": "node scripts/dev-web-debug.mjs",
     "web:kill": "kill-port 3080",
     "check:upstream": "node scripts/check-upstream.mjs",
+    "check:harness-compat": "node scripts/check-upstream.mjs --harness-compat",
+    "check:harness-newer": "node scripts/check-upstream.mjs --harness-newer",
     "check:bundle": "pnpm --filter @wsz987/dsh-channels run test",
     "clean": "turbo run clean",
     "changeset": "changeset",

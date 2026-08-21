@@ -42,7 +42,11 @@ import type { SaveImageHook } from './message-converter.js';
 import { installDebugConsoleExporter } from './debug-logger.js';
 import { StoredChannelAccessPolicyResolver } from './access/resolver.js';
 import type { ChannelFileProvider } from './file-provider.js';
-import { ChannelQuestionBridge } from './channel-question-bridge.js';
+import { createQuestionInteraction } from './interactions/question-backend.js';
+import type {
+  ChannelQuestionApiProxy,
+  ChannelUserQuestionService,
+} from './interactions/index.js';
 
 export interface BridgeLifecycle {
   dispose(): Promise<void>;
@@ -67,10 +71,16 @@ export function startBridge(
     channels.get(channelId);
 
   const replyContexts = new ReplyContextStore();
-  const apiProxy = ctx.get('apiProxy');
-  const questionBridge = config.userQuestions.enabled && apiProxy
-    ? new ChannelQuestionBridge({
-        apiProxy,
+  // One-shot capability probe (plan §5/§21 P0-3): with the public ApiProxy
+  // gateway mounted (Web profile) questions ride the official mux frames and
+  // the channel side NEVER registers a user-questions provider; without it
+  // (headless) the channel registers the official UserQuestionProvider
+  // through ctx.userQuestions. The probe lives entirely in
+  // interactions/question-backend.ts and fails safe with an explicit error.
+  const questionPresenter = config.userQuestions.enabled
+    ? createQuestionInteraction({
+        getApiProxy: () => ctx.get('apiProxy') as ChannelQuestionApiProxy | undefined,
+        getUserQuestions: () => ctx.get('userQuestions') as ChannelUserQuestionService | undefined,
         agentManager,
         replyContexts,
         getAdapter,
@@ -78,7 +88,7 @@ export function startBridge(
         timeoutMs: config.userQuestions.timeoutMs,
       })
     : undefined;
-  questionBridge?.start();
+  questionPresenter?.start();
 
   // Optional attachment service -> real image path (WX5). Absent in deployments
   // without an attachment backend; the converter then keeps text placeholders.
@@ -192,7 +202,7 @@ export function startBridge(
     commandDeps,
     workspaceResolver,
     outbox,
-    questionBridge,
+    questionPresenter,
   });
   const stopInbound = channels.on((event) => bridge.handleChannelEvent(event));
 
@@ -204,7 +214,7 @@ export function startBridge(
     // 1. Stop new inbound (adapter events no longer reach the bridge).
     stopInbound();
     // Cancel channel-owned question waits before draining the blocked Agent.
-    await questionBridge?.stop();
+    await questionPresenter?.stop();
     // Release this bridge's Agent-scoped commands before a replacement bridge
     // can borrow the same live agents and install fresh handlers.
     await bridge.disposeCommandSetups();

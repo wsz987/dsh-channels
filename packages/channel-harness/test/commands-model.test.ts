@@ -268,10 +268,14 @@ describe('/model', () => {
     const sessionId = gateway.agents.keys().next().value as string;
     await bridge.handleChannelEvent(makeMessageEvent('/model openai gpt-5.6', 'm2'));
     expect(selectModel).toHaveBeenCalledWith({
+      rpcId: expect.any(String),
       payload: { sessionId, provider: 'openai', model: 'gpt-5.6' },
     });
     await bridge.handleChannelEvent(makeMessageEvent('/model', 'm3'));
-    expect(models).toHaveBeenCalledWith({ payload: { sessionId } });
+    expect(models).toHaveBeenCalledWith({
+      rpcId: expect.any(String),
+      payload: { sessionId },
+    });
     expect(lastSent(adapter)).toContain('Provider: openai');
   });
 });

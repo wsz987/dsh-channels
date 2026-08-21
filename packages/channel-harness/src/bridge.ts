@@ -13,9 +13,11 @@
  * is resolved through the official registry and its `CommandResult` is
  * rendered directly to the channel — it is never sent to the model and never
  * creates `assistant/message` (`ReplyRouter` is bypassed). An UNREGISTERED
- * slash command is no longer intercepted: it falls through to the model as
- * ordinary user input (spec §12), because `commands.execute` returns
- * `undefined` for admission misses.
+ * slash command follows rc.2 official Host semantics (upgrade plan §10.2):
+ * it is rejected with a direct channel notice and never enters the Agent
+ * prompt — `commands.execute` returns `undefined` for admission misses,
+ * which (given the syntax already parsed) means `ctx.commands.find(agent,
+ * name)` missed.
  *
  * Per-conversation serialization: all `message.received` handling for one
  * canonical key runs through a lightweight per-key promise chain so a `/new`
@@ -76,7 +78,6 @@ import {
 import { ChannelModelSelectionController } from './model-selection.js';
 import { toLoggableError } from './loggable-error.js';
 import { ChannelSessionFactory } from './channel-session-factory.js';
-import { installImageCompatibility } from './image-model-fallback.js';
 import { isReservedClaimCommand } from '@wsz987/channel-core';
 import { InboundAccessController } from './access/controller.js';
 import type {
@@ -84,7 +85,7 @@ import type {
   ResolvedAccessPolicy,
 } from './access/resolver.js';
 import type { AccessDecisionReason } from './access/decision.js';
-import type { ChannelQuestionBridge } from './channel-question-bridge.js';
+import type { ChannelQuestionPresenter } from './interactions/question-presenter.js';
 
 function trimBrandedId<T extends string>(value: T): T {
   return value.trim() as T;
@@ -140,8 +141,12 @@ export interface ChannelHarnessBridgeOptions {
    * `send_channel_message` tool. Absent -> no proactive send tool.
    */
   outbox?: ChannelOutboxService;
-  /** Optional public ApiProxy question-mux bridge. */
-  questionBridge?: ChannelQuestionBridge;
+  /**
+   * Optional question interaction presenter (Web profile: official ApiProxy
+   * mux frames; headless: official UserQuestionProvider). Absent when the
+   * user-questions feature is disabled or no transport was probed.
+   */
+  questionPresenter?: ChannelQuestionPresenter;
 }
 
 /**
@@ -287,7 +292,7 @@ export class ChannelHarnessBridge {
     if (event.type === 'interaction.received') {
       const normalized = this.normalizeInteractionIdentity(event);
       if (await this.enforceInteractionAccessGate(normalized)) return;
-      if (await this.options.questionBridge?.handleChannelEvent(normalized)) return;
+      if (await this.options.questionPresenter?.handleChannelEvent(normalized)) return;
       this.options.logger.debug('[channel-harness] ignoring unmatched interaction.received');
       return;
     }
@@ -315,7 +320,7 @@ export class ChannelHarnessBridge {
     // ------------------------------------------------------------------
     if (await this.enforceAccessGate(normalizedEvent, text)) return;
 
-    if (await this.options.questionBridge?.handleChannelEvent(normalizedEvent)) return;
+    if (await this.options.questionPresenter?.handleChannelEvent(normalizedEvent)) return;
 
     const key = this.conversationKey(normalizedEvent);
     const parsed = parseCommand(text);
@@ -422,11 +427,16 @@ export class ChannelHarnessBridge {
   }
 
   /**
-   * One-time Agent-scoped command, model-hook and image-policy setup. Installed onto an
+   * One-time Agent-scoped command and model-hook setup. Installed onto an
    * Agent's scoped context by every create/resolve and by the Session
    * factory's recreate (borrow + create) so a fresh, resumed OR recreated
-   * session gets the channel commands and channel policies before any driving
+   * session gets the channel commands and channel hooks before any driving
    * happens. Harness still resolves the Session model at creation/resume.
+   * Channel images are NOT rewritten here: the inbound converter hands raw
+   * images to the Harness Attachment Store and the official rc.2 image
+   * pipeline owns model-capability projection (vision variant / text-only
+   * deterministic placeholder), so the Agent-scoped history keeps the
+   * original ImageBlock.
    */
   // Bound arrow: passed to create/resolve/borrowIfLive as the official
   // AgentSetup (invoked as a bare setup(agentCtx)), so this must stay the
@@ -434,22 +444,13 @@ export class ChannelHarnessBridge {
   private commandSetup = async (agentCtx: Context): Promise<void> => {
     const disposeCommands = await installChannelCommands(agentCtx, this.commandDeps);
     const disposeModelSelection = this.modelSelection.install(agentCtx);
-    const disposeImageCompatibility = installImageCompatibility(
-      agentCtx,
-      this.options.ctx,
-      this.modelSelection,
-      this.options.logger,
-      this.options.config.imageCompatibility.mode,
-    );
     if (this.commandSetupsDisposed) {
       await disposeCommands();
       disposeModelSelection();
-      disposeImageCompatibility();
       throw new Error('channel-harness command setup continued after bridge disposal');
     }
     this.commandDisposers.add(disposeCommands);
     this.modelSelectionDisposers.add(disposeModelSelection);
-    this.commandDisposers.add(async () => disposeImageCompatibility());
     // M4: Agent-scoped read_channel_attachment tool. Registered on the agent's
     // own scope so it is disposed with the agent. Best-effort: a tool-install
     // failure must never roll back the agent setup.
@@ -471,7 +472,7 @@ export class ChannelHarnessBridge {
     }
   };
 
-  /** Release this bridge's Agent-scoped command and image-policy registrations. */
+  /** Release this bridge's Agent-scoped command and model-hook registrations. */
   async disposeCommandSetups(): Promise<void> {
     this.commandSetupsDisposed = true;
     const commandDisposers = [...this.commandDisposers];
@@ -711,8 +712,10 @@ export class ChannelHarnessBridge {
       }
       // Every other first message (ordinary text, /help, /status, /models,
       // /model, or an unknown /foo) mints the session and continues below —
-      // first-message /help/status/models/model must work (spec §38) and
-      // unknown commands must NOT be rejected (spec §12).
+      // first-message /help/status/models/model must work (spec §38). An
+      // unknown /foo is then rejected at command admission (rc.2 Host parity;
+      // the session must exist first because channel commands register in the
+      // Agent scope and cannot be resolved without one).
       const fresh = await this.sessionFactory.create(this.conversationInput(event), route);
       binding = fresh.binding;
       agentRef = fresh.agentRef;
@@ -764,15 +767,19 @@ export class ChannelHarnessBridge {
       this.options.agentManager.registerBinding(binding);
     }
 
-    // --- Command admission (spec §12) ----------------------------------------
-    // Registered commands run on the Human Command Plane; UNREGISTERED slash
-    // commands fall through to the model as ordinary user input.
+    // --- Command admission (rc.2 Host parity, upgrade plan §10.2) -----------
+    // Registered commands run on the Human Command Plane; an UNREGISTERED
+    // slash command is always rejected with a direct channel notice and never
+    // enters the Agent prompt.
     if (parsed) {
       const beforeSessionId = binding.sessionId;
       const controller = new AbortController();
+      // rc.2 commands.execute takes base64 composer images; channel command
+      // admission is text-only for now (command image parity is a later phase).
       const execution = await this.options.ctx.commands.execute(
         agentRef!.agent,
         text,
+        [],
         controller.signal,
       );
       if (execution !== undefined) {
@@ -786,8 +793,18 @@ export class ChannelHarnessBridge {
         }
         return;
       }
-      // Unregistered command: NOT an error — the FULL raw text continues to
-      // the model below (never trimmed, never replaced by a notice).
+      // `execution === undefined` with syntax already parsed means the
+      // registry missed the name (`ctx.commands.find(agent, parsed.name)`
+      // returned nothing) — rc.2 official Host answers `unknown-command` and
+      // never forwards the line to the model.
+      this.options.logger.info('[channel-harness] rejected unknown command', {
+        channel: event.channel,
+        account: event.accountId,
+        conversationType: event.conversation.type,
+        command: parsed.name,
+      });
+      await this.sendCommandNotice(event, `未知命令：/${parsed.name}，输入 /help 查看命令。`);
+      return;
     }
 
     // Check #2: a /stop may have arrived while this message was resolving
@@ -842,7 +859,9 @@ export class ChannelHarnessBridge {
       if (agent) {
         try {
           const controller = new AbortController();
-          const execution = await this.options.ctx.commands.execute(agent, text, controller.signal);
+          // rc.2 commands.execute takes base64 composer images; none accompany
+          // an inbound IM stop command.
+          const execution = await this.options.ctx.commands.execute(agent, text, [], controller.signal);
           if (execution !== undefined) {
             await this.renderCommandResult(event, execution.result);
           } else {

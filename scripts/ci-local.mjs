@@ -16,6 +16,8 @@ const steps = [
   ['verify Weixin adapter', ['verify', './packages/channel-weixin', '--test']],
   ['check fixtures', ['check:fixtures']],
   ['check manifests', ['check:manifests']],
+  ['check harness baseline', ['check:harness-compat']],
+  ['report harness newer', ['check:harness-newer']],
   ['run doctor', ['doctor']],
   ['check bundle', ['check:bundle']],
 ];

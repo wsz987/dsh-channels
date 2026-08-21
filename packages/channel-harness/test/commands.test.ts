@@ -342,7 +342,7 @@ describe('A. official dsh-commands compatibility', () => {
     });
     expect(ctx.commands.find(agent as never, 'new')).toBeDefined();
     expect(ctx.commands.list(agent as never).map((d) => d.name)).toContain('new');
-    const execution = await ctx.commands.execute(agent as never, '/new', new AbortController().signal);
+    const execution = await ctx.commands.execute(agent as never, '/new', [], new AbortController().signal);
     expect(execution?.result).toEqual({ kind: 'success', text: 'ok' });
     expect(agent.session.events.map((e) => e.type)).toEqual(['command/run', 'command/done']);
     disposer();
@@ -352,7 +352,7 @@ describe('A. official dsh-commands compatibility', () => {
     const ctx = new Context();
     new CommandRuntime(ctx);
     const agent = fakeScopedAgent(ctx, 's1');
-    const execution = await ctx.commands.execute(agent as never, '/nope', new AbortController().signal);
+    const execution = await ctx.commands.execute(agent as never, '/nope', [], new AbortController().signal);
     expect(execution).toBeUndefined();
     expect(agent.session.events).toEqual([]);
   });
@@ -792,34 +792,45 @@ describe('F. command result rendering', () => {
   });
 });
 
-describe('G. unknown slash command falls through to the model', () => {
-  it('passes an unregistered command verbatim to followup instead of replying to the channel', async () => {
+describe('G. unknown slash command is rejected (rc.2 Host parity, plan §10.2)', () => {
+  it('replies with an unknown-command notice and never sends the line to the model', async () => {
     const rootCtx = new Context();
     new CommandRuntime(rootCtx);
     const { gateway, bridge, adapter } = makeBridge(rootCtx);
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
     const before = gateway.followups.length;
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', '/not-exist')));
-    expect(adapter.sent).toEqual([]);
-    expect(gateway.followups.length).toBe(before + 1);
-    const followup = gateway.followups[gateway.followups.length - 1]!.message as {
-      content: { type: string; text: string }[];
-    };
-    expect(followup.content.map((b) => b.text).join('')).toContain('/not-exist');
+    expect(adapter.sent.map((s) => s.text)).toContain('未知命令：/not-exist，输入 /help 查看命令。');
+    // The unknown line never reaches the Agent (no followup at all).
+    expect(gateway.followups.length).toBe(before);
   });
 
-  it('preserves the full raw text of an unknown command with arguments', async () => {
+  it('rejects an unknown command with arguments by name and never follows up', async () => {
     const rootCtx = new Context();
     new CommandRuntime(rootCtx);
-    const { gateway, bridge } = makeBridge(rootCtx);
+    const { gateway, bridge, adapter } = makeBridge(rootCtx);
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', 'hello')));
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m2', '/unknown foo bar')));
-    expect(gateway.followups.length).toBe(2);
-    const followup = gateway.followups[gateway.followups.length - 1]!.message as {
-      content: { type: string; text: string }[];
-    };
-    const text = followup.content.map((b) => b.text).join('');
-    expect(text).toContain('/unknown foo bar');
+    expect(adapter.sent.map((s) => s.text)).toContain('未知命令：/unknown，输入 /help 查看命令。');
+    expect(gateway.followups).toHaveLength(1); // only the original hello
+    // No command lifecycle events were logged for the admission miss.
+    const agent = gateway.agents.get(gateway.createCalls[0]!);
+    expect(
+      agent?.session.events.filter((e) => e.type === 'command/run' || e.type === 'command/done'),
+    ).toEqual([]);
+  });
+
+  it('an unknown command as the FIRST message mints the session, then rejects without a followup', async () => {
+    const rootCtx = new Context();
+    new CommandRuntime(rootCtx);
+    const { gateway, bridge, adapter } = makeBridge(rootCtx);
+    // Bootstrap reality: channel commands register in the Agent scope, so the
+    // session must be minted before the registry can resolve the miss. The
+    // unknown line itself still never becomes model input.
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', '/nope')));
+    expect(gateway.createCalls).toHaveLength(1);
+    expect(gateway.followups).toEqual([]);
+    expect(adapter.sent.map((s) => s.text)).toContain('未知命令：/nope，输入 /help 查看命令。');
   });
 });
 

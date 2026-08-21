@@ -1,14 +1,22 @@
 # Weekly upstream drift check (scheduled + manual trigger).
 #
 # Flow:
-#   1. `pnpm check:upstream` compares the versions pinned by the committed lockfile
-#      against the npm registry `latest` tag and exits 1 when a newer in-range
-#      @deepseek-ai/* version exists. A red run of THIS workflow is the drift signal.
-#   2. Renovate (renovate.json) proposes dependency PRs.
-#   3. ci.yml gates every Renovate PR ("harness latest-compatible" matrix leg):
+#   1. `pnpm check:upstream` gates the tested baselines:
+#      - the `@deepseek-ai/dsh-*` Harness family must be exactly
+#        HARNESS_TESTED_VERSION (scripts/check-upstream.mjs, plan §15/§16) —
+#        npm `latest` is NOT the compatibility truth for the preview Harness
+#        (its `latest` tag has been observed stuck on an old prerelease wave);
+#      - non-dsh @deepseek-ai/* deps (cordis / schemastery) still use the
+#        npm `latest` drift report.
+#      A red run of THIS workflow is the drift signal.
+#   2. `pnpm check:harness-newer` (non-blocking, exit 0) reports dsh-* versions
+#      published above the tested baseline — "released, not yet verified".
+#   3. Renovate (renovate.json) proposes dependency PRs.
+#   4. ci.yml gates every Renovate PR ("harness latest-compatible" matrix leg):
 #      build + typecheck + full test suite + fixtures + governance must all pass.
-#   4. After all green, maintainers bump `manifest.testedVersion`.
-#   5. Governance checks (check:fixtures / check:manifests / doctor) keep the
+#   5. After all green, maintainers bump HARNESS_TESTED_VERSION together with
+#      the workspace pins and the adapter `manifest.testedVersion`.
+#   6. Governance checks (check:fixtures / check:manifests / doctor) keep the
 #      upstream manifests and fixtures honest against whatever the lockfile pins.
 
 name: Upgrade check
@@ -39,5 +47,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Check upstream drift
         run: pnpm check:upstream
+      - name: Report Harness versions newer than the tested baseline
+        run: pnpm check:harness-newer
       - name: Compatibility governance
         run: pnpm check:fixtures && pnpm check:manifests && pnpm doctor

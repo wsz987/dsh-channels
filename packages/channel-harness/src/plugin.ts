@@ -2,13 +2,19 @@
  * Cordis plugin entry for the channel-harness bridge (doc §30 / H0.6).
  *
  * The plugin injects `channels` (ChannelService), `agents` (AgentRegistry),
- * `agentDefaultModel`, `agentPresets`, `llm`, `commands` (CommandRuntime), and the public
- * `apiProxy` question mux. `sessionPersistence` is
- * NOT required: it is an optional capability resolved LIVE at the use site
- * (a resolver passed into the gateway), so `canResume()` reflects whether the
- * service is present at probe time — including mounts/unmounts after startup.
+ * `agentDefaultModel`, `agentPresets`, `llm`, and `commands` (CommandRuntime).
+ * `sessionPersistence` and the question transports are
+ * NOT required: they are optional capabilities resolved LIVE at the use site
+ * (a resolver passed into the gateway), so probes reflect whether the service
+ * is present at probe time — including mounts/unmounts after startup.
  * `commands` is a required capability (no optional fallback) so the bridge can
  * install Agent-scoped channel commands.
+ *
+ * `apiProxy` is deliberately absent from `inject` (plan §5 / §21 P0-3): the
+ * Web profile mounts it (questions then ride the official ApiProxy mux), but
+ * headless deployments do not, and the channel-harness must still start there
+ * — its question backend probes `apiProxy` once at startup and otherwise
+ * registers the official UserQuestionProvider through `ctx.userQuestions`.
  *
  * The whole bridge lifecycle is registered as one `ctx.effect` whose disposer
  * is the teardown chain from `startBridge`.
@@ -30,7 +36,6 @@ export const inject: string[] = [
   'agentPresets',
   'llm',
   'commands',
-  'apiProxy',
 ];
 
 export function apply(ctx: Context, config: Config): void {

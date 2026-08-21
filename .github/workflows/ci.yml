@@ -25,11 +25,13 @@
 # signal, Renovate (renovate.json) proposes the PRs, this workflow is the gate.
 #
 # Range strategy note: renovate.json uses `rangeStrategy: "bump"` so Renovate rewrites
-# the declared range to the resolved version instead of keeping a static one — the
-# committed manifest `testedVersion` must mirror what the lockfile actually pins.
-# README warning (upstream snapshot): @deepseek-ai/dsh-session / dsh-brand / dsh-llm
-# etc. must stay in the 0.1.0-rc.6 family — npm `latest` is 0.0.1-rc.1, which breaks
-# rc.6 peer consistency; renovate.json caps those via allowedVersions.
+# the declared range to the resolved version instead of keeping a static one —
+# the committed manifest `testedVersion` must mirror what the lockfile actually pins.
+# Harness family note: `@deepseek-ai/dsh-*` compatibility is anchored to
+# HARNESS_TESTED_VERSION in scripts/check-upstream.mjs (exact pins, tested
+# compatibility band — plan §15/§16), NOT to the npm `latest` dist-tag; the
+# weekly upgrade.yml also runs the non-blocking `pnpm check:harness-newer`
+# report for versions published above the baseline.
 
 name: CI
 

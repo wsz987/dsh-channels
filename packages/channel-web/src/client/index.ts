@@ -2,13 +2,19 @@
  * @wsz987/channel-web — Web client plugin entry.
  *
  * This file is bundled by esbuild into lib/client.js and wrapped in the
- * Harness `window.__ModuleLoader__.load({ id, factory })` format (§1.2). It
- * registers the "渠道" Settings section via the settings.section slot and the
+ * Harness `window.__ModuleLoader__.load({ id, factory })` format. It registers
+ * the "渠道" Settings section via the settings.section slot and the
  * 'channels' locale namespace.
  *
- * The plugin context is described by LOCAL structural interfaces (§2.1) — we
- * deliberately do NOT import any @deepseek-ai/dsh-client-* runtime or type
- * package here. React and react/jsx-runtime are the only runtime externals.
+ * rc.2 client module graph notes: React, react/jsx-runtime and
+ * @deepseek-ai/dsh-client-ui-primitives are static shell identities
+ * (PLATFORM_MODULES seeds compiled into the Vite shell), so the bundle keeps
+ * them as require() externals instead of inlining them. The dynamic client
+ * dependency of this entry is declared in package.json `dsh.client.inject`
+ * (currently @deepseek-ai/dsh-client-locale, provider of the "locale"
+ * service); the plugin context itself is described by LOCAL structural
+ * interfaces — we deliberately do NOT import any @deepseek-ai/dsh-client-*
+ * runtime or type package here.
  */
 import { ChannelsSection } from './ChannelsSection.js';
 import { locales } from './locales.js';

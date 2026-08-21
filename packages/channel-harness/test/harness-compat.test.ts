@@ -425,7 +425,7 @@ describe('dsh-commands pinned contract (rc.6)', () => {
     });
     expect(registry.find(agent, 'compact')).toBeDefined();
     expect(registry.list(agent).some((d) => d.name === 'compact')).toBe(true);
-    const execution = await registry.execute(agent, '/compact', new AbortController().signal);
+    const execution = await registry.execute(agent, '/compact', [], new AbortController().signal);
     expect(execution?.result).toEqual({ kind: 'success', text: 'compacted' });
     expect(execution?.commandId).toBeTruthy();
     expect(agentSessionEvents(agent)).toEqual(['command/run', 'command/done']);
@@ -436,7 +436,7 @@ describe('dsh-commands pinned contract (rc.6)', () => {
     const ctx = new Context();
     new CommandRuntime(ctx);
     const agent = scopedAgentFor(ctx, 's-unknown');
-    const execution = await ctx.commands.execute(agent, '/missing', new AbortController().signal);
+    const execution = await ctx.commands.execute(agent, '/missing', [], new AbortController().signal);
     expect(execution).toBeUndefined();
     expect(agentSessionEvents(agent)).toEqual([]);
   });
@@ -447,8 +447,8 @@ describe('dsh-commands pinned contract (rc.6)', () => {
     const agent = scopedAgentFor(ctx, 's-norm');
     ctx.commands.register({ name: 'ok', description: 'x', handler: () => ({ kind: 'success' }) });
     ctx.commands.register({ name: 'fail', description: 'y', handler: () => ({ kind: 'error', text: 'nope' }) });
-    const ok = await ctx.commands.execute(agent, '/ok', new AbortController().signal);
-    const fail = await ctx.commands.execute(agent, '/fail', new AbortController().signal);
+    const ok = await ctx.commands.execute(agent, '/ok', [], new AbortController().signal);
+    const fail = await ctx.commands.execute(agent, '/fail', [], new AbortController().signal);
     expect(ok?.result).toEqual({ kind: 'success' });
     expect(fail?.result).toEqual({ kind: 'error', text: 'nope' });
   });

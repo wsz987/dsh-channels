@@ -45,6 +45,24 @@ profile still boots.
 The package declares a `dsh.client` block so the Harness Web runtime loads the
 client surface from `@wsz987/channel-web/client`.
 
+Against the rc.2 client module graph the contract is:
+
+- `dsh.client.inject` lists **dynamic client packages only** (currently
+  `@deepseek-ai/dsh-client-locale`, provider of the `locale` service).
+  `react`, `@deepseek-ai/cordis`, `@deepseek-ai/dsh-client-ui-primitives` and
+  `@deepseek-ai/dsh-client-ui-slots` are **static shell identities**
+  (`PLATFORM_MODULES` seeds compiled into the Vite shell) and must never
+  appear as dynamic graph rows.
+- `lib/client.js` registers through `window.__ModuleLoader__.load({ id,
+  factory })` and keeps the static identities as `require()` externals
+  (inlining `ui-primitives` would pull in shiki/katex; inlining `react` would
+  duplicate the shell's React copy). Everything else (e.g. `qrcode`) is
+  bundled inline; `build.mjs` fails the build when the artifact requires an
+  undeclared external.
+- Dependency layering: dynamic client dependency → `peerDependencies` +
+  `devDependencies`; static UI library (`ui-primitives`) and `react` →
+  `devDependencies` only.
+
 ## Development
 
 ```bash

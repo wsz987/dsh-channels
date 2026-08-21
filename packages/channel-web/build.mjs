@@ -7,25 +7,67 @@
  *                      window.__ModuleLoader__.load({ id, factory }))
  *   lib/client.js.map  source map for the client bundle
  *
- * The host half (src/index.ts + src/protocol.ts) is compiled by tsc in the
- * package "build" script (`tsc -p tsconfig.json && node build.mjs`). The client
- * half is NOT typechecked by tsc (esbuild strips types).
+ * rc.2 client module graph contract (verified against
+ * @deepseek-ai/dsh-client-modules@0.1.1-rc.2 and @deepseek-ai/dsh-client-web@0.1.1-rc.2):
  *
- * React and react/jsx-runtime are kept as runtime require() calls, and
- * @deepseek-ai/dsh-client-ui-primitives stays external too — all three are
- * provided by the Harness Web runtime module loader (primitives is registered
- * under its bare id). Bundling primitives inline would drag in shiki/katex/
- * markdown (megabytes). Every other bare-specifier import — notably `qrcode`,
- * which the client needs to render QR codes locally — is bundled inline so the
- * client has no undeclared runtime dependency.
+ * - A dynamic client package registers itself by executing
+ *   `window.__ModuleLoader__.load({ id, factory })`; the factory only runs at
+ *   materialization and receives a synchronous `require`.
+ * - `require(spec)` resolves in this order: static shell seed word →
+ *   registered dynamic package factory → throw. The static seed table
+ *   (`PLATFORM_MODULES` exported by @deepseek-ai/dsh-client-web) is:
+ *     react, react/jsx-runtime, react-dom, react-dom/client,
+ *     @deepseek-ai/cordis,
+ *     @deepseek-ai/dsh-client-ui-slots,
+ *     @deepseek-ai/dsh-client-ui-primitives
+ *   Those identities are compiled into the Vite shell — they are NOT dynamic
+ *   graph rows, must never appear in `dsh.client.inject`, and a bundle must
+ *   reference them via `require(...)` instead of inlining them (inlining
+ *   ui-primitives would drag in shiki/katex/markdown — megabytes, and a second
+ *   React copy would break hooks).
+ * - Dynamic client packages (declared in this package's `dsh.client.inject`)
+ *   are served by the host at `/plugins/<id>/client.js` and resolved through
+ *   the module table, so any import of them stays external too.
+ *
+ * Everything else (e.g. `qrcode`, which the client needs to render QR codes
+ * locally) is bundled inline so the artifact has no undeclared runtime
+ * dependency. The purity gate below fails the build when the emitted bundle
+ * requires anything outside the declared externals — the build-time mirror of
+ * the loader's runtime resolution error.
  */
 import { build } from 'esbuild';
 import { writeFile, rm } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+
+/**
+ * Static shell identities this client imports (subset of the rc.2
+ * `PLATFORM_MODULES` seed table — see header). React belongs to the shell;
+ * ui-primitives is a static assembly library, not a dynamic graph row.
+ */
+const STATIC_SHELL_IDENTITIES = [
+  'react',
+  'react/jsx-runtime',
+  '@deepseek-ai/dsh-client-ui-primitives',
+];
+
+/** Dynamic client packages this entry depends on (`dsh.client.inject`). */
+const dynamicClientModules = pkg.dsh?.client?.inject ?? [];
+
+/** Every specifier the artifact may `require()` at runtime. */
+const allowedExternals = new Set([...STATIC_SHELL_IDENTITIES, ...dynamicClientModules]);
+
+/** Extract the require() specifiers from the emitted factory body. */
+function requiredSpecifiers(code) {
+  const specs = new Set();
+  const re = /require\((['"])((?:[^\\'"\n]|\\.)*)\1\)/g;
+  for (const match of code.matchAll(re)) specs.add(match[2]);
+  return specs;
+}
 
 async function buildClient() {
   const result = await build({
@@ -37,13 +79,9 @@ async function buildClient() {
     jsx: 'automatic',
     sourcemap: 'external',
     sourcesContent: true,
-    // Harness provides React and the UI primitives; bundle everything else
-    // (e.g. qrcode) into client.js.
-    external: [
-      'react',
-      'react/jsx-runtime',
-      '@deepseek-ai/dsh-client-ui-primitives',
-    ],
+    // The rc.2 module table resolves static shell identities and dynamic
+    // client packages; everything else (qrcode, …) is bundled inline.
+    external: [...allowedExternals],
     outfile: root + '/lib/.client.tmp.js',
     write: false,
   });
@@ -54,15 +92,30 @@ async function buildClient() {
   // Strip the trailing sourceMappingURL comment so we append our own.
   code = code.replace(/\/\/# sourceMappingURL=[^\n]*\s*$/, '');
 
+  // Bundle purity gate: the loader throws at runtime for unresolvable
+  // requires ("not a platform seed word, not a materialized module, and no
+  // registered package factory"); fail here, at build time, instead.
+  const specs = requiredSpecifiers(code);
+  const drift = [...specs].filter((spec) => !allowedExternals.has(spec));
+  if (drift.length > 0) {
+    throw new Error(
+      '[channel-web] client bundle requires undeclared externals: ' +
+        drift.map((s) => JSON.stringify(s)).join(', ') +
+        ' — add them to STATIC_SHELL_IDENTITIES / dsh.client.inject, or bundle them inline.',
+    );
+  }
+
+  // Same wrapper shape as the official rc.2 dynamic client artifacts
+  // (tsdown output of e.g. @deepseek-ai/dsh-client-ui-settings-general).
+  // NOTE: packages/channels/build.mjs rewrites the `id:` line below when it
+  // rebrands this artifact for the @wsz987/dsh-channels bundle.
   const wrapped = [
     'window.__ModuleLoader__.load({',
     '  id: "@wsz987/channel-web",',
     '  factory: (require) => {',
     '    var module = { exports: {} };',
     '    var exports = module.exports;',
-    '    try {',
-    '      Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });',
-    '    } catch (e) { /* environments without Symbol support */ }',
+    '    Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });',
     code,
     '    return module.exports;',
     '  }',

@@ -29,15 +29,13 @@ As a Cordis plugin:
     - apiProxy
 ```
 
-How a text-only model handles inbound channel images is an explicit **Channel
-compatibility policy** (`imageCompatibility.mode`, default `degrade`), not host
-parity: the official Web host refuses to switch a Session to a model that
-cannot see its existing images, while channels keep serving the conversation.
-With `degrade`, each image is replaced by `[图片：当前模型不支持查看]` at the
-agent `pre-step` boundary, so the durable `user/message` and the model request
-stay reconstructable and text/image order is preserved. Unknown capabilities
-fail open. With `reject`, the step is refused with an error instead — the user
-must start a new Session (`/new`) or switch to an image-capable model.
+Channel images follow the official Harness image pipeline: the bridge hands
+raw inbound image bytes to the Harness Attachment Store
+(`attachments.saveImage` -> `ImageAttachmentRef` -> real `ImageBlock`) and
+never rewrites messages for model compatibility. Whether the current model
+can see images (vision variant vs. deterministic text placeholder) is decided
+by Harness request projection, and the append-only session history keeps the
+original attachment reference.
 
 ## What it does
 
@@ -47,7 +45,7 @@ must start a new Session (`/new`) or switch to an image-capable model.
 | `AgentManager` / `AgentRouter` | Resolves/creates the agent for a conversation via `agent.default` plus per-channel/account/conversation overrides |
 | `MessageConverter` | Maps structured `ChannelEvent` messages to Harness message types |
 | `ReplyRouter` / `ReplyContextStore` | Streams `session/event` output back to the adapter (`ReplyHandle`) |
-| `ChannelQuestionBridge` | Presents channel-origin `ask_user_question` requests through generic interactive actions and returns structured answers through the public ApiProxy contract |
+| `ChannelQuestionPresenter` (interactions/) | Presents `ask_user_question` requests through generic interactive actions. Web profile answers through the official ApiProxy mux contract; headless deployments register the channel as the official `UserQuestionProvider` (`ctx.userQuestions`) |
 | `WorkspaceResolver` | Maps conversations to Harness workspaces (`channel-account` by default) |
 | commands | Registers Agent-scoped slash commands (`/new`) through Harness `CommandRuntime` |
 | outbox | Proactive `send_channel_message` tool support (`OutboxService`) |
@@ -79,8 +77,6 @@ run a first-turn model preparation RPC.
     workspace:
       mode: channel-account   # channel-account | host-cwd | disabled
       autoCreate: true
-    imageCompatibility:
-      mode: degrade           # degrade (default) | reject — ADR 0002
     userQuestions:
       enabled: true
       timeoutMs: 300000

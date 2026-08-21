@@ -164,7 +164,7 @@ interface Fixture {
 
 function makeFixture(
   resolver: StubResolver,
-  questionBridge?: { handleChannelEvent: ReturnType<typeof vi.fn> },
+  questionPresenter?: { handleChannelEvent: ReturnType<typeof vi.fn> },
 ): Fixture {
   const gateway = new FakeGateway();
   const manager = new AgentManager(gateway, silentLogger, 4);
@@ -183,7 +183,7 @@ function makeFixture(
     ctx: new Context(),
     commandDeps: { startNewSession: async () => {} },
     workspaceResolver: noopResolver,
-    questionBridge: questionBridge as never,
+    questionPresenter: questionPresenter as never,
   });
   return { gateway, bindingStore, resolver, adapter, bridge };
 }
@@ -231,30 +231,30 @@ describe('Fail-closed Access Gate (plan §54)', () => {
   });
 
   it('unauthorized interaction is dropped before the question bridge', async () => {
-    const questionBridge = { handleChannelEvent: vi.fn(async () => true) };
-    const { resolver, bridge } = makeFixture(new StubResolver(), questionBridge);
+    const questionPresenter = { handleChannelEvent: vi.fn(async () => true) };
+    const { resolver, bridge } = makeFixture(new StubResolver(), questionPresenter);
     resolver.resolveState = { state: 'present', policy: denyDm };
 
     await bridge.handleChannelEvent(makeInteractionEvent());
-    expect(questionBridge.handleChannelEvent).not.toHaveBeenCalled();
+    expect(questionPresenter.handleChannelEvent).not.toHaveBeenCalled();
   });
 
   it('authorized interaction reaches the question bridge after the Access Gate', async () => {
-    const questionBridge = { handleChannelEvent: vi.fn(async () => true) };
-    const { resolver, bridge } = makeFixture(new StubResolver(), questionBridge);
+    const questionPresenter = { handleChannelEvent: vi.fn(async () => true) };
+    const { resolver, bridge } = makeFixture(new StubResolver(), questionPresenter);
     resolver.resolveState = { state: 'present', policy: openDm };
 
     await bridge.handleChannelEvent(makeInteractionEvent());
-    expect(questionBridge.handleChannelEvent).toHaveBeenCalledOnce();
+    expect(questionPresenter.handleChannelEvent).toHaveBeenCalledOnce();
   });
 
   it('a pending question text answer is consumed before Agent routing', async () => {
-    const questionBridge = { handleChannelEvent: vi.fn(async () => true) };
-    const { gateway, resolver, bridge } = makeFixture(new StubResolver(), questionBridge);
+    const questionPresenter = { handleChannelEvent: vi.fn(async () => true) };
+    const { gateway, resolver, bridge } = makeFixture(new StubResolver(), questionPresenter);
     resolver.resolveState = { state: 'present', policy: openDm };
 
     await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', '1')));
-    expect(questionBridge.handleChannelEvent).toHaveBeenCalledOnce();
+    expect(questionPresenter.handleChannelEvent).toHaveBeenCalledOnce();
     expect(gateway.createCalls).toHaveLength(0);
     expect(gateway.followups).toHaveLength(0);
   });

@@ -63,7 +63,7 @@ Adapter 不得自行定义不同于 `channel-harness` 的 ACL 语义；外部主
 | `channel-weixin` / `-qq` / `-dingtalk` / `-lark` / `-telegram` | 五个内置渠道适配器（Telegram：Bot API 长轮询 + edit streaming + getFile 下载） |
 | `channel-compat` / `-testkit` / `-verify` / `-web` | 校验 / 测试 / 契约验证 / Web 可视化 |
 
-常用命令：`pnpm build`、`pnpm typecheck`、`pnpm test`、`pnpm channels`、`pnpm channels:clean`、`pnpm verify <dir>`、`pnpm doctor`、`pnpm check:fixtures`、`pnpm check:manifests`、`pnpm check:upstream`。
+常用命令：`pnpm build`、`pnpm typecheck`、`pnpm test`、`pnpm channels`、`pnpm channels:clean`、`pnpm verify <dir>`、`pnpm doctor`、`pnpm check:fixtures`、`pnpm check:manifests`、`pnpm check:upstream`（含 dsh-* 基线 `check:harness-compat`；`check:harness-newer` 为非阻塞提示，基线事实来源是 `scripts/check-upstream.mjs` 的 `HARNESS_TESTED_VERSION`）。
 
 ## 2. DeepSeek Harness 怎么排查（本体问题）
 
