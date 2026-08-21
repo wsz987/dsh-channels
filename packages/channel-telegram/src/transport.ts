@@ -63,11 +63,28 @@ export class FetchTransport implements HttpTransport {
   async request(path: string, init: HttpRequestInit = {}, signal?: AbortSignal): Promise<unknown> {
     const response = await this.requestResponse(path, init, signal);
     const text = await response.text();
-    return text ? JSON.parse(text) : undefined;
+    if (!text) {
+      if (!response.ok) {
+        throw new ChannelError('CHANNEL_ERROR', `telegram http ${response.status} on ${redactPath(path)}`);
+      }
+      return undefined;
+    }
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      throw new ChannelError(
+        'CHANNEL_ERROR',
+        `telegram http returned invalid JSON on ${redactPath(path)}`,
+        { cause: error },
+      );
+    }
   }
 
   async requestBinary(path: string, init: HttpRequestInit = {}, signal?: AbortSignal): Promise<HttpBinaryResponse> {
     const response = await this.requestResponse(path, init, signal);
+    if (!response.ok) {
+      throw new ChannelError('CHANNEL_ERROR', `telegram http ${response.status} on ${redactPath(path)}`);
+    }
     const buffer = await response.arrayBuffer();
     return {
       data: new Uint8Array(buffer),
@@ -101,9 +118,6 @@ export class FetchTransport implements HttpTransport {
             : undefined,
         signal: controller.signal,
       });
-      if (!response.ok) {
-        throw new ChannelError('CHANNEL_ERROR', `telegram http ${response.status} on ${redactPath(path)}`);
-      }
       return response;
     } catch (error) {
       if (error instanceof ChannelError) throw error;

@@ -26,7 +26,6 @@ import type {
   CreateReplyOptions,
   ReplyHandle,
 } from './adapter.js';
-import type { z } from 'zod';
 import { defineChannelAdapterInputSchema } from './schema.js';
 
 /**
@@ -56,6 +55,9 @@ export interface DefineChannelAdapterInput {
 
   /** Optional streaming reply handle (native/edit streaming modes). */
   createReply?(target: ChannelTarget, options?: CreateReplyOptions): Promise<ReplyHandle>;
+
+  /** Optional in-place edit of an already-sent message. */
+  edit?(target: ChannelTarget, messageId: string, message: OutboundMessage): Promise<SendResult>;
 
   /** Optional interactive auth challenge (QR/login flows). */
   beginAuth?(): Promise<AuthChallenge>;
@@ -92,8 +94,7 @@ export function defineChannelAdapter<A extends ChannelAdapter>(adapter: A): A {
  * throws one `TypeError` listing all of them, so a broken adapter is fixed
  * in one pass instead of one error per run.
  *
- * The check runs `defineChannelAdapterInputSchema` and maps each zod issue
- * back to the stable legacy problem strings the tests and docs rely on.
+ * The schema owns the stable problem strings relied on by tests and docs.
  */
 function assertAdapterShape(value: unknown): asserts value is ChannelAdapter {
   if (typeof value !== 'object' || value === null) {
@@ -103,13 +104,7 @@ function assertAdapterShape(value: unknown): asserts value is ChannelAdapter {
   }
   const parsed = defineChannelAdapterInputSchema.safeParse(value);
   if (parsed.success) return;
-  const problems: string[] = [];
-  for (const issue of parsed.error.issues) {
-    const problem = problemForIssue(issue);
-    if (problem !== undefined && !problems.includes(problem)) {
-      problems.push(problem);
-    }
-  }
+  const problems = [...new Set(parsed.error.issues.map((issue) => issue.message))];
   if (problems.length === 0) {
     problems.push(parsed.error.issues[0]?.message ?? 'adapter does not satisfy the ChannelAdapter contract');
   }
@@ -117,25 +112,4 @@ function assertAdapterShape(value: unknown): asserts value is ChannelAdapter {
   throw new TypeError(
     `defineChannelAdapter: invalid adapter '${id}' — ${problems.join('; ')}`,
   );
-}
-
-/** Map one zod issue back to the legacy problem string for the field. */
-function problemForIssue(issue: z.ZodIssue): string | undefined {
-  const path = issue.path.map(String).join('.');
-  if (path === 'capabilities.streaming') {
-    return "capabilities.streaming must be one of 'native' | 'edit' | 'buffered'";
-  }
-  if (issue.code === 'invalid_type') {
-    if (path === 'id') return 'id must be a non-empty string';
-    if (path === 'capabilities') return 'capabilities must be a ChannelCapabilities object';
-    if (path.startsWith('capabilities.')) {
-      return `capabilities.${path.slice('capabilities.'.length)} must be a boolean`;
-    }
-    if (path === 'start' || path === 'stop' || path === 'send') return `${path} must be a function`;
-    if (path === 'createReply' || path === 'beginAuth' || path === 'pollAuth' || path === 'getHealth') {
-      return `${path} must be a function when present`;
-    }
-  }
-  if (issue.code === 'too_small' && path === 'id') return 'id must be a non-empty string';
-  return undefined;
 }

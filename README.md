@@ -100,6 +100,10 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 
 密钥由 Harness 凭据管理，`cordis.patch.yml` 只填写 `appSecretRef` 等引用。完整示例见 [minimal-profile](apps/example/minimal-profile/)；配置 patch 会整体替换 `config`，不会深度合并。
 
+Telegram adapter 最低支持 Bot API 10.2；`formatting.mode: auto` 默认使用 Rich
+Markdown。项目不维护旧 Bot API server 的自动兼容，`plain` 仅作为显式输出模式或
+格式错误时的单次降级。
+
 ### 必做：配置安全访问
 
 首次安装或从 0.3.x 升级后，需要在“安全访问”中确认谁可以通过 Bot 使用本机 Agent。系统默认不会把“能给 Bot 发消息的人”自动视为已授权用户。
@@ -156,7 +160,7 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 ```yaml
 - id: channels-harness
   name: '@wsz987/dsh-channels/harness'
-  inject: [channels, agents, agentDefaultModel, llm, commands]
+  inject: [channels, agents, agentDefaultModel, agentPresets, llm, commands, apiProxy]
   config:
     workspace:
       mode: channel-account # channel-account（默认）| host-cwd | disabled

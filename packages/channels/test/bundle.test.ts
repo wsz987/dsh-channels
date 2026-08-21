@@ -91,8 +91,8 @@ const EXPECTED_ITEMS: PatchItem[] = [
   { id: 'channels-service', name: '@wsz987/dsh-channels/service' },
   { id: 'channels-files', name: '@wsz987/dsh-channels/files' },
   // channel-harness injects the command-plane capabilities: the Harness
-  // `commands` registry plus the default-model selection it resolves routes against.
-  { id: 'channels-harness', name: '@wsz987/dsh-channels/harness', inject: ['channels', 'agents', 'agentDefaultModel', 'llm', 'commands'] },
+  // `commands` registry, default model/preset composition, and the public Host question mux.
+  { id: 'channels-harness', name: '@wsz987/dsh-channels/harness', inject: ['channels', 'agents', 'agentDefaultModel', 'agentPresets', 'llm', 'commands', 'apiProxy'] },
   // channel-control is the universal control plane: it must load before the
   // channel plugins so ctx.channelControl exists when they register definitions.
   { id: 'channels-control', name: '@wsz987/dsh-channels/control', inject: ['channels', 'credentials'] },

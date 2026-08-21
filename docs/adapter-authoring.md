@@ -233,6 +233,61 @@ Required media tests for every capability declared `true`:
 5. Shared conversion is covered: image data can become a Harness `ImageBlock`,
    and file data can be consumed by `ChannelFileProvider` when installed.
 
+### Interactive actions and in-place edit
+
+The contract is platform-agnostic for interactive buttons. `OutboundMessage`
+can carry `actions` — an array of `OutboundActionRow`, each row holding one or
+more `OutboundAction` (`id`, `label`, optional `style`):
+
+```ts
+{
+  text: 'choose',
+  actions: [
+    { actions: [{ id: 'yes', label: 'Yes', style: 'primary' }, { id: 'no', label: 'No' }] },
+  ],
+}
+```
+
+- `id` is returned verbatim by the platform on a press; map it to your native
+  inline payload (Telegram `callback_data`, Lark/DingTalk action value). The
+  matching `interaction.received` event carries `action = <the callback id>`.
+- **Never put platform-specific fields in core.** A Telegram adapter maps
+  `actions` → `inline_keyboard`; a Lark adapter maps them → card buttons. Core
+  has no `callback_data` / `action_value` field.
+- Declare support with `capabilities.interactiveActions: true`; adapters without
+  interactive controls omit it.
+- Guard platform-specific size limits at the adapter boundary: e.g. Telegram
+  `callback_data` is capped at 64 bytes, so an adapter whose `id` would exceed
+  it must fail closed rather than silently truncate (a truncated id cannot round
+  trip back to a press).
+
+For interactive flows that rewrite an already-sent message (multi-select
+toggles, removing stale buttons once an answer is consumed), implement the
+optional `edit(target, messageId, message)` method. It maps to your platform's
+in-place edit primitive (Telegram `editMessageText` / `editMessageReplyMarkup`,
+Lark/DingTalk card update). Adapters without an edit primitive leave it
+undefined; the harness degrades those flows to a non-edit strategy.
+
+A minimal interactive-capable adapter snippet:
+
+```ts
+defineChannelAdapter({
+  id: 'interactive',
+  capabilities: {
+    text: true, image: false, file: false, audio: false, video: false,
+    markdown: true, cards: false, reactions: false, threads: false,
+    interactiveActions: true,
+    streaming: 'buffered',
+  },
+  async send(target, message) {
+    // Map message.actions -> native inline keyboard; fail closed on oversize ids.
+  },
+  async edit(target, messageId, message) {
+    // Update reply markup / text in place.
+  },
+});
+```
+
 ## 5. Contract tests
 
 `@wsz987/channel-testkit` ships `runChannelAdapterContract(adapter, options)`,
@@ -268,7 +323,7 @@ are caught without a live platform:
 {
   "name": "inbound text",
   "channel": "telegram",
-  "upstreamVersion": "7.10.0",
+  "upstreamVersion": "10.2",
   "payload": {
     "type": "text",
     "msgId": "msg_text_1",
@@ -307,8 +362,8 @@ const manifest = {
   adapterVersion: '0.1.0',
   upstream: {
     reference: 'telegram bot api (official)',
-    testedVersion: '7.10',
-    versionRange: '>=7.0 <8.0',
+    testedVersion: '10.2',
+    versionRange: '>=10.2',
     // per-adapter strategy: mostly 'sdk' (official SDK), 'source' (direct
     // protocol) or 'source-port'. The four-value enum below is reserved for
     // channel-compat's upstream manifest:

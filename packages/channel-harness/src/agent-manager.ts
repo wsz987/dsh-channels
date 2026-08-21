@@ -32,6 +32,7 @@ import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence';
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent, AgentHandle, AgentOptions, AgentSetup, ModelSelection } from '@deepseek-ai/dsh-agent';
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model';
+import { resolveSessionPreset, type AgentPresets } from '@deepseek-ai/dsh-agent-presets';
 import type { UserMessage } from '@deepseek-ai/dsh-llm';
 import type { ChannelLogger } from '@wsz987/channel-core';
 import type { AgentRouteSpec } from './agent-router.js';
@@ -271,6 +272,30 @@ export class HarnessAgentGateway implements AgentGateway {
     return service?.currentSelection();
   }
 
+  /**
+   * Resolve and mount the official Agent preset before publication, matching
+   * the Harness Host's create/resume composition boundary. Without this join,
+   * preset-scoped tools such as `ask_user_question` are invisible to the Agent.
+   */
+  private async composePreset(presetId: string | undefined, setup?: AgentSetup): Promise<{
+    agentPreset?: string;
+    setup?: AgentSetup;
+  }> {
+    const presets = this.ctx.get('agentPresets') as AgentPresets | undefined;
+    // Test/minimal hosts without the optional roster retain the historical
+    // metadata behavior; the official runtime always provides this service.
+    if (!presets) return { agentPreset: presetId, setup };
+
+    const resolvedId = (await presets.resolve(presetId)).id;
+    return {
+      agentPreset: resolvedId,
+      setup: async (agentCtx) => {
+        await presets.mount(agentCtx, resolvedId);
+        return setup?.(agentCtx);
+      },
+    };
+  }
+
   async create(
     sessionId: string,
     route: AgentRouteSpec,
@@ -278,6 +303,7 @@ export class HarnessAgentGateway implements AgentGateway {
     meta?: AgentCreateMeta,
   ): Promise<GatewayAgentHandle> {
     const resolved = resolveRoute(route, this.defaultSelection());
+    const composition = await this.composePreset(resolved.preset, setup);
     const handle = await this.ctx.agents.create({
       sessionId: SessionId(sessionId),
       // `{{cwd}}` reads `session.header.cwd`, and `dsh-workspace` groups the
@@ -288,10 +314,10 @@ export class HarnessAgentGateway implements AgentGateway {
       // `resume` has no `meta` and cannot add it later.
       meta: {
         ...(meta?.cwd ? { cwd: meta.cwd } : {}),
-        ...(resolved.preset ? { agentPreset: resolved.preset } : {}),
+        ...(composition.agentPreset ? { agentPreset: composition.agentPreset } : {}),
       },
       agentOptions: optionsFor(resolved),
-      setup,
+      setup: composition.setup,
     });
     return this.wrap(handle);
   }
@@ -300,10 +326,21 @@ export class HarnessAgentGateway implements AgentGateway {
     // Route parity (doc H0.5): resume uses the SAME optionsFor(resolveRoute(...))
     // as create. NEVER `model ?? agentId`.
     const resolved = resolveRoute(route, this.defaultSelection());
+    const persistence = this.resolvePersistence();
+    const inspected = persistence ? await persistence.inspect(SessionId(sessionId)) : undefined;
+    const persistedPreset = inspected
+      ? resolveSessionPreset({ header: inspected.meta, events: inspected.events })
+      : undefined;
+    if (persistedPreset && resolved.preset && persistedPreset !== resolved.preset) {
+      throw new AgentPresetConflictError(sessionId, resolved.preset, persistedPreset);
+    }
+    // Persisted composition wins. Sessions created before Agent presets were
+    // recorded have no value, so they intentionally adopt the current default.
+    const composition = await this.composePreset(persistedPreset ?? resolved.preset, setup);
     const handle = await this.ctx.agents.resume({
       resumeSessionId: SessionId(sessionId),
       agentOptions: optionsFor(resolved),
-      setup,
+      setup: composition.setup,
     });
     return this.wrap(handle);
   }
@@ -618,5 +655,17 @@ export class AgentManager {
     };
     this.refs.set(sessionId, ref);
     return ref;
+  }
+}
+
+/** A durable session cannot be silently recomposed under a different preset. */
+export class AgentPresetConflictError extends Error {
+  constructor(
+    readonly sessionId: string,
+    readonly requested: string,
+    readonly persisted: string,
+  ) {
+    super(`session '${sessionId}' uses Agent preset '${persisted}', but route requested '${requested}'`);
+    this.name = 'AgentPresetConflictError';
   }
 }

@@ -13,6 +13,7 @@ import { Context } from '@deepseek-ai/cordis';
 import CommandRuntime, { parseCommand, type CommandResult } from '@deepseek-ai/dsh-commands';
 import { createScope } from '@deepseek-ai/dsh-scope';
 import type { Agent } from '@deepseek-ai/dsh-agent';
+import type { AgentPresets } from '@deepseek-ai/dsh-agent-presets';
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence';
 import {
   AgentRegistry,
@@ -48,6 +49,15 @@ function makeHandle(id: SessionId): AgentHandle {
 }
 
 const route: AgentRouteSpec = { preset: 'coding', provider: 'deepseek', model: 'deepseek-reasoner' };
+
+function providePresetRoster(ctx: Context, defaultId = 'standard') {
+  const roster = {
+    resolve: vi.fn(async (id?: string) => ({ id: id ?? defaultId })),
+    mount: vi.fn(async () => {}),
+  };
+  ctx.provide('agentPresets', roster as never as AgentPresets);
+  return roster;
+}
 
 describe('Harness compatibility (pinned rc.6 contract)', () => {
   it('AgentRegistry exposes get/create/resume/list', () => {
@@ -128,6 +138,7 @@ describe('Harness compatibility (pinned rc.6 contract)', () => {
   it('create maps the preset into meta.agentPreset and leaves cwd to the caller', async () => {
     const ctx = new Context();
     const agents = new AgentRegistry(ctx);
+    providePresetRoster(ctx);
     const createdMeta: { cwd?: string; agentPreset?: string }[] = [];
     agents.setFactory({
       createAgent: async (_owner, options) => {
@@ -182,6 +193,7 @@ describe('Harness compatibility (pinned rc.6 contract)', () => {
   it('create combines a caller-supplied cwd and the route preset', async () => {
     const ctx = new Context();
     const agents = new AgentRegistry(ctx);
+    providePresetRoster(ctx);
     const createdMeta: { cwd?: string; agentPreset?: string }[] = [];
     agents.setFactory({
       createAgent: async (_owner, options) => {
@@ -194,6 +206,57 @@ describe('Harness compatibility (pinned rc.6 contract)', () => {
     const gateway = new HarnessAgentGateway(ctx);
     await gateway.create('s-both', { preset: 'coding' }, undefined, { cwd: 'X' });
     expect(createdMeta).toEqual([{ cwd: 'X', agentPreset: 'coding' }]);
+  });
+
+  it('resolves the official default preset and mounts it before channel setup', async () => {
+    const ctx = new Context();
+    const agents = new AgentRegistry(ctx);
+    const roster = providePresetRoster(ctx);
+    const order: string[] = [];
+    roster.mount.mockImplementation(async () => {
+      order.push('preset');
+    });
+    let createdMeta: CreateAgentOptions['meta'];
+    agents.setFactory({
+      createAgent: async (_owner, options) => {
+        createdMeta = options.meta;
+        await options.setup?.(ctx);
+        return makeHandle(options.sessionId);
+      },
+      resume: async (_owner, options) => makeHandle(options.resumeSessionId),
+    } satisfies AgentFactory);
+
+    const gateway = new HarnessAgentGateway(ctx);
+    await gateway.create('s-default-preset', {}, async () => {
+      order.push('channel');
+    });
+
+    expect(roster.resolve).toHaveBeenCalledWith(undefined);
+    expect(createdMeta).toEqual({ agentPreset: 'standard' });
+    expect(roster.mount).toHaveBeenCalledWith(ctx, 'standard');
+    expect(order).toEqual(['preset', 'channel']);
+  });
+
+  it('resumes a legacy session with no recorded preset under the official default', async () => {
+    const ctx = new Context();
+    const agents = new AgentRegistry(ctx);
+    const roster = providePresetRoster(ctx);
+    agents.setFactory({
+      createAgent: async (_owner, options) => makeHandle(options.sessionId),
+      resume: async (_owner, options) => {
+        await options.setup?.(ctx);
+        return makeHandle(options.resumeSessionId);
+      },
+    } satisfies AgentFactory);
+    const persistence = {
+      inspect: vi.fn(async () => ({ meta: { id: SessionId('s-legacy') }, events: [] })),
+    } as never as SessionPersistence;
+
+    const gateway = new HarnessAgentGateway(ctx, () => persistence);
+    await gateway.resume('s-legacy', {});
+
+    expect(roster.resolve).toHaveBeenCalledWith(undefined);
+    expect(roster.mount).toHaveBeenCalledWith(ctx, 'standard');
   });
 
   it('the AgentHandle shape the gateway wraps is { agent: { id, followup, steer, inject, whenIdle }, dispose }', async () => {

@@ -1,0 +1,43 @@
+{
+  "name": "callback query interaction",
+  "channel": "telegram",
+  "upstreamVersion": "10.2",
+  "payload": {
+    "update_id": 2001,
+    "callback_query": {
+      "id": "callback_query_id_9001",
+      "from": {
+        "id": 100200300,
+        "first_name": "Alice",
+        "username": "alice_user",
+        "is_bot": false
+      },
+      "message": {
+        "message_id": 777,
+        "chat": {
+          "id": 100200300,
+          "type": "private",
+          "first_name": "Alice",
+          "username": "alice_user"
+        }
+      },
+      "chat_instance": "chat_instance_token",
+      "data": "dshq:token:0:1"
+    }
+  },
+  "expected": {
+    "type": "interaction.received",
+    "channel": "telegram",
+    "accountId": "main",
+    "conversation": {
+      "id": "100200300",
+      "type": "dm"
+    },
+    "sender": {
+      "id": "100200300",
+      "name": "Alice"
+    },
+    "interactionId": "callback_query_id_9001",
+    "action": "dshq:token:0:1"
+  }
+}

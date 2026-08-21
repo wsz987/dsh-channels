@@ -24,6 +24,8 @@
 
 export interface ChannelReplyContext {
   conversationType: 'dm' | 'group';
+  /** Authorized sender that initiated this turn. */
+  senderId?: string;
   replyToMessageId?: string;
   raw?: unknown;
   /**
@@ -82,6 +84,19 @@ export class ReplyContextStore {
   /** Active context for sessionId+turn, if any. */
   getTurn(sessionId: string, turn: number): ChannelReplyContext | undefined {
     return this.activeByTurn.get(`${sessionId}:${turn}`);
+  }
+
+  /** Active context for a single-flight Agent session, including its turn. */
+  getActiveForSession(
+    sessionId: string,
+  ): { turn: number; context: ChannelReplyContext } | undefined {
+    const prefix = `${sessionId}:`;
+    for (const [key, context] of this.activeByTurn) {
+      if (!key.startsWith(prefix)) continue;
+      const turn = Number(key.slice(prefix.length));
+      if (Number.isSafeInteger(turn)) return { turn, context };
+    }
+    return undefined;
   }
 
   /** Drop the active context for sessionId+turn (turn/end cleanup). */

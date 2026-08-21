@@ -109,6 +109,19 @@ export interface ChannelAdapter {
   send(target: ChannelTarget, message: OutboundMessage): Promise<SendResult>;
 
   /**
+   * Optional in-place edit of an already-sent message (e.g. Telegram
+   * `editMessageText` / `editMessageReplyMarkup`, Lark/DingTalk card update).
+   * Enables interactive flows that rewrite a single sent message (multi-select
+   * toggling, removing stale buttons). Adapters without an edit primitive leave
+   * it undefined; the harness must degrade those flows to a non-edit strategy.
+   */
+  edit?(
+    target: ChannelTarget,
+    messageId: string,
+    message: OutboundMessage,
+  ): Promise<SendResult>;
+
+  /**
    * Best-effort typing indicator. Optional: adapters with a typing API (e.g.
    * Weixin sendtyping) implement these; the harness fires them around turn
    * start/end and NEVER lets a failure break reply delivery.

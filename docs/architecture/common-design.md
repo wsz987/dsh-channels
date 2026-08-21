@@ -950,7 +950,7 @@ pnpm 将传递依赖提升到 profile 根目录。根入口同时承载 Web host
 
     - id: channels-harness
       name: '@wsz987/dsh-channels/harness'
-      inject: [channels, agents, agentDefaultModel, llm, commands]
+      inject: [channels, agents, agentDefaultModel, llm, commands, apiProxy]
 
     - id: channels-control
       name: '@wsz987/dsh-channels/control'
@@ -991,10 +991,11 @@ pnpm 将传递依赖提升到 profile 根目录。根入口同时承载 Web host
 - **DSH Bundle**：`package.json` 的 `dsh.bundle.patch` 指向 `cordis.patch.yml`；patch 行只引用 bundle 自己的 exports，实现包作内部依赖，不要求 pnpm 提升传递依赖到 profile 根。
 - **patch 语义**：`cordis.patch.yml` / profile patch 是**整体替换**目标插件 `config`，不是深度合并；覆盖时必须保留该插件完整字段。
 - **Cordis 插件形态**：`export const name` / `export const inject` / `export function apply(ctx, config)`；WS、long-poll、Gateway、heartbeat 等手动资源放 `ctx.effect()`；事件监听走 `ctx.on()` 由框架自动清理。
-- **inject 名称**：只用 Harness public service 名（`channels`、`channelControl`、`agents`、`credentials`、`llm`、`commands`、`agentDefaultModel`），禁止私造 key。
+- **inject 名称**：只用 Harness public service 名（`channels`、`channelControl`、`agents`、`credentials`、`llm`、`commands`、`agentDefaultModel`、`apiProxy`），禁止私造 key。
 - **命令**：统一走 `commandFactories` / `ctx.commands.register`；命令名 lowercase、以 `/` 开头；handler 返回 `{ kind: 'success' | 'error', text }`；未注册命令不再被拦截（作为普通用户输入交给模型）；命令结果不进模型历史。
 - **Agent 输入语义**：普通聊天 `agent.followup()`；执行中纠偏才用 `agent.steer()`；额外上下文用 `agent.inject()`（不得代替聊天）。
 - **回复只消费官方 `session/event`**：`assistant/chunk`、`assistant/message`、`turn/end`；`tool/call` / `tool/result` 只作可选 UX，不混入回复协议。
+- **User Questions 只走官方 ApiProxy client contract**：`channel-harness` 消费 `ctx.apiProxy.events.mux()` 的 `question/requested`，只匹配当前 active ReplyContext，并用 `ctx.apiProxy.respond()` 返回结构化答案；禁止 adapter 访问 `ctx.userQuestions`，也禁止注册第二个 Provider。Web 与渠道同时展示时首个 accepted response 获胜，`question/resolved` 负责清理陈旧渠道按钮。
 - **配置与凭据**：部署可调参数进 Schemastery 配置，禁止写死常量；凭据只经 `ctx.credentials` 引用（如 `appSecretRef`），配置/patch 禁止明文 Secret。
 
 ---

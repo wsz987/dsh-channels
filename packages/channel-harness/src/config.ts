@@ -109,6 +109,13 @@ export interface ImageCompatibilityConfig {
   mode: ImageCompatibilityMode;
 }
 
+/** Channel-backed handling for Harness `ask_user_question` requests. */
+export interface UserQuestionsConfig {
+  enabled: boolean;
+  /** Maximum time to wait for a channel answer before cancelling the question. */
+  timeoutMs: number;
+}
+
 export interface Config {
   /** Default route (and explicit per-level override dictionary). */
   agent: AgentConfig;
@@ -129,6 +136,8 @@ export interface Config {
    * `{ mode: 'degrade' }`.
    */
   imageCompatibility: ImageCompatibilityConfig;
+  /** Present channel-origin user questions through native interactive actions. */
+  userQuestions: UserQuestionsConfig;
   reply: ReplyConfig;
   /**
    * Upper bound on concurrently live agents the bridge owns (per-session
@@ -180,6 +189,10 @@ export const Config: Schema<Config> = Schema.object({
   imageCompatibility: Schema.object({
     mode: Schema.union(['degrade', 'reject']).default('degrade'),
   }).default({ mode: 'degrade' }),
+  userQuestions: Schema.object({
+    enabled: Schema.boolean().default(true),
+    timeoutMs: Schema.natural().default(300000),
+  }).default({ enabled: true, timeoutMs: 300000 }),
   reply: Schema.object({
     updateIntervalMs: Schema.natural().default(200),
     maxTextLength: Schema.natural(),

@@ -36,14 +36,49 @@ export { TelegramAdapter, type TelegramAdapterDeps } from './adapter.js';
 export { createTelegramDefinition, type TelegramCredentialSeam } from './definition.js';
 export { InboundProcessor } from './inbound.js';
 export { hydrateTelegramParts, type TelegramFileResolver, type TelegramMediaHydratorOptions } from './media-hydrator.js';
-export { OutboundSender } from './outbound.js';
-export { TelegramStreamingReply } from './streaming-reply.js';
+export { OutboundSender, actionsToReplyMarkup } from './outbound.js';
+export { TelegramStreamingReply, makePreview } from './streaming-reply.js';
+export { TelegramRichStreamingReply } from './rich-streaming-reply.js';
+export {
+  TelegramApiError,
+  classifyTelegramError,
+  type TelegramErrorKind,
+  type TelegramErrorParameters,
+} from './api-error.js';
+export {
+  RICH_MESSAGE_MAX_UTF8,
+  RICH_MESSAGE_MAX_BLOCKS,
+  RICH_MESSAGE_MAX_NESTING,
+  RICH_MESSAGE_MAX_MEDIA,
+  RICH_MESSAGE_MAX_TABLE_COLUMNS,
+  REGULAR_MESSAGE_MAX,
+  CAPTION_MAX,
+  type InputRichMessage,
+  type TelegramInlineKeyboardButton,
+  type TelegramInlineKeyboardMarkup,
+  type TelegramInlineKeyboardRow,
+  type TelegramReplyMarkup,
+  type AnswerCallbackQueryParams,
+} from './rich-message.js';
+export * as render from './render/index.js';
+export {
+  renderMessage,
+  sendWithFallback,
+  resolveMode,
+  isFormattingFailure,
+  type RenderMode,
+  type RenderOptions,
+  type RenderPlan,
+} from './render/index.js';
+export type { TelegramFormattingConfig } from './config.js';
+export { mapInbound, mapCallbackQuery, isCallbackQueryUpdate, dedupKey, simpleHash, type TelegramInboundMeta } from './mapper.js';
 export {
   HttpTelegramUpstream,
   type TelegramUpstream,
   type TelegramBotUser,
   type TelegramMedia,
   type TelegramSendOptions,
+  type TelegramFormatOptions,
   type TelegramSentMessage,
   type TelegramFileInfo,
   type TelegramDownloadedFile,
@@ -54,7 +89,6 @@ export {
   type HttpRequestInit,
   type HttpBinaryResponse,
 } from './transport.js';
-export { mapInbound, dedupKey, simpleHash, type TelegramInboundMeta } from './mapper.js';
 export { manifest, type TelegramManifest } from './manifest.js';
 
 /**

@@ -32,8 +32,8 @@ export const manifest: TelegramManifest = {
   adapterVersion: pkg.version,
   upstream: {
     reference: 'Telegram Bot API (https://core.telegram.org/bots/api)',
-    testedVersion: '7.10',
-    versionRange: '7.10',
+    testedVersion: '10.2',
+    versionRange: '>=10.2',
     strategy: 'source',
   },
   sdk: undefined,

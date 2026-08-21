@@ -126,7 +126,7 @@ DeepSeek Harness / Cordis
 | QQ | `@wsz987/channel-qq` | Tencent 官方 SDK | `@tencent-connect/qqbot-nodejs@1.0.4` | `tested`* | AppID + AppSecret | text/image/file/audio/video；C2C native stream |
 | DingTalk | `@wsz987/channel-dingtalk` | 官方 Stream SDK + OpenAPI | `dingtalk-stream@2.1.5` | `tested`* | ClientID + ClientSecret；device/credentials | text/image/file/audio/cards；edit stream |
 | Lark/Feishu | `@wsz987/channel-lark` | 官方 Node SDK | `@larksuiteoapi/node-sdk@1.73.0` | `tested`* | AppID + AppSecret；credentials/hybrid | text/image/file/audio/cards/reactions/threads；edit stream |
-| Telegram | `@wsz987/channel-telegram` | Bot API HTTP 直连 | manifest `Bot API 7.10` | `experimental` | Bot token | text/image/file/audio/video/threads；edit stream |
+| Telegram | `@wsz987/channel-telegram` | Bot API HTTP 直连 | manifest `Bot API >=10.2` | `experimental` | Bot token | text/image/file/audio/video/threads；Rich Markdown + streaming |
 
 \* `tested` 当前主要指 contract/fixture/offline SDK tests 已通过；**不等于真实平台权限与账号 live gate 已通过**。
 
@@ -363,7 +363,7 @@ Bot 管理员权限（按操作）
 
 ```text
 deleteWebhook
-getUpdates allowed_updates=['message']
+getUpdates allowed_updates=['message', 'callback_query']
 ```
 
 因此：
@@ -373,7 +373,7 @@ getUpdates allowed_updates=['message']
 - 如果产品目标是“所有群消息都进入 Agent”，必须显式核验 BotFather privacy / 管理员状态
 - 当前 20 MiB inbound download cap 与 Telegram cloud Bot API `getFile` 的 20 MB 下载限制对齐
 
-**DRIFT**：仓库 manifest 仍写 `Telegram Bot API 7.10`，而 2026-07-14 官方已发布 **Bot API 10.2**。当前实现使用的基础 API 仍可能兼容，但发布前必须重新做 API drift + live gate，不应继续把 7.10 当作当前平台版本。
+**CODE-CONFIRMED**：仓库 manifest 与 fixtures 已迁移到 **Bot API 10.2**，`auto` 使用 Rich Markdown；最低支持版本为 10.2，不维护旧 Bot API server。状态仍为 `experimental`，Rich output、draft streaming、callback 与 429 recovery 仍需真实 Bot live gate。
 
 ### 6.5 Weixin iLink
 
@@ -442,20 +442,19 @@ DSH 当前使用什么事件
 
 而不是请求所有 intents。
 
-### P1 — Telegram manifest 严重落后于当前 Bot API
+### P1 — Telegram Bot API 10.2 live gate
 
 ```text
-DSH manifest: 7.10
+DSH minimum:  >=10.2
 官方当前:     10.2 (2026-07-14)
 ```
 
 优先执行：
 
-1. API breaking/change review
-2. fixture 更新
-3. offline test
-4. real bot live verification
-5. 再更新 `testedVersion/versionRange/status`
+1. Rich Markdown / table / code / link live verification
+2. DM draft 与 group final edit live verification
+3. 8K / 32K+ 与 429 cooldown live verification
+4. live gate 完成后再评估将 status 从 `experimental` 升级
 
 ### P1 — Weixin live pin 尚未完成
 
@@ -703,7 +702,7 @@ Stable Core
 
 1. 保持 `channel-web` 不展示静态 permission 状态；恢复前先实现真实 permission checker
 2. QQ 显式最小 intents
-3. Telegram 从 Bot API 7.10 基线升级核验到当前 10.2
+3. Telegram 完成 Bot API 10.2 Rich Message 真实 live gate
 4. Weixin 完成真实 iLink live gate 并 pin version/commit
 5. Lark/DingTalk 把真实平台 permission/event/API 要求整理成机器可读 metadata，未来再接真实 permission checker
 
@@ -932,7 +931,7 @@ token
 | QQ | sdk | `@tencent-connect/qqbot-nodejs` | `1.0.4` | tested |
 | DingTalk | sdk | `dingtalk-stream` | `2.1.5` | tested |
 | Lark | sdk | `@larksuiteoapi/node-sdk` | `1.73.0` | tested |
-| Telegram | source/direct HTTP | Telegram Bot API | `7.10` | experimental |
+| Telegram | source/direct HTTP | Telegram Bot API | `>=10.2` | experimental |
 
 ## 4. Actual interface surface
 
@@ -1236,7 +1235,8 @@ Official:
 Current platform drift observed:
 
 ```text
-DSH manifest testedVersion: 7.10
+DSH manifest testedVersion: 10.2
+DSH minimum versionRange: >=10.2
 Telegram Bot API current as of 2026-07-14: 10.2
 ```
 
@@ -1382,7 +1382,7 @@ For each target channel:
 
 - [ ] QQ: verify DSH does not accidentally rely on SDK `FULL_INTENTS`.
 - [ ] QQ: `markdownSupport=true` only when platform permission exists.
-- [ ] Telegram: review drift from manifest 7.10 to official Bot API 10.2.
+- [x] Telegram: align manifest and fixtures to Bot API 10.2; live gate remains pending.
 - [ ] Telegram: verify webhook disabled before long polling.
 - [ ] Weixin: keep file outbound unsupported until concrete upstream supports it.
 - [ ] Weixin: replace pending live version/commit after real gate.

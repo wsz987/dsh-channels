@@ -1,7 +1,7 @@
 {
   "name": "duplicate update (getUpdates redelivery)",
   "channel": "telegram",
-  "upstreamVersion": "7.10",
+  "upstreamVersion": "10.2",
   "payload": {
     "update_id": 1010,
     "message": {

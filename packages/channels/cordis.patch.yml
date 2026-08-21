@@ -24,8 +24,10 @@
         - channels
         - agents
         - agentDefaultModel
+        - agentPresets
         - llm
         - commands
+        - apiProxy
 
     - id: channels-control
       name: '@wsz987/dsh-channels/control'

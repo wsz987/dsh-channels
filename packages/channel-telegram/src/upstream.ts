@@ -10,15 +10,25 @@
  * so Telegram stops redelivering confirmed updates (the offset IS the
  * protocol-level dedup mechanism). The InboundProcessor dedup window is the
  * adapter-level second layer for webhook-style redelivery inside one cycle.
+ *
+ * ## Structured errors (plan §3.1 / §5.4)
+ *
+ * Every non-ok / invalid envelope is converted at this boundary into a
+ * `TelegramApiError` (see `api-error.ts`) that preserves Telegram's
+ * `error_code` / `description` / `parameters` and carries a stable kind. This
+ * lets the renderer and reply engine distinguish a formatting parse failure
+ * (→ one-shot plain fallback) from 401/403 / 429 / network / 5xx without
+ * re-classifying raw numbers.
  */
 import {
-  ChannelAuthError,
   ChannelError,
   mimeHintFromFilename,
   normalizeMimeHint,
 } from '@wsz987/channel-core';
 import { z } from 'zod';
 import type { HttpTransport } from './transport.js';
+import { classifyTelegramError, TelegramApiError, type TelegramErrorParameters } from './api-error.js';
+import type { TelegramInputRichMessage, TelegramReplyMarkup } from './rich-message.js';
 
 /** Bot user returned by getMe. */
 export interface TelegramBotUser {
@@ -37,7 +47,25 @@ export interface TelegramMedia {
   localData?: Uint8Array;
   mimeType?: string;
   name?: string;
+  /** Caption rendered on the media; honors caption formatting options. */
   caption?: string;
+}
+
+/**
+ * Formatting options shared by text messages and media captions.
+ *
+ * `parseMode` and `entities` are mutually exclusive in the Bot API; callers
+ * should provide one. `replyMarkup` is the interactive keyboard / ForceReply.
+ */
+export interface TelegramFormatOptions {
+  /** Telegram parse mode for a formatted body (HTML / MarkdownV2). */
+  parseMode?: 'HTML' | 'MarkdownV2';
+  /** Pre-calculated entities list (alternative to parse_mode). */
+  entities?: unknown[];
+  /** Entities for a media caption (alternative to caption_parse_mode). */
+  captionEntities?: unknown[];
+  /** Interactive keyboard markup (inline buttons / ForceReply). */
+  replyMarkup?: TelegramReplyMarkup;
 }
 
 export interface TelegramSendOptions {
@@ -84,7 +112,8 @@ export interface TelegramUpstream {
   /**
    * Long-poll getUpdates until `signal` aborts. The shared cursor advances only
    * after `onUpdate` resolves, so failed dispatches remain unacknowledged and
-   * reconnects resume from the last successfully handled update.
+   * reconnects resume from the last successfully handled update. Subscribes to
+   * `message` and `callback_query` updates.
    */
   getUpdates(
     cursor: TelegramUpdateCursor,
@@ -96,11 +125,59 @@ export interface TelegramUpstream {
   /** Send a text message; resolves with the raw Bot API envelope. */
   sendText(chatId: string, text: string, options?: TelegramSendOptions): Promise<unknown>;
 
-  /** Send a text message; resolves with the parsed message id + raw envelope. */
-  sendMessage(chatId: string, text: string, options?: TelegramSendOptions): Promise<TelegramSentMessage>;
+  /** Send a formatted text message; resolves with the parsed message id. */
+  sendMessage(
+    chatId: string,
+    text: string,
+    options?: TelegramSendOptions,
+    format?: TelegramFormatOptions,
+  ): Promise<TelegramSentMessage>;
 
-  /** Edit an existing message by id (streaming preview). */
-  editMessageText(chatId: string, messageId: string, text: string): Promise<unknown>;
+  /** Edit an existing message by id, optionally with formatting options. */
+  editMessageText(
+    chatId: string,
+    messageId: string,
+    text: string,
+    format?: TelegramFormatOptions,
+  ): Promise<unknown>;
+
+  /** Edit only the reply markup of an existing message (interactive updates). */
+  editMessageReplyMarkup(chatId: string, messageId: string, replyMarkup?: TelegramReplyMarkup): Promise<unknown>;
+
+  /**
+   * Send a Bot API 10.1 Rich Message. `message` is the `InputRichMessage`
+   * (Markdown source rendered by the server). Only used when rich output is
+   * active and supported; falls back to plain text via the renderer otherwise.
+   */
+  sendRichMessage(
+    chatId: string,
+    message: TelegramInputRichMessage,
+    options?: TelegramSendOptions,
+    format?: TelegramFormatOptions,
+  ): Promise<unknown>;
+
+  /**
+   * Stream a partial Rich Message over a 30s temporary draft (`draftId`).
+   * Same draft id updates the preview in place; a final `sendRichMessage`
+   * persists the result.
+   */
+  sendRichMessageDraft(
+    chatId: string,
+    draftId: number,
+    message: TelegramInputRichMessage,
+    options?: TelegramSendOptions,
+  ): Promise<unknown>;
+
+  /** Edit an existing message in place, replacing it with a Rich Message. */
+  editMessageRich(
+    chatId: string,
+    messageId: string,
+    message: TelegramInputRichMessage,
+    replyMarkup?: TelegramReplyMarkup,
+  ): Promise<unknown>;
+
+  /** Best-effort `answerCallbackQuery` acknowledgement (never blocks on agent). */
+  answerCallbackQuery(params: { callback_query_id: string }): Promise<void>;
 
   /** Resolve a Telegram file_id into its file metadata. */
   getFile(fileId: string): Promise<TelegramFileInfo>;
@@ -108,8 +185,13 @@ export interface TelegramUpstream {
   /** Resolve a file_id and download its bytes from the Bot API file endpoint. */
   downloadFile(fileId: string, signal?: AbortSignal): Promise<TelegramDownloadedFile>;
 
-  /** Send a media reference (image/file/audio/video). */
-  sendMedia(chatId: string, media: TelegramMedia, options?: TelegramSendOptions): Promise<unknown>;
+  /** Send a media reference (image/file/audio/video) with formatting options. */
+  sendMedia(
+    chatId: string,
+    media: TelegramMedia,
+    options?: TelegramSendOptions,
+    format?: TelegramFormatOptions,
+  ): Promise<unknown>;
 }
 
 export interface HttpTelegramUpstreamOptions {
@@ -121,14 +203,19 @@ export interface HttpTelegramUpstreamOptions {
 
 /**
  * Bot API envelope shared by every method: `{ ok, result?, error_code?,
- * description? }`. Validated with zod (not hand-rolled casts) at the upstream
- * boundary, matching the official adapters' response-validation pattern.
+ * description?, parameters? }`. Validated with zod (not hand-rolled casts) at
+ * the upstream boundary, matching the official adapters' response-validation
+ * pattern.
  */
 const apiResponseSchema = z.object({
   ok: z.boolean(),
   result: z.unknown().optional(),
   error_code: z.number().optional(),
   description: z.string().optional(),
+  parameters: z.object({
+    retry_after: z.number().optional(),
+    migrate_to_chat_id: z.number().optional(),
+  }).optional(),
 }).passthrough();
 
 /** `getMe` result: the bot user. */
@@ -140,7 +227,9 @@ const botUserSchema = z.object({
 }).passthrough();
 
 /** `getUpdates` result: a list of raw updates (shape owned by the mapper). */
-const getUpdatesResultSchema = z.array(z.unknown());
+const getUpdatesResultSchema = z.array(z.object({
+  update_id: z.number(),
+}).passthrough());
 
 /** `sendMessage` result: the sent message id. */
 const sentMessageSchema = z.object({
@@ -170,16 +259,7 @@ export class HttpTelegramUpstream implements TelegramUpstream {
   }
 
   async getMe(): Promise<TelegramBotUser> {
-    const envelope = apiResponseSchema.safeParse(await this.options.transport.request(this.path('getMe')));
-    if (!envelope.success) {
-      throw new ChannelError('CHANNEL_ERROR', 'telegram getMe returned an invalid response');
-    }
-    if (!envelope.data.ok) {
-      if (envelope.data.error_code === 401) {
-        throw new ChannelAuthError('telegram getMe rejected: invalid bot token');
-      }
-      throw new ChannelError('CHANNEL_ERROR', `telegram getMe failed: ${envelope.data.description ?? 'unknown error'}`);
-    }
+    const envelope = await this.requestOk('getMe');
     const user = botUserSchema.safeParse(envelope.data.result);
     if (!user.success) {
       throw new ChannelError('CHANNEL_ERROR', 'telegram getMe returned no bot user');
@@ -189,12 +269,9 @@ export class HttpTelegramUpstream implements TelegramUpstream {
 
   async deleteWebhook(): Promise<void> {
     const raw = await this.post('deleteWebhook', { drop_pending_updates: false });
-    const envelope = apiResponseSchema.safeParse(raw);
-    if (!envelope.success || !envelope.data.ok || envelope.data.result !== true) {
-      throw new ChannelError(
-        'CHANNEL_ERROR',
-        `telegram deleteWebhook failed: ${envelope.success ? envelope.data.description ?? 'unknown error' : 'invalid response'}`,
-      );
+    const envelope = this.parseEnvelope('deleteWebhook', raw);
+    if (!envelope.data.ok || envelope.data.result !== true) {
+      throw this.apiError('deleteWebhook', envelope.data);
     }
   }
 
@@ -217,7 +294,9 @@ export class HttpTelegramUpstream implements TelegramUpstream {
               // HTTP request timeout must exceed it so the fetch outlives
               // the poll window.
               timeout: Math.max(1, Math.floor(this.options.longPollTimeoutMs / 1000)),
-              allowed_updates: ['message'],
+              // Plan §3.4 / §5: subscribe to interactive callback_query updates
+              // in addition to plain messages.
+              allowed_updates: ['message', 'callback_query'],
             },
             timeoutMs: this.options.longPollTimeoutMs + 5000,
           },
@@ -227,20 +306,11 @@ export class HttpTelegramUpstream implements TelegramUpstream {
         // Abort-driven teardown exits gracefully; other failures propagate to
         // the adapter, which owns reconnect/backoff.
         if (signal.aborted) return;
-        throw error;
+        throw this.networkError('getUpdates', error);
       }
-      const envelope = apiResponseSchema.safeParse(raw);
-      if (!envelope.success) {
-        throw new ChannelError('CHANNEL_ERROR', 'telegram getUpdates returned an invalid response');
-      }
+      const envelope = this.parseEnvelope('getUpdates', raw);
       if (!envelope.data.ok) {
-        if (envelope.data.error_code === 401) {
-          throw new ChannelAuthError('telegram getUpdates rejected: invalid bot token');
-        }
-        throw new ChannelError(
-          'CHANNEL_ERROR',
-          `telegram getUpdates failed: ${envelope.data.description ?? 'unknown error'}`,
-        );
+        throw this.apiError('getUpdates', envelope.data);
       }
       const result = getUpdatesResultSchema.safeParse(envelope.data.result ?? []);
       if (!result.success) {
@@ -250,26 +320,24 @@ export class HttpTelegramUpstream implements TelegramUpstream {
       for (const update of result.data) {
         if (signal.aborted) return;
         await onUpdate(update);
-        const updateId = (update as { update_id?: number })?.update_id;
-        if (typeof updateId === 'number') {
-          // Commit only after dispatch succeeds. The shared cursor survives a
-          // thrown handler and is reused by the adapter's reconnect attempt.
-          cursor.offset = Math.max(cursor.offset, updateId + 1);
-        }
+        // Commit only after dispatch succeeds. The shared cursor survives a
+        // thrown handler and is reused by the adapter's reconnect attempt.
+        cursor.offset = Math.max(cursor.offset, update.update_id + 1);
       }
     }
   }
 
-  sendText(chatId: string, text: string, options?: TelegramSendOptions): Promise<unknown> {
-    return this.post('sendMessage', this.messageBody(chatId, { text }, options));
+  async sendText(chatId: string, text: string, options?: TelegramSendOptions): Promise<unknown> {
+    return (await this.sendMessageRaw(chatId, text, options)).data;
   }
 
-  async sendMessage(chatId: string, text: string, options?: TelegramSendOptions): Promise<TelegramSentMessage> {
-    const raw = await this.post('sendMessage', this.messageBody(chatId, { text }, options));
-    const envelope = apiResponseSchema.safeParse(raw);
-    if (!envelope.success || !envelope.data.ok) {
-      throw new ChannelError('CHANNEL_ERROR', 'telegram sendMessage returned an invalid response');
-    }
+  async sendMessage(
+    chatId: string,
+    text: string,
+    options?: TelegramSendOptions,
+    format?: TelegramFormatOptions,
+  ): Promise<TelegramSentMessage> {
+    const envelope = await this.sendMessageRaw(chatId, text, options, format);
     const sent = sentMessageSchema.safeParse(envelope.data.result);
     if (!sent.success) {
       throw new ChannelError('CHANNEL_ERROR', 'telegram sendMessage returned no message_id');
@@ -277,36 +345,135 @@ export class HttpTelegramUpstream implements TelegramUpstream {
     return { messageId: String(sent.data.message_id), raw: envelope.data };
   }
 
-  async editMessageText(chatId: string, messageId: string, text: string): Promise<unknown> {
-    const raw = await this.post('editMessageText', {
+  /** Send a formatted text message; returns the parsed, ok-checked envelope. */
+  private async sendMessageRaw(
+    chatId: string,
+    text: string,
+    options?: TelegramSendOptions,
+    format?: TelegramFormatOptions,
+  ): Promise<{ data: EnvelopeData }> {
+    const raw = await this.post('sendMessage', this.messageBody(chatId, { text }, options, format));
+    const envelope = this.parseEnvelope('sendMessage', raw);
+    if (!envelope.data.ok) {
+      throw this.apiError('sendMessage', envelope.data);
+    }
+    return envelope;
+  }
+
+  async editMessageText(
+    chatId: string,
+    messageId: string,
+    text: string,
+    format?: TelegramFormatOptions,
+  ): Promise<unknown> {
+    const body: Record<string, unknown> = {
       chat_id: chatId,
       message_id: Number(messageId),
       text,
-    });
-    const envelope = apiResponseSchema.safeParse(raw);
-    if (!envelope.success) {
-      throw new ChannelError('CHANNEL_ERROR', 'telegram editMessageText returned an invalid response');
-    }
+    };
+    this.applyFormatToBody(body, format, false);
+    const raw = await this.post('editMessageText', body);
+    const envelope = this.parseEnvelope('editMessageText', raw);
     if (!envelope.data.ok) {
-      throw new ChannelError(
-        'CHANNEL_ERROR',
-        `telegram editMessageText failed: ${envelope.data.description ?? 'unknown error'}`,
-      );
+      throw this.apiError('editMessageText', envelope.data);
     }
     return envelope.data.result;
   }
 
+  async editMessageReplyMarkup(chatId: string, messageId: string, replyMarkup?: TelegramReplyMarkup): Promise<unknown> {
+    const body: Record<string, unknown> = {
+      chat_id: chatId,
+      message_id: Number(messageId),
+    };
+    if (replyMarkup !== undefined) body.reply_markup = replyMarkup;
+    const raw = await this.post('editMessageReplyMarkup', body);
+    const envelope = this.parseEnvelope('editMessageReplyMarkup', raw);
+    if (!envelope.data.ok) {
+      throw this.apiError('editMessageReplyMarkup', envelope.data);
+    }
+    return envelope.data.result;
+  }
+
+  async sendRichMessage(
+    chatId: string,
+    message: TelegramInputRichMessage,
+    options?: TelegramSendOptions,
+    format?: TelegramFormatOptions,
+  ): Promise<unknown> {
+    const raw = await this.post(
+      'sendRichMessage',
+      this.messageBody(
+        chatId,
+        { rich_message: message },
+        options,
+        format?.replyMarkup ? { replyMarkup: format.replyMarkup } : undefined,
+      ),
+    );
+    const envelope = this.parseEnvelope('sendRichMessage', raw);
+    if (!envelope.data.ok) {
+      throw this.apiError('sendRichMessage', envelope.data);
+    }
+    return envelope.data.result;
+  }
+
+  async sendRichMessageDraft(
+    chatId: string,
+    draftId: number,
+    message: TelegramInputRichMessage,
+    options?: TelegramSendOptions,
+  ): Promise<unknown> {
+    const numericChatId = Number(chatId);
+    if (!Number.isSafeInteger(numericChatId)) {
+      throw new ChannelError('CHANNEL_ERROR', 'telegram rich drafts require a numeric private chat id');
+    }
+    const raw = await this.post(
+      'sendRichMessageDraft',
+      {
+        chat_id: numericChatId,
+        draft_id: draftId,
+        rich_message: message,
+        ...(options?.messageThreadId ? { message_thread_id: Number(options.messageThreadId) } : {}),
+      },
+    );
+    const envelope = this.parseEnvelope('sendRichMessageDraft', raw);
+    if (!envelope.data.ok) {
+      throw this.apiError('sendRichMessageDraft', envelope.data);
+    }
+    return envelope.data.result;
+  }
+
+  async editMessageRich(
+    chatId: string,
+    messageId: string,
+    message: TelegramInputRichMessage,
+    replyMarkup?: TelegramReplyMarkup,
+  ): Promise<unknown> {
+    const raw = await this.post('editMessageText', {
+      chat_id: chatId,
+      message_id: Number(messageId),
+      rich_message: message,
+      ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+    });
+    const envelope = this.parseEnvelope('editMessageText', raw);
+    if (!envelope.data.ok) {
+      throw this.apiError('editMessageText', envelope.data);
+    }
+    return envelope.data.result;
+  }
+
+  async answerCallbackQuery(params: { callback_query_id: string }): Promise<void> {
+    const raw = await this.post('answerCallbackQuery', { callback_query_id: params.callback_query_id });
+    const envelope = this.parseEnvelope('answerCallbackQuery', raw);
+    if (!envelope.data.ok) {
+      throw this.apiError('answerCallbackQuery', envelope.data);
+    }
+  }
+
   async getFile(fileId: string): Promise<TelegramFileInfo> {
     const raw = await this.post('getFile', { file_id: fileId });
-    const envelope = apiResponseSchema.safeParse(raw);
-    if (!envelope.success) {
-      throw new ChannelError('CHANNEL_ERROR', 'telegram getFile returned an invalid response');
-    }
+    const envelope = this.parseEnvelope('getFile', raw);
     if (!envelope.data.ok) {
-      throw new ChannelError(
-        'CHANNEL_ERROR',
-        `telegram getFile failed: ${envelope.data.description ?? 'unknown error'}`,
-      );
+      throw this.apiError('getFile', envelope.data);
     }
     const file = fileSchema.safeParse(envelope.data.result);
     if (!file.success) {
@@ -341,7 +508,12 @@ export class HttpTelegramUpstream implements TelegramUpstream {
     return { data: response.data, mimeType, name };
   }
 
-  sendMedia(chatId: string, media: TelegramMedia, options?: TelegramSendOptions): Promise<unknown> {
+  sendMedia(
+    chatId: string,
+    media: TelegramMedia,
+    options?: TelegramSendOptions,
+    format?: TelegramFormatOptions,
+  ): Promise<unknown> {
     const endpointAndField = {
       image: ['sendPhoto', 'photo'],
       file: ['sendDocument', 'document'],
@@ -358,6 +530,9 @@ export class HttpTelegramUpstream implements TelegramUpstream {
         media.name ?? defaultMediaName(media.type),
       );
       if (media.caption !== undefined) form.append('caption', media.caption);
+      if (format?.parseMode !== undefined) form.append('caption_parse_mode', format.parseMode);
+      if (format?.captionEntities !== undefined) form.append('caption_entities', JSON.stringify(format.captionEntities));
+      if (format?.replyMarkup !== undefined) form.append('reply_markup', JSON.stringify(format.replyMarkup));
       this.appendSendOptions(form, options);
       return this.post(endpoint, form);
     }
@@ -367,13 +542,13 @@ export class HttpTelegramUpstream implements TelegramUpstream {
     const mediaWithUrl = { ...media, url: media.url };
     switch (media.type) {
       case 'image':
-        return this.post('sendPhoto', this.mediaBody(chatId, mediaWithUrl, 'photo', options));
+        return this.post('sendPhoto', this.mediaBody(chatId, mediaWithUrl, 'photo', options, format));
       case 'file':
-        return this.post('sendDocument', this.mediaBody(chatId, mediaWithUrl, 'document', options));
+        return this.post('sendDocument', this.mediaBody(chatId, mediaWithUrl, 'document', options, format));
       case 'audio':
-        return this.post('sendAudio', this.mediaBody(chatId, mediaWithUrl, 'audio', options));
+        return this.post('sendAudio', this.mediaBody(chatId, mediaWithUrl, 'audio', options, format));
       case 'video':
-        return this.post('sendVideo', this.mediaBody(chatId, mediaWithUrl, 'video', options));
+        return this.post('sendVideo', this.mediaBody(chatId, mediaWithUrl, 'video', options, format));
       default:
         // Exhaustive over TelegramMedia['type']; kept for safety.
         throw new ChannelError(
@@ -388,22 +563,43 @@ export class HttpTelegramUpstream implements TelegramUpstream {
     media: TelegramMedia & { url: string },
     field: string,
     options?: TelegramSendOptions,
+    format?: TelegramFormatOptions,
   ): Record<string, unknown> {
     const body: Record<string, unknown> = { chat_id: chatId, [field]: media.url };
     if (media.caption !== undefined) body.caption = media.caption;
+    this.applyFormatToBody(body, format, true);
     return this.messageBody(chatId, body, options);
+  }
+
+  /** Apply formatting fields to a JSON body (caption vs text variants). */
+  private applyFormatToBody(
+    body: Record<string, unknown>,
+    format: TelegramFormatOptions | undefined,
+    caption: boolean,
+  ): void {
+    if (!format) return;
+    if (caption) {
+      if (format.parseMode !== undefined) body.caption_parse_mode = format.parseMode;
+      if (format.captionEntities !== undefined) body.caption_entities = format.captionEntities;
+    } else {
+      if (format.parseMode !== undefined) body.parse_mode = format.parseMode;
+      if (format.entities !== undefined) body.entities = format.entities;
+    }
+    if (format.replyMarkup !== undefined) body.reply_markup = format.replyMarkup;
   }
 
   private messageBody(
     chatId: string,
     body: Record<string, unknown>,
     options?: TelegramSendOptions,
+    format?: TelegramFormatOptions,
   ): Record<string, unknown> {
     const result: Record<string, unknown> = { chat_id: chatId, ...body };
     if (options?.replyToMessageId) {
       result.reply_parameters = { message_id: Number(options.replyToMessageId) };
     }
     if (options?.messageThreadId) result.message_thread_id = Number(options.messageThreadId);
+    if (format) this.applyFormatToBody(result, format, false);
     return result;
   }
 
@@ -414,10 +610,74 @@ export class HttpTelegramUpstream implements TelegramUpstream {
     if (options?.messageThreadId) form.append('message_thread_id', options.messageThreadId);
   }
 
-  private post(endpoint: string, body: unknown): Promise<unknown> {
-    return this.options.transport.request(this.path(endpoint), { method: 'POST', body });
+  private async post(endpoint: string, body: unknown): Promise<unknown> {
+    try {
+      return await this.options.transport.request(this.path(endpoint), { method: 'POST', body });
+    } catch (error) {
+      if (error instanceof TelegramApiError) throw error;
+      throw this.networkError(endpoint, error);
+    }
+  }
+
+  /**
+   * Issue a request and return a parsed, ok-checked envelope — or throw a
+   * structured `TelegramApiError`. This is the single envelope boundary: the
+   * sendMessage "invalid response" catch-all is replaced here.
+   */
+  private async requestOk(endpoint: string, body?: unknown): Promise<{ data: EnvelopeData }> {
+    const raw = await this.post(endpoint, body ?? {});
+    const envelope = this.parseEnvelope(endpoint, raw);
+    if (!envelope.data.ok) {
+      throw this.apiError(endpoint, envelope.data);
+    }
+    return envelope;
+  }
+
+  /**
+   * Parse a raw response into the envelope shape; a body that is not a valid
+   * Bot API envelope is a network/protocol-level failure, not a format issue.
+   */
+  private parseEnvelope(endpoint: string, raw: unknown): { data: EnvelopeData } {
+    const envelope = apiResponseSchema.safeParse(raw);
+    if (!envelope.success) {
+      throw new TelegramApiError({
+        method: endpoint,
+        kind: 'network',
+        description: 'invalid Bot API response envelope',
+      });
+    }
+    return envelope;
+  }
+
+  /** Build a structured `TelegramApiError` from an ok=false envelope. */
+  private apiError(endpoint: string, envelope: EnvelopeData): TelegramApiError {
+    const params: TelegramErrorParameters | undefined = envelope.parameters
+      ? { retryAfter: envelope.parameters.retry_after, migrateToChatId: envelope.parameters.migrate_to_chat_id }
+      : undefined;
+    const kind = classifyTelegramError(envelope.error_code, envelope.description, params);
+    return new TelegramApiError({
+      method: endpoint,
+      errorCode: envelope.error_code,
+      description: envelope.description,
+      parameters: params,
+      kind,
+    });
+  }
+
+  /** Wrap a transport/network failure into a structured network-kind error. */
+  private networkError(endpoint: string, error: unknown): TelegramApiError {
+    const message = error instanceof Error ? error.message : String(error);
+    return new TelegramApiError({
+      method: endpoint,
+      kind: 'network',
+      description: message,
+      cause: error,
+    });
   }
 }
+
+/** Envelope shape used internally after zod parsing (result is unknown). */
+type EnvelopeData = z.infer<typeof apiResponseSchema>;
 
 function filenameFromDisposition(value?: string): string | undefined {
   if (!value) return undefined;

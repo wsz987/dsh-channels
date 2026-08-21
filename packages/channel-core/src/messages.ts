@@ -144,6 +144,28 @@ export type MessagePart =
   | CardPart
   | UnsupportedPart;
 
+/**
+ * A platform-agnostic interactive action (button) attached to an outbound
+ * message. Core only models the minimal generic surface: a stable `id` sent
+ * back by the platform on interaction, a `label`, and an optional presentation
+ * `style`. It intentionally carries NO platform-specific fields (e.g. Telegram
+ * `callback_data` / Lark action value); adapters map `id ->` their inline
+ * payload and `action -> id` on the corresponding interaction event.
+ */
+export interface OutboundAction {
+  /** Stable action id returned verbatim by the platform on a press. */
+  id: string;
+  /** User-visible button label. */
+  label: string;
+  /** Optional presentation style; adapters map it to their closest equivalent. */
+  style?: 'default' | 'primary' | 'success' | 'danger';
+}
+
+/** A single row of interactive buttons. */
+export interface OutboundActionRow {
+  actions: OutboundAction[];
+}
+
 /** Outbound message sent through `ChannelAdapter.send()`. */
 export interface OutboundMessage {
   /** Plain text payload; most platforms support at least this. */
@@ -152,6 +174,13 @@ export interface OutboundMessage {
   parts?: MessagePart[];
   /** Platform message id this message replies to, when applicable. */
   replyTo?: string;
+  /**
+   * Optional interactive action rows (buttons). Requires
+   * `capabilities.interactiveActions`; adapters map them to their native
+   * inline control (e.g. Telegram `InlineKeyboardMarkup`). Each action `id`
+   * is echoed back on the matching `interaction.received` event.
+   */
+  actions?: OutboundActionRow[];
   /** Adapter-agnostic metadata (never passed to the model surface). */
   metadata?: Record<string, unknown>;
 }

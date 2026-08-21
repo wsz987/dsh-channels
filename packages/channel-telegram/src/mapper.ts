@@ -27,7 +27,9 @@ import type {
   MessageReceived,
   SenderId,
 } from '@wsz987/channel-core';
+import type { InteractionReceived } from '@wsz987/channel-core';
 import { textParts } from '@wsz987/channel-core';
+import { z } from 'zod';
 
 export interface TelegramInboundMeta {
   channel: ChannelId;
@@ -104,6 +106,7 @@ interface TelegramMessage {
 interface TelegramRawUpdate {
   update_id?: number;
   message?: TelegramMessage;
+  callback_query?: { id?: string };
   [key: string]: unknown;
 }
 
@@ -231,5 +234,79 @@ export function dedupKey(raw: unknown): string {
   const update = raw as TelegramRawUpdate;
   if (typeof update.update_id === 'number') return `update-${update.update_id}`;
   if (typeof update.message?.message_id === 'number') return `message-${update.message.message_id}`;
+  if (typeof update.callback_query?.id === 'string') return `callback-${update.callback_query.id}`;
   return `telegram-${simpleHash(JSON.stringify(raw))}`;
+}
+
+/**
+ * Zod schema for a `callback_query` update. `callback_query.data` is UNTRUSTED
+ * client payload: it is validated as a plain string here and only ever echoed
+ * back as `InteractionReceived.action` (plan §5 / red line 5). The adapter never
+ * parses it into Harness question semantics — that interpretation belongs to
+ * `channel-harness`.
+ */
+const callbackQueryUpdateSchema = z.object({
+  update_id: z.number().optional(),
+  callback_query: z.object({
+    id: z.string(),
+    from: z.object({
+      id: z.number(),
+      first_name: z.string().optional(),
+      username: z.string().optional(),
+    }).partial(),
+    message: z.object({
+      message_id: z.number(),
+      chat: z.object({
+        id: z.number(),
+        type: z.string().optional(),
+      }).partial(),
+    }).partial(),
+    data: z.string().optional(),
+    chat_instance: z.string().optional(),
+  }).passthrough(),
+}).loose();
+
+/** Whether a raw update carries a `callback_query` (message-bearing). */
+export function isCallbackQueryUpdate(raw: unknown): boolean {
+  return (
+    typeof raw === 'object' &&
+    raw !== null &&
+    typeof (raw as { callback_query?: unknown }).callback_query === 'object' &&
+    callbackQueryUpdateSchema.safeParse(raw).success
+  );
+}
+
+/**
+ * Map a validated `callback_query` update to `InteractionReceived`. Always run
+ * `isCallbackQueryUpdate` first; this function re-parses defensively and throws
+ * a clear error for a malformed tolerance so the adapter fails closed rather
+ * than emitting a fabricated interaction.
+ */
+export function mapCallbackQuery(raw: unknown, meta: TelegramInboundMeta): InteractionReceived {
+  const parsed = callbackQueryUpdateSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new Error('telegram mapCallbackQuery: invalid callback_query payload');
+  }
+  const cq = parsed.data.callback_query;
+  const chat = cq.message?.chat;
+  const from = cq.from;
+  const sender: SenderId = String(from?.id ?? 'unknown') as SenderId;
+  const conversationId: ConversationId = String(chat?.id ?? sender) as ConversationId;
+
+  return {
+    type: 'interaction.received',
+    channel: meta.channel,
+    accountId: meta.accountId,
+    conversation: {
+      id: conversationId,
+      // 'private' → dm; 'group'/'supergroup' → group keyed by the chat id.
+      type: chat?.type === 'group' || chat?.type === 'supergroup' ? 'group' : 'dm',
+    },
+    sender: { id: sender, name: from?.first_name },
+    interactionId: cq.id,
+    // The untrusted callback data is surfaced verbatim as the action; the
+    // adapter never interprets it (red line 5).
+    action: typeof cq.data === 'string' ? cq.data : '',
+    raw,
+  };
 }

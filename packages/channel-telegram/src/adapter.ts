@@ -32,7 +32,7 @@ import type {
   StreamingMode,
 } from '@wsz987/channel-core';
 import { ChannelError } from '@wsz987/channel-core';
-import type { TelegramConfig } from './config.js';
+import type { TelegramConfig, TelegramFormattingConfig } from './config.js';
 import { FetchTransport, type HttpTransport } from './transport.js';
 import {
   HttpTelegramUpstream,
@@ -42,7 +42,10 @@ import {
 import { InboundProcessor } from './inbound.js';
 import { OutboundSender } from './outbound.js';
 import { TelegramStreamingReply } from './streaming-reply.js';
+import { TelegramRichStreamingReply } from './rich-streaming-reply.js';
+import { actionsToReplyMarkup } from './outbound.js';
 import { manifest as telegramManifest, type TelegramManifest } from './manifest.js';
+import { resolveMode } from './render/index.js';
 
 export interface TelegramAdapterDeps {
   transport?: HttpTransport;
@@ -70,12 +73,16 @@ export class TelegramAdapter implements ChannelAdapter {
     file: true,
     audio: true,
     video: true,
-    markdown: false,
+    // Rich Markdown (Bot API 10.1/10.2 sendRichMessage / HTML / MarkdownV2) is
+    // genuinely rendered, not just parse_mode in a body (plan §Phase 3).
+    markdown: true,
     cards: false,
     reactions: false,
     threads: true,
-    // Telegram can edit sent messages with editMessageText, so edit streaming
-    // is the default; `resolveStreamingMode` can force buffered through config.
+    // Inline buttons + callback_query interactions are supported (plan §5).
+    interactiveActions: true,
+    // Telegram can edit sent messages with editMessageText and can stream rich
+    // drafts natively for DMs; `resolveStreamingMode` picks per target.
     streaming: 'edit',
     maxTextLength: 4096,
   };
@@ -98,6 +105,8 @@ export class TelegramAdapter implements ChannelAdapter {
   private readonly now: () => number;
   /** Resolved token used by the upstream driver (deps credential wins over legacy config). */
   private readonly token: string | undefined;
+  /** Resolved once so outbound, streaming and explicit edits use one policy. */
+  private readonly formattingMode: Exclude<TelegramFormattingConfig['mode'], 'auto'>;
 
   constructor(private readonly config: TelegramConfig, deps: TelegramAdapterDeps = {}) {
     this.now = deps.now ?? Date.now;
@@ -109,6 +118,7 @@ export class TelegramAdapter implements ChannelAdapter {
       longPollTimeoutMs: config.longPollTimeoutMs,
     });
     this.token = token;
+    this.formattingMode = resolveMode(config.formatting.mode);
   }
 
   async start(ctx: ChannelAdapterContext): Promise<void> {
@@ -126,7 +136,9 @@ export class TelegramAdapter implements ChannelAdapter {
       this.removeContextAbortListener = () => ctx.signal.removeEventListener('abort', abortReceive);
     }
 
-    this.outbound = new OutboundSender(this.upstream, ctx.logger);
+    this.outbound = new OutboundSender(this.upstream, ctx.logger, {
+      formatting: { ...this.config.formatting, mode: this.formattingMode },
+    });
 
     if (this.token) {
       try {
@@ -173,6 +185,9 @@ export class TelegramAdapter implements ChannelAdapter {
       files: this.upstream,
       maxDownloadBytes: this.config.maxDownloadBytes,
       now: this.now,
+      // Best-effort callback ACK (clears the button spinner; never blocks on
+      // agent resolution — plan §12.2).
+      ackCallback: (callbackId) => this.upstream.answerCallbackQuery({ callback_query_id: callbackId }),
     });
   }
 
@@ -198,25 +213,83 @@ export class TelegramAdapter implements ChannelAdapter {
     return this.outbound.send(target, message);
   }
 
-  resolveStreamingMode(_target: ChannelTarget): StreamingMode {
+  resolveStreamingMode(target: ChannelTarget): StreamingMode {
     // `streaming.enabled: false` is a hard off-switch: it forces the buffered
-    // send-once strategy even though edit streaming is available.
-    return this.config.streaming.enabled ? 'edit' : 'buffered';
+    // send-once strategy even though streaming is available.
+    if (!this.config.streaming.enabled) return 'buffered';
+    // Private DMs with rich output use the native sendRichMessageDraft flow.
+    const rich = this.formattingMode === 'rich-markdown';
+    if (rich && target.conversationType === 'dm') return 'native';
+    // Everything else edits one message in place.
+    return 'edit';
   }
 
   async createReply(target: ChannelTarget, _options?: CreateReplyOptions): Promise<ReplyHandle> {
     if (!this.started || !this.ctx) {
       throw new ChannelError('CHANNEL_NOT_STARTED', 'telegram adapter is not started');
     }
+    const mode = this.formattingMode;
+    const rich = mode === 'rich-markdown';
+    // Native rich draft streaming for private DMs (plan §6.1).
+    if (rich && target.conversationType === 'dm') {
+      const reply = new TelegramRichStreamingReply(
+        this.upstream,
+        target,
+        this.config.streaming.placeholder,
+        { formatting: { mode } },
+      );
+      await reply.start();
+      return reply;
+    }
+    // Group (or plain config): plain edit preview; finish upgrades the same
+    // message to a Rich Message when rich output is active (plan §6.2).
     const reply = new TelegramStreamingReply(
       this.upstream,
       target,
       this.config.streaming.placeholder,
+      { formatting: { mode }, richFinal: rich && target.conversationType !== 'dm' },
     );
     // Send the placeholder immediately so the user sees the bot is working;
     // subsequent full-text previews edit this same message in place.
     await reply.start();
     return reply;
+  }
+
+  /**
+   * Optional in-place edit of an already-sent message (plan §15.3): either
+   * update the interactive keyboard (`editMessageReplyMarkup`) or the text
+   * (`editMessageText`).
+   */
+  async edit(target: ChannelTarget, messageId: string, message: OutboundMessage): Promise<SendResult> {
+    if (!this.started) {
+      throw new ChannelError('CHANNEL_NOT_STARTED', 'telegram adapter is not started');
+    }
+    if (message.text !== undefined) {
+      const markup = message.actions === undefined
+        ? undefined
+        : actionsToReplyMarkup(message.actions) ?? { inline_keyboard: [] };
+      const mode = this.formattingMode;
+      const raw = mode === 'rich-markdown'
+        ? await this.upstream.editMessageRich(
+            target.conversationId,
+            messageId,
+            { markdown: message.text },
+            markup,
+          )
+        : await this.upstream.editMessageText(
+            target.conversationId,
+            messageId,
+            message.text,
+            markup ? { replyMarkup: markup } : undefined,
+          );
+      return { delivered: true, raw };
+    }
+    if (message.actions !== undefined) {
+      const markup = actionsToReplyMarkup(message.actions) ?? { inline_keyboard: [] };
+      const raw = await this.upstream.editMessageReplyMarkup(target.conversationId, messageId, markup);
+      return { delivered: true, raw };
+    }
+    return { delivered: true };
   }
 
   async getHealth(): Promise<ChannelHealth> {

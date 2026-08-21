@@ -14,8 +14,11 @@ import {
   InboundProcessor,
   HttpTelegramUpstream,
   FetchTransport,
+  TelegramApiError,
   TelegramStreamingReply,
   mapInbound,
+  mapCallbackQuery,
+  isCallbackQueryUpdate,
   dedupKey,
   apply,
   name,
@@ -186,6 +189,24 @@ describe('mapper (fixture-driven)', () => {
     expect(dedupKey(update)).toBe('update-99');
     expect(dedupKey({ ...update })).toBe('update-99');
     expect(dedupKey({ message: { message_id: 5 } })).toBe('message-5');
+  });
+
+  it('maps a callback_query fixture to interaction.received', async () => {
+    const fixture = await loadFixture('telegram', 'interaction-callback');
+    expect(isCallbackQueryUpdate(fixture.payload)).toBe(true);
+    const event = mapCallbackQuery(fixture.payload, { channel: 'telegram' as never, accountId: 'main' as never });
+    const expected = fixture.expected as {
+      type: string;
+      conversation: unknown;
+      sender: unknown;
+      interactionId: string;
+      action: string;
+    };
+    expect(event.type).toBe(expected.type);
+    expect(event.conversation).toEqual(expected.conversation);
+    expect(event.sender).toEqual(expected.sender);
+    expect(event.interactionId).toBe(expected.interactionId);
+    expect(event.action).toBe(expected.action);
   });
 });
 
@@ -462,6 +483,30 @@ describe('HttpTelegramUpstream (fake transport)', () => {
     expect(message).not.toContain(TOKEN);
     expect(message).toContain('/bot<redacted>/getMe');
   });
+
+  it.each([
+    [400, { ok: false, error_code: 400, description: "Bad Request: can't parse entities" }, 'format'],
+    [400, { ok: false, error_code: 400, description: 'Bad Request: chat not found' }, 'upstream'],
+    [401, { ok: false, error_code: 401, description: 'Unauthorized' }, 'auth'],
+    [403, { ok: false, error_code: 403, description: 'Forbidden: bot was kicked' }, 'permission'],
+    [429, { ok: false, error_code: 429, description: 'Too Many Requests', parameters: { retry_after: 7 } }, 'rate-limit'],
+    [500, { ok: false, error_code: 500, description: 'Internal Server Error' }, 'upstream'],
+  ])('parses HTTP %s Telegram error envelopes before classification', async (status, envelope, kind) => {
+    const fetchImpl = (async () => new Response(JSON.stringify(envelope), {
+      status,
+      headers: { 'content-type': 'application/json' },
+    })) as typeof fetch;
+    const real = new FetchTransport('https://api.telegram.org', { timeoutMs: 1000, fetchImpl });
+    const upstream = new HttpTelegramUpstream({ transport: real, token: TOKEN, longPollTimeoutMs: 500 });
+    const request = status === 401
+      ? upstream.getMe()
+      : upstream.sendMessage('123', 'hello');
+    await expect(request).rejects.toMatchObject({
+      name: 'TelegramApiError',
+      errorCode: status,
+      kind,
+    } satisfies Partial<TelegramApiError>);
+  });
 });
 
 describe('InboundProcessor dedup', () => {
@@ -661,6 +706,125 @@ describe('TelegramStreamingReply', () => {
     expect(edit.text).toHaveLength(4096);
     const overflow = transport.calls.filter((call) => call.path === tgPath('sendMessage'))[1]?.init?.body;
     expect(overflow).toEqual({ chat_id: '123', text: 'tail', message_thread_id: 9 });
+  });
+
+  it('coalesces preview edits during a Telegram 429 cooldown', async () => {
+    vi.useFakeTimers();
+    try {
+      const transport = new FakeTransport();
+      let edits = 0;
+      transport.route(tgPath('sendMessage'), () => ({ ok: true, result: { message_id: 42 } }));
+      transport.route(tgPath('editMessageText'), () => {
+        edits += 1;
+        if (edits === 1) {
+          return {
+            ok: false,
+            error_code: 429,
+            description: 'Too Many Requests: retry after 62',
+            parameters: { retry_after: 62 },
+          };
+        }
+        return { ok: true, result: { message_id: 42 } };
+      });
+      const upstream = new HttpTelegramUpstream({ transport, token: TOKEN, longPollTimeoutMs: 500 });
+      const reply = new TelegramStreamingReply(upstream, makeChannelTarget({
+        channelId: 'telegram', accountId: 'main', conversationId: '123',
+      }));
+      await reply.start();
+      await reply.replace({ text: 'first' });
+      await reply.replace({ text: 'second' });
+      await reply.replace({ text: 'x'.repeat(4096) + 'latest-tail' });
+
+      expect(edits).toBe(1);
+      await vi.advanceTimersByTimeAsync(62_000);
+
+      expect(edits).toBe(2);
+      const lastEdit = transport.calls.filter((call) => call.path === tgPath('editMessageText')).at(-1)?.init?.body as {
+        text: string;
+      };
+      expect(lastEdit.text).toBe(`…${'x'.repeat(4084)}latest-tail`);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('defers a final edit through cooldown without emitting a warning preview', async () => {
+    vi.useFakeTimers();
+    try {
+      const transport = new FakeTransport();
+      let edits = 0;
+      transport.route(tgPath('sendMessage'), () => ({ ok: true, result: { message_id: 42 } }));
+      transport.route(tgPath('editMessageText'), () => {
+        edits += 1;
+        if (edits === 1) {
+          return {
+            ok: false,
+            error_code: 429,
+            description: 'Too Many Requests: retry after 62',
+            parameters: { retry_after: 62 },
+          };
+        }
+        return { ok: true, result: { message_id: 42 } };
+      });
+      const upstream = new HttpTelegramUpstream({ transport, token: TOKEN, longPollTimeoutMs: 500 });
+      const reply = new TelegramStreamingReply(upstream, makeChannelTarget({
+        channelId: 'telegram', accountId: 'main', conversationId: '123',
+      }));
+      await reply.start();
+      await reply.replace({ text: 'preview that was rate limited' });
+
+      const finish = reply.finish({ text: 'final response' });
+      await vi.advanceTimersByTimeAsync(61_999);
+      expect(edits).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await finish;
+
+      expect(edits).toBe(2);
+      const editTexts = transport.calls
+        .filter((call) => call.path === tgPath('editMessageText'))
+        .map((call) => (call.init?.body as { text: string }).text);
+      expect(editTexts).toEqual(['preview that was rate limited', 'final response']);
+      expect(editTexts.some((text) => text.startsWith('Warning:'))).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries a rate-limited first final edit instead of failing the reply', async () => {
+    vi.useFakeTimers();
+    try {
+      const transport = new FakeTransport();
+      let edits = 0;
+      transport.route(tgPath('sendMessage'), () => ({ ok: true, result: { message_id: 42 } }));
+      transport.route(tgPath('editMessageText'), () => {
+        edits += 1;
+        return edits === 1
+          ? {
+            ok: false,
+            error_code: 429,
+            description: 'Too Many Requests: retry after 62',
+            parameters: { retry_after: 62 },
+          }
+          : { ok: true, result: { message_id: 42 } };
+      });
+      const upstream = new HttpTelegramUpstream({ transport, token: TOKEN, longPollTimeoutMs: 500 });
+      const reply = new TelegramStreamingReply(upstream, makeChannelTarget({
+        channelId: 'telegram', accountId: 'main', conversationId: '123',
+      }));
+      await reply.start();
+
+      const finish = reply.finish({ text: 'final response' });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(edits).toBe(1);
+      await vi.advanceTimersByTimeAsync(62_000);
+      await finish;
+
+      expect(edits).toBe(2);
+      expect(transport.calls.filter((call) => call.path === tgPath('editMessageText')))
+        .toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -872,7 +1036,9 @@ describe('TelegramAdapter lifecycle', () => {
     const ctx = createTestContext(service);
     routeAuth();
     transport.route(tgPath('sendMessage'), () => ({ ok: true, result: { message_id: 9 } }));
-    const a = adapter({ token: TOKEN });
+    // Plain formatting keeps the driver on the sendMessage path (rich is
+    // covered by separate rich-render / rich-streaming tests).
+    const a = adapter({ token: TOKEN, formatting: { mode: 'plain', fallback: 'plain' } });
     await a.start(ctx);
     const result = await a.send(makeChannelTarget(), makeOutboundMessage());
     expect(result.delivered).toBe(true);
@@ -967,7 +1133,7 @@ describe('TelegramAdapter lifecycle', () => {
     transport.route(tgPath('sendMessage'), () => {
       throw new Error('upstream exploded');
     });
-    const a = adapter({ token: TOKEN });
+    const a = adapter({ token: TOKEN, formatting: { mode: 'plain', fallback: 'plain' } });
     await a.start(ctx);
     let caught: unknown;
     try {
@@ -979,6 +1145,103 @@ describe('TelegramAdapter lifecycle', () => {
     // The token never reaches request init/body or the surfaced error.
     expect(JSON.stringify(transport.calls.map((c) => c.init))).not.toContain(TOKEN);
     expect(String((caught as Error).message)).not.toContain(TOKEN);
+    await a.stop();
+  });
+
+  it('send in auto mode requires Rich Markdown even for a custom endpoint', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    routeAuth();
+    transport.route(tgPath('sendRichMessage'), () => ({ ok: true, result: { message_id: 21 } }));
+    const a = adapter({ token: TOKEN });
+    await a.start(ctx);
+    const result = await a.send(makeChannelTarget(), { text: '## Hello' });
+    expect(result.delivered).toBe(true);
+    const call = transport.calls.find((c) => c.path === tgPath('sendRichMessage'));
+    expect(call?.init?.body).toEqual({
+      chat_id: 'conv-1',
+      rich_message: { markdown: '## Hello' },
+    });
+    expect(transport.calls.some((c) => c.path === tgPath('sendMessage'))).toBe(false);
+    await a.stop();
+  });
+
+  it('sends Rich Markdown by default through Telegram hosted Bot API', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    routeAuth();
+    transport.route(tgPath('sendRichMessage'), () => ({ ok: true, result: { message_id: 24 } }));
+    const a = adapter({ token: TOKEN, baseUrl: 'https://api.telegram.org' });
+    await a.start(ctx);
+    const result = await a.send(makeChannelTarget(), {
+      text: '# Heading\n\n**bold**\n\n| A | B |\n|---|---|\n| 1 | 2 |',
+    });
+    expect(result.delivered).toBe(true);
+    const call = transport.calls.find((c) => c.path === tgPath('sendRichMessage'));
+    expect(call?.init?.body).toMatchObject({
+      chat_id: 'conv-1',
+      rich_message: {
+        markdown: expect.stringContaining('# Heading'),
+      },
+    });
+    expect(transport.calls.some((c) => c.path === tgPath('sendMessage'))).toBe(false);
+    await a.stop();
+  });
+
+  it('uses native rich draft streaming for an official Telegram DM in auto mode', () => {
+    const a = adapter({ token: TOKEN, baseUrl: 'https://api.telegram.org' });
+    expect(a.resolveStreamingMode({
+      channelId: 'telegram' as never,
+      accountId: 'main' as never,
+      conversationId: '123' as never,
+      conversationType: 'dm',
+    })).toBe('native');
+  });
+
+  it('send with actions maps to an InlineKeyboardMarkup reply_markup', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    routeAuth();
+    transport.route(tgPath('sendMessage'), () => ({ ok: true, result: { message_id: 22 } }));
+    const a = adapter({ token: TOKEN, formatting: { mode: 'plain', fallback: 'plain' } });
+    await a.start(ctx);
+    await a.send(makeChannelTarget(), {
+      text: 'choose',
+      actions: [{ actions: [{ id: 'a1', label: 'One' }, { id: 'a2', label: 'Two', style: 'danger' }] }],
+    });
+    const call = transport.calls.find((c) => c.path === tgPath('sendMessage'));
+    expect(call?.init?.body).toMatchObject({
+      chat_id: 'conv-1',
+      text: 'choose',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: 'One', callback_data: 'a1' },
+            { text: 'Two', callback_data: 'a2', style: 'danger' },
+          ],
+        ],
+      },
+    });
+    await a.stop();
+  });
+
+  it('rich-mode send carries reply_markup when actions are present', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    routeAuth();
+    transport.route(tgPath('sendRichMessage'), () => ({ ok: true, result: { message_id: 23 } }));
+    const a = adapter({ token: TOKEN, formatting: { mode: 'rich-markdown', fallback: 'plain' } });
+    await a.start(ctx);
+    await a.send(makeChannelTarget(), {
+      text: 'choose',
+      actions: [{ actions: [{ id: 'b1', label: 'Pick' }] }],
+    });
+    const call = transport.calls.find((c) => c.path === tgPath('sendRichMessage'));
+    expect(call?.init?.body).toMatchObject({
+      chat_id: 'conv-1',
+      rich_message: { markdown: 'choose' },
+      reply_markup: { inline_keyboard: [[{ text: 'Pick', callback_data: 'b1' }]] },
+    });
     await a.stop();
   });
 
@@ -1001,6 +1264,8 @@ describe('channel-telegram plugin', () => {
     expect(manifest).toMatchObject({ id: 'telegram', status: 'experimental' });
     expect(manifest.adapterVersion).toBe(pkg.version);
     expect(manifest.upstream.strategy).toBe('source');
+    expect(manifest.upstream.testedVersion).toBe('10.2');
+    expect(manifest.upstream.versionRange).toBe('>=10.2');
     expect(manifest.upstream.reference).toContain('core.telegram.org');
   });
 

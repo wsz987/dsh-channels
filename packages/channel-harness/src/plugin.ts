@@ -2,7 +2,8 @@
  * Cordis plugin entry for the channel-harness bridge (doc §30 / H0.6).
  *
  * The plugin injects `channels` (ChannelService), `agents` (AgentRegistry),
- * `agentDefaultModel`, `llm`, and `commands` (CommandRuntime). `sessionPersistence` is
+ * `agentDefaultModel`, `agentPresets`, `llm`, `commands` (CommandRuntime), and the public
+ * `apiProxy` question mux. `sessionPersistence` is
  * NOT required: it is an optional capability resolved LIVE at the use site
  * (a resolver passed into the gateway), so `canResume()` reflects whether the
  * service is present at probe time — including mounts/unmounts after startup.
@@ -22,7 +23,15 @@ export const name = 'channel-harness';
 // without an explicit provider/model (the channel `agent.default` route) must
 // inherit the user's Harness-wide default model so the `{{model}}` persona
 // variable always resolves. See `resolveRoute` in agent-manager.ts.
-export const inject: string[] = ['channels', 'agents', 'agentDefaultModel', 'llm', 'commands'];
+export const inject: string[] = [
+  'channels',
+  'agents',
+  'agentDefaultModel',
+  'agentPresets',
+  'llm',
+  'commands',
+  'apiProxy',
+];
 
 export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => {

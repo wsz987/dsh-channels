@@ -44,8 +44,8 @@ appSecretRef: QQBOT_APP_SECRET   # reference only — the value lives in ctx.cre
 ```
 
 The `channels-qq` plugin injects `[channels, credentials, channelControl]`; the
-`channel-harness` bridge injects `[channels, agents, agentDefaultModel,
-commands]`.
+`channel-harness` bridge injects `[channels, agents, agentDefaultModel, llm,
+commands, apiProxy]`.
 
 > **Note:** a real clean-profile install requires the dsh CLI (this repo ships
 > the bundle, not the CLI) and is a **manual release-validation step** —

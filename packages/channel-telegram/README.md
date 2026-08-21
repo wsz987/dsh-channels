@@ -26,7 +26,7 @@ Contract coverage:
 - `runChannelAdapterContract` — the testkit's full contract suite passes
 - Cordis plugin shape (`name` / `inject` / `apply` via `ctx.effect`)
 - Schemastery `Config` with an injectable `HttpTransport` (offline fake in tests)
-- Fixture-driven mapper tests (`fixtures/telegram/*.json`, Bot API 7.10 shapes)
+- Fixture-driven mapper tests (`fixtures/telegram/*.json`, Bot API 10.2 shapes)
 - M4 governance: `readonly manifest` class field + `manifest.ts` for
   `channels doctor` compatibility checks
 
@@ -66,14 +66,17 @@ exclusive. A hosted webhook transport is not implemented yet.
 | capability   | value     |
 | ------------ | --------- |
 | text / image / file / audio / video | ✅ |
-| markdown     | ❌        |
+| markdown     | ✅ Rich Markdown |
 | reactions    | ❌        |
 | cards        | ❌        |
 | threads      | ✅        |
-| streaming    | `edit` — send one message, then edit it in place with `editMessageText`; set `streaming.enabled: false` for buffered |
+| streaming    | DM Rich Draft; group plain preview + rich final edit; set `streaming.enabled: false` for buffered |
 
 ## Known limits
 
+- Minimum supported upstream is Telegram Bot API 10.2. Older or pinned custom
+  Bot API servers are not supported; use `formatting.mode: plain` only as an
+  explicit presentation choice, not as an old-server compatibility mode.
 - Inbound media hydration downloads image and document bytes through `getFile`; audio/video keep their `resourceRef` placeholder in V1.
 - Telegram albums (`media_group_id`) are intentionally delivered one update at
   a time. Each image is downloaded, dispatched, retried and acknowledged

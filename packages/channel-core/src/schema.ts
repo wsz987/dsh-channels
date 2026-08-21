@@ -27,7 +27,20 @@ export const CAPABILITY_FLAGS = [
   'threads',
 ] as const;
 
-export const streamingModeSchema = z.enum(STREAMING_MODES);
+export const streamingModeSchema = z.enum(STREAMING_MODES, {
+  error: "capabilities.streaming must be one of 'native' | 'edit' | 'buffered'",
+});
+
+function capabilityFlagSchema(name: string) {
+  return z.boolean({ error: `capabilities.${name} must be a boolean` });
+}
+
+function adapterFunctionSchema(error: string) {
+  return z.custom<(...args: never[]) => unknown>(
+    (value) => typeof value === 'function',
+    { error },
+  );
+}
 
 /**
  * `ChannelCapabilities` shape validated at the contract boundary: the nine
@@ -36,16 +49,19 @@ export const streamingModeSchema = z.enum(STREAMING_MODES);
  * unvalidated.
  */
 export const capabilitiesSchema = z.object({
-  text: z.boolean(),
-  image: z.boolean(),
-  file: z.boolean(),
-  audio: z.boolean(),
-  video: z.boolean(),
-  markdown: z.boolean(),
-  cards: z.boolean(),
-  reactions: z.boolean(),
-  threads: z.boolean(),
+  text: capabilityFlagSchema('text'),
+  image: capabilityFlagSchema('image'),
+  file: capabilityFlagSchema('file'),
+  audio: capabilityFlagSchema('audio'),
+  video: capabilityFlagSchema('video'),
+  markdown: capabilityFlagSchema('markdown'),
+  cards: capabilityFlagSchema('cards'),
+  reactions: capabilityFlagSchema('reactions'),
+  threads: capabilityFlagSchema('threads'),
   streaming: streamingModeSchema,
+  interactiveActions: capabilityFlagSchema('interactiveActions').optional(),
+}, {
+  error: 'capabilities must be a ChannelCapabilities object',
 }).loose();
 
 /** Loose structural adapter shape: an id plus the three required methods. */
@@ -62,15 +78,18 @@ export const channelAdapterShapeSchema = z.object({
  * (e.g. `manifest`, `resolveStreamingMode`) pass through untouched.
  */
 export const defineChannelAdapterInputSchema = z.object({
-  id: z.string().min(1),
+  id: z.string({ error: 'id must be a non-empty string' }).min(1, {
+    error: 'id must be a non-empty string',
+  }),
   capabilities: capabilitiesSchema,
-  start: z.function(),
-  stop: z.function(),
-  send: z.function(),
-  createReply: z.function().optional(),
-  beginAuth: z.function().optional(),
-  pollAuth: z.function().optional(),
-  getHealth: z.function().optional(),
+  start: adapterFunctionSchema('start must be a function'),
+  stop: adapterFunctionSchema('stop must be a function'),
+  send: adapterFunctionSchema('send must be a function'),
+  createReply: adapterFunctionSchema('createReply must be a function when present').optional(),
+  edit: adapterFunctionSchema('edit must be a function when present').optional(),
+  beginAuth: adapterFunctionSchema('beginAuth must be a function when present').optional(),
+  pollAuth: adapterFunctionSchema('pollAuth must be a function when present').optional(),
+  getHealth: adapterFunctionSchema('getHealth must be a function when present').optional(),
 }).loose();
 
 /**

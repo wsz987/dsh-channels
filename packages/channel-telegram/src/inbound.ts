@@ -1,6 +1,6 @@
 /**
  * Inbound processing: dedup window + structured mapping + media hydration +
- * emit.
+ * emit. Handles both `message` and `callback_query` updates.
  *
  * The getUpdates offset ack already prevents protocol-level redelivery; this
  * dedup window is the adapter-level second layer for redelivery inside one
@@ -13,14 +13,29 @@
  * downloaded through the platform upstream and its bytes are placed on
  * `localData`. A download failure never blocks text delivery — the part keeps
  * its `resourceRef` and records a stable `ingressFailure` code.
+ *
+ * ## Interactions (plan §5 / §12.2)
+ *
+ * A `callback_query` update maps to `interaction.received` with
+ * `action = callback_data` (untrusted, zod-validated, never interpreted by the
+ * adapter). The adapter immediately issues a best-effort `answerCallbackQuery`
+ * ACK so Telegram clears the button progress spinner — this must NOT block on
+ * agent resolution, so the ACK is fired and never gates the emit.
  */
 import type {
   ChannelAdapterContext,
   MessagePart,
   MessageReceived,
 } from '@wsz987/channel-core';
+import type { InteractionReceived } from '@wsz987/channel-core';
 import { hydrateTelegramParts, type TelegramFileResolver } from './media-hydrator.js';
-import { dedupKey, mapInbound, type TelegramInboundMeta } from './mapper.js';
+import {
+  dedupKey,
+  isCallbackQueryUpdate,
+  mapCallbackQuery,
+  mapInbound,
+  type TelegramInboundMeta,
+} from './mapper.js';
 
 /** Compact per-part summary for inbound message logs (debug diagnostics). */
 function summarizeParts(parts: readonly MessagePart[]): unknown[] {
@@ -67,6 +82,12 @@ export interface InboundProcessorOptions {
   maxDownloadBytes?: number;
   /** Injectable clock (tests). */
   now?: () => number;
+  /**
+   * Best-effort `answerCallbackQuery` ACK for callback_query updates. The
+   * adapter wires this to the upstream; the call is fired immediately and never
+   * gates the emit (plan §12.2).
+   */
+  ackCallback?: (callbackQueryId: string) => Promise<void>;
 }
 
 export class InboundProcessor {
@@ -90,6 +111,40 @@ export class InboundProcessor {
       }
       this.prune(now);
     }
+
+    if (isCallbackQueryUpdate(raw)) {
+      await this.handleCallbackQuery(raw);
+      if (this.options.dedupEnabled) this.seen.set(key, this.now());
+      return;
+    }
+
+    await this.handleMessage(raw);
+    if (this.options.dedupEnabled) this.seen.set(key, this.now());
+  }
+
+  /** Map + ACK + emit a callback_query interaction. */
+  private async handleCallbackQuery(raw: unknown): Promise<void> {
+    const event: InteractionReceived = mapCallbackQuery(raw, this.options.meta);
+    // Immediate best-effort ACK (clears the button spinner). It must never
+    // block on agent resolution, so any failure is logged, not propagated to
+    // the emit.
+    if (this.options.ackCallback) {
+      void this.options.ackCallback(event.interactionId).catch((error) => {
+        this.options.ctx.logger.warn(
+          '[channel-telegram] answerCallbackQuery failed',
+          error instanceof Error ? error.message : error,
+        );
+      });
+    }
+    this.options.ctx.logger.info(
+      `[channel-telegram] inbound interaction ${event.interactionId} from ${event.sender.id} in ${event.conversation.id}`,
+      { action: event.action.slice(0, 80) },
+    );
+    await this.options.ctx.emit(event);
+  }
+
+  /** Map + hydrate + emit a message update. */
+  private async handleMessage(raw: unknown): Promise<void> {
     const event: MessageReceived = mapInbound(raw, this.options.meta);
     if (this.options.files) {
       await hydrateTelegramParts(event.message.content, this.options.files, {
@@ -105,7 +160,6 @@ export class InboundProcessor {
       { parts: summarizeParts(event.message.content) },
     );
     await this.options.ctx.emit(event);
-    if (this.options.dedupEnabled) this.seen.set(key, this.now());
   }
 
   private prune(now: number): void {

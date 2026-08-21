@@ -13,7 +13,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { Context } from '@deepseek-ai/cordis';
-import type { ChannelAccessPolicy, MessageReceived } from '@wsz987/channel-core';
+import type { ChannelAccessPolicy, InteractionReceived, MessageReceived } from '@wsz987/channel-core';
 import {
   AgentManager,
   type AgentGateway,
@@ -162,7 +162,10 @@ interface Fixture {
   bridge: ChannelHarnessBridge;
 }
 
-function makeFixture(resolver: StubResolver): Fixture {
+function makeFixture(
+  resolver: StubResolver,
+  questionBridge?: { handleChannelEvent: ReturnType<typeof vi.fn> },
+): Fixture {
   const gateway = new FakeGateway();
   const manager = new AgentManager(gateway, silentLogger, 4);
   const bindingStore = new MemoryBindingStore();
@@ -180,8 +183,21 @@ function makeFixture(resolver: StubResolver): Fixture {
     ctx: new Context(),
     commandDeps: { startNewSession: async () => {} },
     workspaceResolver: noopResolver,
+    questionBridge: questionBridge as never,
   });
   return { gateway, bindingStore, resolver, adapter, bridge };
+}
+
+function makeInteractionEvent(): InteractionReceived {
+  return {
+    type: 'interaction.received',
+    channel: 'weixin' as never,
+    accountId: 'main' as never,
+    conversation: { id: 'user_123' as never, type: 'dm' },
+    sender: { id: 'user_123' as never, name: 'Alice' },
+    interactionId: 'callback-1',
+    action: 'opaque-action',
+  };
 }
 
 describe('Fail-closed Access Gate (plan §54)', () => {
@@ -212,6 +228,35 @@ describe('Fail-closed Access Gate (plan §54)', () => {
     expect(gateway.createCalls).toHaveLength(0);
     expect(gateway.resumeCalls).toHaveLength(0);
     expect(await bindingStore.get('weixin:main:user_123')).toBeUndefined();
+  });
+
+  it('unauthorized interaction is dropped before the question bridge', async () => {
+    const questionBridge = { handleChannelEvent: vi.fn(async () => true) };
+    const { resolver, bridge } = makeFixture(new StubResolver(), questionBridge);
+    resolver.resolveState = { state: 'present', policy: denyDm };
+
+    await bridge.handleChannelEvent(makeInteractionEvent());
+    expect(questionBridge.handleChannelEvent).not.toHaveBeenCalled();
+  });
+
+  it('authorized interaction reaches the question bridge after the Access Gate', async () => {
+    const questionBridge = { handleChannelEvent: vi.fn(async () => true) };
+    const { resolver, bridge } = makeFixture(new StubResolver(), questionBridge);
+    resolver.resolveState = { state: 'present', policy: openDm };
+
+    await bridge.handleChannelEvent(makeInteractionEvent());
+    expect(questionBridge.handleChannelEvent).toHaveBeenCalledOnce();
+  });
+
+  it('a pending question text answer is consumed before Agent routing', async () => {
+    const questionBridge = { handleChannelEvent: vi.fn(async () => true) };
+    const { gateway, resolver, bridge } = makeFixture(new StubResolver(), questionBridge);
+    resolver.resolveState = { state: 'present', policy: openDm };
+
+    await bridge.handleChannelEvent(makeMessageEvent(textEvent('m1', '1')));
+    expect(questionBridge.handleChannelEvent).toHaveBeenCalledOnce();
+    expect(gateway.createCalls).toHaveLength(0);
+    expect(gateway.followups).toHaveLength(0);
   });
 
   it('unauthorized /new -> NO session create, NO binding write', async () => {

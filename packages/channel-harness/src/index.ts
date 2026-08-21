@@ -24,6 +24,7 @@ export * from './model-selection.js';
 export * from './image-model-fallback.js';
 export * from './reply-router.js';
 export * from './reply-context-store.js';
+export * from './channel-question-bridge.js';
 export * from './bridge.js';
 export * from './lifecycle.js';
 export * from './workspace-resolver.js';

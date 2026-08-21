@@ -1,7 +1,7 @@
 {
   "name": "inbound voice message in a supergroup",
   "channel": "telegram",
-  "upstreamVersion": "7.10",
+  "upstreamVersion": "10.2",
   "payload": {
     "update_id": 1003,
     "message": {

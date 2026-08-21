@@ -27,7 +27,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence';
 import { SessionId, type Session, type SessionStore } from '@deepseek-ai/dsh-session';
-import type { ChannelAdapter, ChannelEvent, ChannelLogger, ChannelTarget } from '@wsz987/channel-core';
+import type { ChannelAdapter, ChannelEvent, ChannelLogger, ChannelService, ChannelTarget } from '@wsz987/channel-core';
 import type { Config } from './config.js';
 import { createBindingStore } from './binding-store.js';
 import { AgentManager, HarnessAgentGateway } from './agent-manager.js';
@@ -42,6 +42,7 @@ import type { SaveImageHook } from './message-converter.js';
 import { installDebugConsoleExporter } from './debug-logger.js';
 import { StoredChannelAccessPolicyResolver } from './access/resolver.js';
 import type { ChannelFileProvider } from './file-provider.js';
+import { ChannelQuestionBridge } from './channel-question-bridge.js';
 
 export interface BridgeLifecycle {
   dispose(): Promise<void>;
@@ -55,6 +56,7 @@ export function startBridge(
 ): BridgeLifecycle {
   installDebugConsoleExporter(ctx);
   const logger: ChannelLogger = ctx.logger('channel-harness');
+  const channels = ctx.get('channels') as ChannelService;
 
   const bindingStore = createBindingStore(config.bindingStore);
   const agentGateway = new HarnessAgentGateway(ctx, resolvePersistence);
@@ -62,9 +64,21 @@ export function startBridge(
   const agentRouter = new AgentRouter(config);
   const workspaceResolver = new HarnessChannelWorkspaceResolver(ctx, config.workspace, logger);
   const getAdapter = (channelId: string): ChannelAdapter | undefined =>
-    ctx.channels.get(channelId);
+    channels.get(channelId);
 
   const replyContexts = new ReplyContextStore();
+  const apiProxy = ctx.get('apiProxy');
+  const questionBridge = config.userQuestions.enabled && apiProxy
+    ? new ChannelQuestionBridge({
+        apiProxy,
+        agentManager,
+        replyContexts,
+        getAdapter,
+        logger,
+        timeoutMs: config.userQuestions.timeoutMs,
+      })
+    : undefined;
+  questionBridge?.start();
 
   // Optional attachment service -> real image path (WX5). Absent in deployments
   // without an attachment backend; the converter then keeps text placeholders.
@@ -159,7 +173,7 @@ export function startBridge(
   // policy from the shared ChannelStorage and logs decisions on the
   // `channel-access` namespace. Reads once per inbound — no policy caching (§16).
   const accessResolver = new StoredChannelAccessPolicyResolver(
-    () => ctx.channels.resources.storage,
+    () => channels.resources.storage,
   );
   const accessLogger = ctx.logger('channel-access');
   bridge = new ChannelHarnessBridge({
@@ -178,8 +192,9 @@ export function startBridge(
     commandDeps,
     workspaceResolver,
     outbox,
+    questionBridge,
   });
-  const stopInbound = ctx.channels.on((event) => bridge.handleChannelEvent(event));
+  const stopInbound = channels.on((event) => bridge.handleChannelEvent(event));
 
   let disposed = false;
 
@@ -188,6 +203,8 @@ export function startBridge(
     disposed = true;
     // 1. Stop new inbound (adapter events no longer reach the bridge).
     stopInbound();
+    // Cancel channel-owned question waits before draining the blocked Agent.
+    await questionBridge?.stop();
     // Release this bridge's Agent-scoped commands before a replacement bridge
     // can borrow the same live agents and install fresh handlers.
     await bridge.disposeCommandSetups();

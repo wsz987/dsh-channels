@@ -1,7 +1,7 @@
 {
   "name": "inbound text message",
   "channel": "telegram",
-  "upstreamVersion": "7.10",
+  "upstreamVersion": "10.2",
   "payload": {
     "update_id": 1001,
     "message": {

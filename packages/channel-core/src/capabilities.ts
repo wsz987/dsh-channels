@@ -62,6 +62,13 @@ export interface ChannelCapabilities {
   threads: boolean;
 
   /**
+   * Whether the adapter can attach interactive buttons (`OutboundMessage.actions`)
+   * and receive the matching `interaction.received` presses back. Adapters that
+   * only render plain messages leave this undefined.
+   */
+  interactiveActions?: boolean;
+
+  /**
    * How incremental assistant output is delivered:
    * - `native`   — the platform streams chunks natively (e.g. DingTalk AI Card)
    * - `edit`     — an existing message/card can be updated in place

@@ -23,8 +23,10 @@ As a Cordis plugin:
     - channels
     - agents
     - agentDefaultModel
+    - agentPresets
     - llm
     - commands
+    - apiProxy
 ```
 
 How a text-only model handles inbound channel images is an explicit **Channel
@@ -45,6 +47,7 @@ must start a new Session (`/new`) or switch to an image-capable model.
 | `AgentManager` / `AgentRouter` | Resolves/creates the agent for a conversation via `agent.default` plus per-channel/account/conversation overrides |
 | `MessageConverter` | Maps structured `ChannelEvent` messages to Harness message types |
 | `ReplyRouter` / `ReplyContextStore` | Streams `session/event` output back to the adapter (`ReplyHandle`) |
+| `ChannelQuestionBridge` | Presents channel-origin `ask_user_question` requests through generic interactive actions and returns structured answers through the public ApiProxy contract |
 | `WorkspaceResolver` | Maps conversations to Harness workspaces (`channel-account` by default) |
 | commands | Registers Agent-scoped slash commands (`/new`) through Harness `CommandRuntime` |
 | outbox | Proactive `send_channel_message` tool support (`OutboxService`) |
@@ -61,7 +64,7 @@ run a first-turn model preparation RPC.
 ```yaml
 - id: channels-harness
   name: '@wsz987/channel-harness'
-  inject: [channels, agents, agentDefaultModel, llm, commands]
+  inject: [channels, agents, agentDefaultModel, agentPresets, llm, commands, apiProxy]
   config:
     agent:
       default:
@@ -78,6 +81,9 @@ run a first-turn model preparation RPC.
       autoCreate: true
     imageCompatibility:
       mode: degrade           # degrade (default) | reject — ADR 0002
+    userQuestions:
+      enabled: true
+      timeoutMs: 300000
     reply:
       updateIntervalMs: 200
       splitParagraphs: true

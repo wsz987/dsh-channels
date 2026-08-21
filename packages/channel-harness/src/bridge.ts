@@ -41,6 +41,7 @@ import type {
   ChannelLogger,
   ChannelEvent,
   ChannelTarget,
+  InteractionReceived,
   MessageReceived,
   TextPart,
 } from '@wsz987/channel-core';
@@ -83,6 +84,7 @@ import type {
   ResolvedAccessPolicy,
 } from './access/resolver.js';
 import type { AccessDecisionReason } from './access/decision.js';
+import type { ChannelQuestionBridge } from './channel-question-bridge.js';
 
 function trimBrandedId<T extends string>(value: T): T {
   return value.trim() as T;
@@ -138,6 +140,8 @@ export interface ChannelHarnessBridgeOptions {
    * `send_channel_message` tool. Absent -> no proactive send tool.
    */
   outbox?: ChannelOutboxService;
+  /** Optional public ApiProxy question-mux bridge. */
+  questionBridge?: ChannelQuestionBridge;
 }
 
 /**
@@ -280,6 +284,13 @@ export class ChannelHarnessBridge {
     if (event.type === 'connection.changed' || event.type === 'auth.changed') {
       return;
     }
+    if (event.type === 'interaction.received') {
+      const normalized = this.normalizeInteractionIdentity(event);
+      if (await this.enforceInteractionAccessGate(normalized)) return;
+      if (await this.options.questionBridge?.handleChannelEvent(normalized)) return;
+      this.options.logger.debug('[channel-harness] ignoring unmatched interaction.received');
+      return;
+    }
     if (event.type !== 'message.received') {
       this.options.logger.debug(`[channel-harness] ignoring channel event '${event.type}'`);
       return;
@@ -303,6 +314,8 @@ export class ChannelHarnessBridge {
     // agent or bump the generation, plan §33).
     // ------------------------------------------------------------------
     if (await this.enforceAccessGate(normalizedEvent, text)) return;
+
+    if (await this.options.questionBridge?.handleChannelEvent(normalizedEvent)) return;
 
     const key = this.conversationKey(normalizedEvent);
     const parsed = parseCommand(text);
@@ -343,6 +356,69 @@ export class ChannelHarnessBridge {
       sender: { ...event.sender, id: senderId },
       conversation: { ...event.conversation, id: conversationId },
     };
+  }
+
+  private normalizeInteractionIdentity(event: InteractionReceived): InteractionReceived {
+    return {
+      ...event,
+      sender: { ...event.sender, id: trimBrandedId(event.sender.id) },
+      conversation: {
+        ...event.conversation,
+        id: trimBrandedId(event.conversation.id),
+      },
+    };
+  }
+
+  /** Interaction admission reuses Security Gate semantics; the click is activation. */
+  private async enforceInteractionAccessGate(event: InteractionReceived): Promise<boolean> {
+    const accessLogger = this.options.accessLogger ?? this.options.logger;
+    if (!event.sender.id || event.sender.id === 'unknown') {
+      this.dropInteraction(accessLogger, event, 'unidentified_sender');
+      return true;
+    }
+    if (!event.conversation.id) {
+      this.dropInteraction(accessLogger, event, 'invalid_conversation');
+      return true;
+    }
+    let resolved: ResolvedAccessPolicy;
+    try {
+      resolved = await this.options.accessResolver.resolve(event.channel, event.accountId);
+    } catch (error) {
+      this.options.logger.warn('[channel-access] policy resolution failed', toLoggableError(error));
+      return true;
+    }
+    if (resolved.state !== 'present') {
+      this.dropInteraction(
+        accessLogger,
+        event,
+        resolved.state === 'missing' ? 'missing_policy' : 'invalid_policy',
+      );
+      return true;
+    }
+    const decision = this.accessController.authorize({
+      conversationType: event.conversation.type,
+      senderId: event.sender.id,
+      conversationId: event.conversation.id,
+      policy: resolved.policy,
+    });
+    if (!decision.authorized) {
+      this.dropInteraction(accessLogger, event, decision.reason);
+      return true;
+    }
+    return false;
+  }
+
+  private dropInteraction(
+    logger: ChannelLogger,
+    event: InteractionReceived,
+    reason: AccessDecisionReason,
+  ): void {
+    logger.info('[channel-access] interaction dropped', {
+      channel: event.channel,
+      account: event.accountId,
+      conversationType: event.conversation.type,
+      reason,
+    });
   }
 
   /**
@@ -732,6 +808,7 @@ export class ChannelHarnessBridge {
       sessionId: binding.sessionId,
       context: {
         conversationType: event.conversation.type,
+        senderId: event.sender.id,
         replyToMessageId: event.message.id,
         // Platform reply handles such as DingTalk's per-message sessionWebhook
         // are transient and must travel only with the triggering turn.

@@ -38,6 +38,28 @@ export interface TelegramStreamingConfig {
   placeholder: string;
 }
 
+/**
+ * Outbound formatting policy (plan §5.1). The adapter's minimum supported
+ * upstream is Bot API 10.2, so `auto` always selects Rich Markdown.
+ */
+export interface TelegramFormattingConfig {
+  /**
+   * Output renderer:
+   * - `auto`         -> Rich Markdown
+   * - `rich-markdown`-> sendRichMessage / sendRichMessageDraft
+   * - `html`         -> sendMessage(parse_mode=HTML) via the safe HTML renderer
+   * - `markdown-v2`  -> expert-compat mode (fully escaped, never raw Agent MD)
+   * - `plain`        -> no formatting parsed
+   */
+  mode: 'auto' | 'rich-markdown' | 'html' | 'markdown-v2' | 'plain';
+  /**
+   * What to fall back to when the selected mode fails with a *format* error.
+   * Only `plain` is supported today; 401/403 / 429 / network / 5xx never
+   * trigger this fallback (plan §20.9).
+   */
+  fallback: 'plain';
+}
+
 export interface TelegramConfig {
   enabled: boolean;
   /** Account id within the telegram channel (defaults to 'main'). */
@@ -63,6 +85,8 @@ export interface TelegramConfig {
   reconnect: TelegramReconnectConfig;
   dedup: TelegramDedupConfig;
   streaming: TelegramStreamingConfig;
+  /** Outbound formatting / rich rendering policy. */
+  formatting: TelegramFormattingConfig;
   /** Hard byte cap for one inbound media download (image / document). */
   maxDownloadBytes: number;
 }
@@ -91,6 +115,16 @@ export const Config: Schema<TelegramConfig> = Schema.object({
   streaming: Schema.object({
     enabled: Schema.boolean().default(true),
     placeholder: Schema.string().default('…'),
+  }),
+  formatting: Schema.object({
+    mode: Schema.union([
+      Schema.const('auto'),
+      Schema.const('rich-markdown'),
+      Schema.const('html'),
+      Schema.const('markdown-v2'),
+      Schema.const('plain'),
+    ]).default('auto'),
+    fallback: Schema.const('plain').default('plain'),
   }),
   maxDownloadBytes: Schema.natural().default(20 * 1024 * 1024),
 });
