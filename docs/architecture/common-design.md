@@ -907,7 +907,7 @@ Harness latest-compatible
 ```json
 {
   "name": "@wsz987/dsh-channels",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "type": "module",
   "exports": {
     ".": "./lib/index.js",
