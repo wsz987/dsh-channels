@@ -13,7 +13,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/%40wsz987%2Fdsh-channels)](https://www.npmjs.com/package/@wsz987/dsh-channels)
 [![GitHub stars](https://img.shields.io/github/stars/wsz987/dsh-channels?style=flat)](https://github.com/wsz987/dsh-channels/stargazers)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](package.json)
+[![Node](https://img.shields.io/badge/node-%3E%3D22.19-brightgreen.svg)](package.json)
 
 [English](README.en.md) | 简体中文
 
@@ -56,6 +56,7 @@
 ## 使用前须知
 
 - 确认 `npx @deepseek-ai/dsh` 可运行，且 Harness Web 普通会话可正常对话。
+- **0.5.x 版本线要求 DeepSeek Harness `0.1.1-rc.2` 及以上、Node `22.19+`**；仍在使用 Harness `0.1.0-rc.7` 的用户请停留在 `0.4.x`（版本线对照见 [兼容矩阵](docs/compatibility-matrix.md)）。
 - 渠道会话通常使用 `Workspace Write`；仅在确需访问 Workspace 外文件且信任当前任务时启用 `Full access`。
 - 项目仍在快速迭代，升级前请备份数据。
 
@@ -79,6 +80,13 @@ npx @deepseek-ai/dsh web
 ### 更新与卸载
 
 安装、更新和卸载时请保留 `-w` 参数。
+
+> **跨版本线升级（如 0.4.x → 0.5.x）？** `update` 只在 package.json 当前版本范围内更新，跨版本线必须**先升级 Harness CLI，再用 `add ...@latest` 重新安装**（顺序不能颠倒，否则旧宿主上会出现运行不兼容）：
+>
+> ```bash
+> npm i -g @deepseek-ai/dsh@latest   # 先升级 Harness（0.5.x 需要 0.1.1-rc.2+，Node ≥ 22.19）
+> npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@latest
+> ```
 
 ```bash
 # 在当前 package.json 版本范围内更新
@@ -141,7 +149,7 @@ live gate 完成前均不视为生产验证通过。
 | `/model [<provider> <model> [<reasoningEffort>]]` | 查看或切换当前会话模型 |
 
 - 若宿主加载了官方插件（`/compact`、`/goal`、`/plan`、`/feedback` 等），这些命令也会自动出现在渠道里，无需额外升级。
-- **未注册的斜杠指令不再被拦截**：会原样作为普通用户输入交给模型处理。
+- **未注册的斜杠指令直接拒绝**（与官方 rc.2 Host 行为一致）：回复一条「未知命令」提示，**不会**作为普通用户输入发给模型。
 
 #### `/model` 示例
 
@@ -222,6 +230,7 @@ pnpm ci:check
 - [渠道身份映射（安全）](docs/security/channel-identity-map.md)
 - [第三方渠道接入指南](docs/adapter-authoring.md)
 - [发布流程](docs/release.md)
+- [兼容矩阵（Harness / Node / 必测场景）](docs/compatibility-matrix.md)
 - [微信 live 验证手册](docs/weixin-live-verification-runbook.md)
 - [渠道权限核验（接口/权限/上游漂移对照）](docs/channel-platform-verification.md)
 - [第三方版权声明](THIRD_PARTY_NOTICES.md)

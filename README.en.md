@@ -13,7 +13,7 @@ Send and receive images and files, with PDF, DOCX, XLSX and text content readabl
 [![npm downloads](https://img.shields.io/npm/dm/%40wsz987%2Fdsh-channels)](https://www.npmjs.com/package/@wsz987/dsh-channels)
 [![GitHub stars](https://img.shields.io/github/stars/wsz987/dsh-channels?style=flat)](https://github.com/wsz987/dsh-channels/stargazers)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](package.json)
+[![Node](https://img.shields.io/badge/node-%3E%3D22.19-brightgreen.svg)](package.json)
 
 English | [简体中文](README.md)
 
@@ -58,6 +58,7 @@ Once installed, configure and authorize channels via QR code in the Harness Web 
 ## Before you start
 
 - Confirm that `npx @deepseek-ai/dsh` runs and a normal Harness Web session can chat.
+- **The 0.5.x line requires DeepSeek Harness `0.1.1-rc.2` or newer and Node `22.19+`**; users still on Harness `0.1.0-rc.7` should stay on `0.4.x` (see the [compatibility matrix](docs/compatibility-matrix.md)).
 - Channel sessions normally use `Workspace Write`; enable `Full access` only when the task must access files outside the Workspace and you trust it.
 - The project is evolving quickly; back up your data before upgrading.
 
@@ -81,6 +82,13 @@ After installation, configure or log in to the channels you need in Harness Web 
 ### Update and uninstall
 
 Keep the `-w` flag when installing, updating and uninstalling.
+
+> **Crossing a release line (e.g. 0.4.x → 0.5.x)?** `update` only refreshes within the current package.json range. Crossing a release line requires **upgrading the Harness CLI first, then re-adding the bundle with `@latest`** (in that order — running the newer bundle on an old host is not supported):
+>
+> ```bash
+> npm i -g @deepseek-ai/dsh@latest   # upgrade Harness first (0.5.x needs 0.1.1-rc.2+, Node >= 22.19)
+> npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@latest
+> ```
 
 ```bash
 # Update within the current package.json version range
@@ -133,7 +141,7 @@ In any channel conversation you can send slash commands, parsed and executed by 
 | `/model [<provider> <model> [<reasoningEffort>]]` | Show or switch the current session's model |
 
 If the host loads official plugins (`/compact`, `/goal`, `/plan`, `/feedback`, ...), those commands also appear in channels automatically — no channel upgrade needed.
-**Unregistered slash commands are no longer intercepted**: they pass through to the model as ordinary user input.
+**Unregistered slash commands are rejected** (matching the official rc.2 Host behavior): the channel replies with an "unknown command" notice and the line is **never** sent to the model as ordinary user input.
 
 #### `/model` examples
 
@@ -214,6 +222,7 @@ pnpm ci:check
 - [Channel identity map (security)](docs/security/channel-identity-map.md)
 - [Third-party adapter authoring guide](docs/adapter-authoring.md)
 - [Release pipeline](docs/release.md)
+- [Compatibility matrix (Harness / Node / required scenarios)](docs/compatibility-matrix.md)
 - [Weixin live verification runbook](docs/weixin-live-verification-runbook.md)
 - [Channel permission verification (APIs / scopes / upstream drift)](docs/channel-platform-verification.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
