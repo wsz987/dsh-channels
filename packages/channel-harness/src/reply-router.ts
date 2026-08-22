@@ -40,7 +40,7 @@
  * target-aware adapters (e.g. QQ C2C native streaming) behave correctly.
  */
 import type { Context } from '@deepseek-ai/cordis';
-import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
+import type { Session, SessionEvent, TurnEndReason } from '@deepseek-ai/dsh-session';
 import type { AssistantMessage } from '@deepseek-ai/dsh-llm';
 import type {
   ChannelAdapter,
@@ -51,6 +51,7 @@ import type {
 import type { ReplyConfig } from './config.js';
 import type { SessionBinding } from './session-router.js';
 import type { ChannelReplyContext, ReplyContextStore } from './reply-context-store.js';
+import { formatChannelTurnFailure } from './failure-display.js';
 
 type ReplyStrategy = 'native' | 'edit' | 'buffered';
 
@@ -122,7 +123,7 @@ export class ReplyRouter {
         break;
       }
       case 'turn/end':
-        void this.finishTurn(session, event.data.turn);
+        void this.finishTurn(session, event.data.turn, event.data.reason);
         break;
     }
   }
@@ -357,16 +358,97 @@ export class ReplyRouter {
     }
   }
 
-  private async finishTurn(session: Session, turn: number): Promise<void> {
+  private resolveTurnTarget(
+    sessionId: string,
+    context: ChannelReplyContext | undefined,
+  ):
+    | {
+        binding: SessionBinding;
+        adapter: ChannelAdapter;
+        target: ChannelTarget;
+      }
+    | undefined {
+    if (!context) return undefined;
+
+    const binding = this.options.getBinding(sessionId);
+    if (!binding) {
+      this.options.logger.warn(`[channel-harness] no session binding for '${sessionId}'`);
+      return undefined;
+    }
+    const adapter = this.options.getAdapter(binding.channelId);
+    if (!adapter) {
+      this.options.logger.warn(
+        `[channel-harness] no adapter for channel '${binding.channelId}'`,
+      );
+      return undefined;
+    }
+
+    return { binding, adapter, target: targetFor(binding, context) };
+  }
+
+  private async finishTurn(
+    session: Session,
+    turn: number,
+    reason: TurnEndReason,
+  ): Promise<void> {
     const sessionId = String(session.id);
     const active = this.active.get(sessionId);
-    if (!active) {
-      // Even without an active reply, drop the active context for this turn
-      // (v1.1 §20) so it never leaks.
-      this.options.replyContexts.releaseTurn(sessionId, turn);
-      return;
+    // finalize() releases the reply context, so resolve it while it is still
+    // the outbound authority for this terminal event.
+    const context = this.options.replyContexts.getTurn(sessionId, turn);
+    const terminalTarget = active
+      ? (() => {
+          const adapter = this.options.getAdapter(active.binding.channelId);
+          return adapter
+            ? { binding: active.binding, adapter, target: active.target }
+            : undefined;
+        })()
+      : this.resolveTurnTarget(sessionId, context);
+
+    try {
+      // Existing assistant content retains its normal finalization path.
+      if (active) await this.finalize(active, turn);
+
+      // A terminal failure is a separate system notice, never part of model
+      // output. The ReplyContext gate prevents Web/CLI turns from leaking to a
+      // channel-bound conversation.
+      if (reason.kind === 'error' && terminalTarget) {
+        this.options.logger.error(
+          `[channel-harness] Harness turn failed for session '${sessionId}'`,
+          {
+            turn,
+            code: reason.error.code,
+            status: reason.error.status,
+            requestId: reason.error.requestId,
+            providerRetryAfterMs: reason.error.providerRetryAfterMs,
+          },
+        );
+        try {
+          await this.deliver(
+            terminalTarget.adapter,
+            terminalTarget.target,
+            formatChannelTurnFailure(reason.error),
+          );
+        } catch (error) {
+          this.options.logger.error(
+            `[channel-harness] failed to deliver turn error for session '${sessionId}'`,
+            error,
+          );
+        }
+      }
+    } finally {
+      // Active replies clean up in finalize(). No-output terminal turns need
+      // the same release and typing cleanup even when delivery fails.
+      if (!active) {
+        this.options.replyContexts.releaseTurn(sessionId, turn);
+        if (terminalTarget) {
+          this.stopTypingIfSupported(
+            terminalTarget.binding.channelId,
+            terminalTarget.target,
+          );
+        }
+      }
     }
-    await this.finalize(active, turn);
   }
 
   /**

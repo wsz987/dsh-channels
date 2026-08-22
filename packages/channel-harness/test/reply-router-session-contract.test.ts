@@ -96,11 +96,17 @@ class BufferedAdapter {
     streaming: 'buffered',
   } as const;
   sent: { target: ChannelTarget; text?: string }[] = [];
+  stopTypingForTargetCalls: ChannelTarget[] = [];
+  sendFailure: Error | undefined;
   async start() {}
   async stop() {}
   async send(target: ChannelTarget, message: { text?: string }) {
+    if (this.sendFailure) throw this.sendFailure;
     this.sent.push({ target, text: message.text });
     return { delivered: true };
+  }
+  async stopTypingForTarget(target: ChannelTarget) {
+    this.stopTypingForTargetCalls.push(target);
   }
 }
 
@@ -132,17 +138,24 @@ interface ContractFixture {
  * the ReplyRouter through the OFFICIAL `session/event` firehose (`attach`),
  * exactly like the production bridge.
  */
-function makeFixture(sessionId = 'contract-1', turn = 0): ContractFixture {
+function makeFixture(
+  sessionId = 'contract-1',
+  turn = 0,
+  seedReplyContext = true,
+  logger = silentLogger,
+): ContractFixture {
   const ctx = new Context();
   const sessions = new SessionStore(ctx);
   const session = sessions.create(SessionId(sessionId));
   const adapter = new BufferedAdapter();
   const replyContexts = new ReplyContextStore();
-  replyContexts.register(`harness_${turn}`, {
-    sessionId,
-    context: { conversationType: 'dm', replyToMessageId: `im_${turn}` },
-  });
-  replyContexts.claim({ sessionId, messageId: `harness_${turn}`, turn });
+  if (seedReplyContext) {
+    replyContexts.register(`harness_${turn}`, {
+      sessionId,
+      context: { conversationType: 'dm', replyToMessageId: `im_${turn}` },
+    });
+    replyContexts.claim({ sessionId, messageId: `harness_${turn}`, turn });
+  }
   const router = new ReplyRouter({
     config: {
       updateIntervalMs: 0,
@@ -154,7 +167,7 @@ function makeFixture(sessionId = 'contract-1', turn = 0): ContractFixture {
     getAdapter: () => adapter as unknown as ChannelAdapter,
     getBinding: () => makeBinding(sessionId),
     replyContexts,
-    logger: silentLogger,
+    logger,
   });
   const detach = router.attach(ctx);
   return { ctx, session, router, adapter, replyContexts, detach };
@@ -311,7 +324,7 @@ describe('rc.2 contract: append-origin assistant message (human transcript sourc
 // ---------------------------------------------------------------------------
 
 describe('rc.2 contract: turn error and aborted turns', () => {
-  it('an errored turn with streamed partial content delivers the partial (no phantom text)', async () => {
+  it('an errored turn with streamed partial content delivers the partial and a separate terminal notice', async () => {
     const { session, adapter, detach } = makeFixture();
     try {
       session.append('turn/start', { turn: 0 });
@@ -328,27 +341,117 @@ describe('rc.2 contract: turn error and aborted turns', () => {
         },
       });
       await vi.waitFor(() => {
-        expect(adapter.sent).toHaveLength(1);
+        expect(adapter.sent).toHaveLength(2);
       });
       expect(adapter.sent[0]?.text).toBe('partial before failure');
+      expect(adapter.sent[1]?.text).toBe('⚠️ 本轮运行失败\n\nprovider 500');
+      expect(adapter.stopTypingForTargetCalls).toHaveLength(1);
     } finally {
       detach();
     }
   });
 
-  it('an errored turn with NO streamed output sends nothing (observed real behavior)', async () => {
-    const { session, adapter, detach } = makeFixture();
+  it('an errored turn with no assistant output sends a terminal failure notice', async () => {
+    const { session, adapter, replyContexts, detach } = makeFixture();
     try {
       session.append('turn/start', { turn: 0 });
       session.append('turn/end', {
         turn: 0,
         reason: { kind: 'error', error: { message: 'provider 500', code: 'UNKNOWN' } },
       });
-      await settled();
-      // Documented current behavior: a turn that fails before any visible
-      // output produces no channel feedback (the router has no error-notice
-      // plane). No crash, no empty message, no phantom content.
-      expect(adapter.sent).toEqual([]);
+      await vi.waitFor(() => {
+        expect(replyContexts.getTurn('contract-1', 0)).toBeUndefined();
+      });
+      expect(adapter.sent).toHaveLength(1);
+      expect(adapter.sent[0]?.text).toBe('⚠️ 本轮运行失败\n\nprovider 500');
+      expect(adapter.stopTypingForTargetCalls).toHaveLength(1);
+    } finally {
+      detach();
+    }
+  });
+
+  it('redacts raw AUTH provider diagnostics', async () => {
+    const { session, adapter, detach } = makeFixture();
+    try {
+      session.append('turn/start', { turn: 0 });
+      session.append('turn/end', {
+        turn: 0,
+        reason: {
+          kind: 'error',
+          error: {
+            code: 'AUTH',
+            message: '401 invalid key sk-THIS-MUST-NOT-LEAK',
+          },
+        },
+      });
+      await vi.waitFor(() => {
+        expect(adapter.sent).toHaveLength(1);
+      });
+      expect(adapter.sent[0]?.text).toBe('⚠️ 本轮运行失败\n\nAPI key is invalid');
+      expect(JSON.stringify(adapter.sent)).not.toContain('sk-THIS-MUST-NOT-LEAK');
+    } finally {
+      detach();
+    }
+  });
+
+  it('prefers a validated provider JSON message and logs the full failure', async () => {
+    const errors: unknown[][] = [];
+    const logger = { ...silentLogger, error: (...args: unknown[]) => errors.push(args) };
+    const { session, adapter, detach } = makeFixture('contract-429', 0, true, logger);
+    const failure = {
+      code: 'QUOTA',
+      message: '429: {"type":"GoUsageLimitError","message":"Weekly usage limit reached. Resets in 1 day."}',
+      status: 429,
+    };
+
+    try {
+      session.append('turn/start', { turn: 0 });
+      session.append('turn/end', {
+        turn: 0,
+        reason: { kind: 'error', error: failure },
+      });
+      await vi.waitFor(() => {
+        expect(adapter.sent).toHaveLength(1);
+      });
+
+      expect(adapter.sent[0]?.text).toBe(
+        '⚠️ 本轮运行失败\n\nWeekly usage limit reached. Resets in 1 day.',
+      );
+      expect(errors).toContainEqual([
+        "[channel-harness] Harness turn failed for session 'contract-429'",
+        {
+          turn: 0,
+          code: 'QUOTA',
+          status: 429,
+          requestId: undefined,
+          providerRetryAfterMs: undefined,
+        },
+      ]);
+    } finally {
+      detach();
+    }
+  });
+
+  it('falls back to the Harness message when a QUOTA JSON envelope is invalid', async () => {
+    const { session, adapter, detach } = makeFixture('contract-429-markdown');
+    const message = '429: {"type":"GoUsageLimitError","message":"Weekly usage limit reached."}](https://opencode.ai/workspace/go)';
+    try {
+      session.append('turn/start', { turn: 0 });
+      session.append('turn/end', {
+        turn: 0,
+        reason: {
+          kind: 'error',
+          error: {
+            code: 'QUOTA',
+            message,
+          },
+        },
+      });
+      await vi.waitFor(() => {
+        expect(adapter.sent).toHaveLength(1);
+      });
+
+      expect(adapter.sent[0]?.text).toBe(`⚠️ 本轮运行失败\n\n${message}`);
     } finally {
       detach();
     }
@@ -390,8 +493,8 @@ describe('rc.2 contract: turn error and aborted turns', () => {
     }
   });
 
-  it('an aborted turn with NO interrupted assistant/message (nothing streamed) sends nothing', async () => {
-    const { session, adapter, detach } = makeFixture();
+  it('an aborted turn with NO interrupted assistant/message sends nothing but stops typing', async () => {
+    const { session, adapter, replyContexts, detach } = makeFixture();
     try {
       session.append('turn/start', { turn: 0 });
       session.append('turn/end', {
@@ -400,6 +503,58 @@ describe('rc.2 contract: turn error and aborted turns', () => {
       });
       await settled();
       expect(adapter.sent).toEqual([]);
+      expect(replyContexts.getTurn('contract-1', 0)).toBeUndefined();
+      expect(adapter.stopTypingForTargetCalls).toHaveLength(1);
+    } finally {
+      detach();
+    }
+  });
+
+  it('a completed turn with no assistant output stops typing and releases its context', async () => {
+    const { session, adapter, replyContexts, detach } = makeFixture();
+    try {
+      session.append('turn/start', { turn: 0 });
+      session.append('turn/end', { turn: 0, reason: { kind: 'completed' } });
+      await vi.waitFor(() => {
+        expect(replyContexts.getTurn('contract-1', 0)).toBeUndefined();
+      });
+      expect(adapter.sent).toEqual([]);
+      expect(adapter.stopTypingForTargetCalls).toHaveLength(1);
+    } finally {
+      detach();
+    }
+  });
+
+  it('never routes a terminal error from a non-channel turn', async () => {
+    const { session, adapter, detach } = makeFixture('contract-foreign-error', 0, false);
+    try {
+      session.append('turn/start', { turn: 0 });
+      session.append('turn/end', {
+        turn: 0,
+        reason: { kind: 'error', error: { message: 'web-only provider failure', code: 'UNKNOWN' } },
+      });
+      await settled();
+      expect(adapter.sent).toEqual([]);
+      expect(adapter.stopTypingForTargetCalls).toEqual([]);
+    } finally {
+      detach();
+    }
+  });
+
+  it('cleans up the terminal context and typing when error notice delivery fails', async () => {
+    const { session, adapter, replyContexts, detach } = makeFixture();
+    adapter.sendFailure = new Error('channel unavailable');
+    try {
+      session.append('turn/start', { turn: 0 });
+      session.append('turn/end', {
+        turn: 0,
+        reason: { kind: 'error', error: { message: 'provider 500', code: 'UNKNOWN' } },
+      });
+      await vi.waitFor(() => {
+        expect(replyContexts.getTurn('contract-1', 0)).toBeUndefined();
+      });
+      expect(adapter.sent).toEqual([]);
+      expect(adapter.stopTypingForTargetCalls).toHaveLength(1);
     } finally {
       detach();
     }
