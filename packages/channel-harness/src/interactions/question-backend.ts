@@ -128,6 +128,12 @@ export interface QuestionInteractionOptions extends QuestionInteractionDeps, Que
  * registering a second provider. Only without ApiProxy does the channel
  * register the official provider headless. A probe that finds neither
  * transport fails safe: explicit error, no backend (never both).
+ *
+ * ORDERING CONTRACT: this probe is only race-free when the api-gateway fiber
+ * has already applied (both sides claim the single provider slot; the second
+ * registration throws DUPLICATE_PROVIDER and kills the boot). The stock
+ * bundle guarantees that with `inject: [apiProxy]` on the channels-harness
+ * patch row; custom hosts mounting the gateway must order the same way.
  */
 export function selectQuestionBackend(
   probe: QuestionBackendProbe,

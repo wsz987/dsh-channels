@@ -111,6 +111,13 @@ export const locales = {
     seconds: '秒',
     connectionError: '连接出错',
     retry: '重试',
+    // bundle update notice (prompt-only; the host performed the npm check)
+    updateAvailable: '新版本 {version} 可用（{tag}）',
+    updateCrossLineHint: '跨版本线升级：请先升级 Harness CLI，再重新安装 bundle（按顺序执行）',
+    // panel-bottom repository entry
+    repoFooterRepo: '仓库',
+    repoFooterDocs: '文档',
+    repoFooterIssue: '反馈 issue',
   },
   en: {
     nav: 'Channels',
@@ -219,6 +226,13 @@ export const locales = {
     seconds: 's',
     connectionError: 'Connection error',
     retry: 'Retry',
+    // bundle update notice (prompt-only; the host performed the npm check)
+    updateAvailable: 'New version {version} available ({tag})',
+    updateCrossLineHint: 'Cross-line upgrade: upgrade the Harness CLI first, then re-add the bundle (run in order)',
+    // panel-bottom repository entry
+    repoFooterRepo: 'Repository',
+    repoFooterDocs: 'Docs',
+    repoFooterIssue: 'Feedback',
   },
 } as const;
 

@@ -108,6 +108,7 @@ interface Fakes {
     getOwnerClaim: Array<[string, string]>;
     confirmOwnerClaim: Array<[string, string]>;
     cancelOwnerClaim: Array<[string, string]>;
+    getUpdateStatus: number[];
   };
 }
 
@@ -144,6 +145,7 @@ function makeControl(
     getOwnerClaim: [],
     confirmOwnerClaim: [],
     cancelOwnerClaim: [],
+    getUpdateStatus: [],
   };
   const requireKnown = (channelId: string): void => {
     if (channelId !== KNOWN) throw new ControlError('CONTROL_DEFINITION_NOT_FOUND');
@@ -257,6 +259,10 @@ function makeControl(
     async cancelOwnerClaim(channelId, claimId) {
       requireKnown(channelId);
       calls.cancelOwnerClaim.push([channelId, claimId]);
+    },
+    async getUpdateStatus() {
+      calls.getUpdateStatus.push(1);
+      return { currentVersion: '0.4.2' };
     },
   };
   return { control, calls };

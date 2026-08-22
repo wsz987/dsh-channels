@@ -21,6 +21,7 @@
 import type {
   AuthBeginInput,
   AuthInput,
+  BundleUpdateStatus,
   ChannelAccessState,
   ChannelSetupDescriptor,
   ChannelSetupInput,
@@ -69,6 +70,8 @@ export interface ChannelControlLike {
   getOwnerClaim(channelId: string, claimId: string): Promise<PublicOwnerClaimSession>;
   confirmOwnerClaim(channelId: string, claimId: string): Promise<ChannelAccessState>;
   cancelOwnerClaim(channelId: string, claimId: string): Promise<void>;
+  // ---- bundle update check (prompt-only, read-only DTO) --------------------
+  getUpdateStatus(): Promise<BundleUpdateStatus>;
 }
 
 export interface ApiResultV2 {
@@ -200,6 +203,18 @@ export class ChannelApiV2 {
     return run(
       (): Promise<ChannelSummary[]> => this.control.listChannels(),
       (channels) => ({ status: 200, body: { channels } }),
+    );
+  }
+
+  /**
+   * GET /update-check → BundleUpdateStatus. Panel-level read-only DTO (no
+   * secrets); the host performs the registry check so the browser never
+   * contacts npm itself.
+   */
+  async getUpdateCheck(): Promise<ApiResultV2> {
+    return run(
+      () => this.control.getUpdateStatus(),
+      (status) => ({ status: 200, body: status }),
     );
   }
 
@@ -386,6 +401,7 @@ export class ChannelApiV2 {
   async handle(method: string, pathname: string, body: unknown): Promise<ApiResultV2> {
     const clean = pathname.replace(/\/+$/, '');
     if (method === 'GET' && clean === '/channels') return this.listChannels();
+    if (method === 'GET' && clean === '/update-check') return this.getUpdateCheck();
 
     const setup = /^\/channels\/([^/]+)\/setup$/.exec(clean);
     if (method === 'GET' && setup) return this.getSetup(safeDecode(setup[1]!));

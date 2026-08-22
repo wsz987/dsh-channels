@@ -73,6 +73,7 @@ import {
   installChannelCommands,
   type ChannelCommandDisposer,
   type ChannelCommandDependencies,
+  type ChannelVersionInfo,
 } from './commands/index.js';
 
 import { ChannelModelSelectionController } from './model-selection.js';
@@ -122,13 +123,13 @@ export interface ChannelHarnessBridgeOptions {
    */
   commandDeps: Omit<
     ChannelCommandDependencies,
-    'modelSelection' | 'listCommands' | 'findCommand' | 'llm'
+    'modelSelection' | 'listCommands' | 'findCommand' | 'llm' | 'versionInfo'
   > & {
     modelSelection?: ChannelModelSelectionController;
     listCommands?: ChannelCommandDependencies['listCommands'];
     findCommand?: ChannelCommandDependencies['findCommand'];
     llm?: ChannelCommandDependencies['llm'];
-
+    versionInfo?: ChannelCommandDependencies['versionInfo'];
 
   };
   /**
@@ -220,6 +221,21 @@ export class ChannelHarnessBridge {
           this.options.ctx.llm.resolveModelInfo(provider, model, signal),
         resolveCallConfig: (config, signal) =>
           this.options.ctx.llm.resolveCallConfig(config, signal),
+      },
+      // /version's update hint: live probe of the (optional) control plane.
+      // `ctx.get` is the official detection API — safe on any scope, undefined
+      // when channel-control is not mounted (headless-without-control or the
+      // check disabled). The probe re-runs on every /version so an HMR reload
+      // of the control plugin is picked up without restarting the bridge.
+      versionInfo: async (): Promise<ChannelVersionInfo | undefined> => {
+        try {
+          const control = this.options.ctx.get('channelControl') as
+            | { getUpdateStatus(): Promise<ChannelVersionInfo> }
+            | undefined;
+          return await control?.getUpdateStatus();
+        } catch {
+          return undefined;
+        }
       },
     };
     this.sessionFactory = new ChannelSessionFactory({

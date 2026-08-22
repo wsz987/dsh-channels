@@ -13,6 +13,7 @@
  */
 export * from './types.js';
 export * from './errors.js';
+export * from './config.js';
 export * from './definitions/registry.js';
 export * from './credentials/manager.js';
 export * from './auth/sanitizer.js';
@@ -23,4 +24,5 @@ export * from './access/policy-store.js';
 export * from './access/validation.js';
 export * from './access/materialize.js';
 export * from './access/manager.js';
+export * from './update-check.js';
 export * from './service.js';

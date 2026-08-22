@@ -34,7 +34,9 @@
   },
   "dependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@wsz987/channel-core": "workspace:*"
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "@wsz987/channel-core": "workspace:*",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "rimraf": "^6.0.0",

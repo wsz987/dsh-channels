@@ -18,6 +18,13 @@
     - id: channels-files
       name: '@wsz987/dsh-channels/files'
 
+    # `apiProxy` MUST stay in this inject list: the loader orders this entry
+    # after the api-gateway fiber has registered the apiProxy service, so the
+    # question-backend probe at apply time deterministically picks the
+    # ApiProxy backend. Without it the fibers race, the channel may register
+    # the official UserQuestionProvider first, and the gateway's own
+    # registration then fails the whole boot (UserQuestionError
+    # DUPLICATE_PROVIDER).
     - id: channels-harness
       name: '@wsz987/dsh-channels/harness'
       inject:
@@ -27,6 +34,7 @@
         - agentPresets
         - llm
         - commands
+        - apiProxy
 
     - id: channels-control
       name: '@wsz987/dsh-channels/control'

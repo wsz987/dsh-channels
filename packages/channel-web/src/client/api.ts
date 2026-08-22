@@ -180,6 +180,31 @@ export interface PublicOwnerClaimSession {
 }
 
 // ---------------------------------------------------------------------------
+// Bundle update-check DTOs — mirror @wsz987/channel-control shapes. The host
+// performs the npm registry check; the browser only renders this sanitized,
+// secret-free projection (it never contacts npm itself).
+// ---------------------------------------------------------------------------
+
+/** Advisory upgrade hint computed by the host (prompt-only; never installs). */
+export interface BundleUpdateInfo {
+  /** Target version string, e.g. "0.6.0". */
+  version: string;
+  /** Which npm dist-tag provided the target. */
+  tag: 'latest' | 'next';
+  /** Target sits on a different major.minor line than the installed bundle. */
+  crossLine: boolean;
+  /** Upgrade commands in execution order. */
+  commands: string[];
+}
+
+/** Read-only update status served by GET /update-check. */
+export interface BundleUpdateStatus {
+  currentVersion: string;
+  update?: BundleUpdateInfo;
+  checkedAt?: number;
+}
+
+// ---------------------------------------------------------------------------
 // fetch helper
 // ---------------------------------------------------------------------------
 
@@ -224,6 +249,15 @@ async function request<T>(path: string, init?: RequestInit, base: string = BASE_
 export async function fetchChannelsV2(signal?: AbortSignal): Promise<ChannelSummary[]> {
   const body = await request<{ channels: ChannelSummary[] }>('/channels', { signal });
   return body.channels ?? [];
+}
+
+/**
+ * GET /update-check → BundleUpdateStatus. Failure-tolerant by contract: the
+ * caller treats any error as "no banner" (an unreachable check must never
+ * break the Channels panel).
+ */
+export async function fetchUpdateCheck(signal?: AbortSignal): Promise<BundleUpdateStatus> {
+  return request<BundleUpdateStatus>('/update-check', { signal });
 }
 
 /** GET /channels/:id/setup → ChannelSetupDescriptor */

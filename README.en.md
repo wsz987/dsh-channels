@@ -98,6 +98,25 @@ npx @deepseek-ai/dsh plugin --profile web update -w @wsz987/dsh-channels
 npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 ```
 
+### New-version notice (prompt-only, never auto-installs)
+
+At runtime the bundle periodically checks whether npm has a newer `@wsz987/dsh-channels` than the installed one (default: once every 24 hours; offline or failed checks are skipped silently). When a newer version is found:
+
+- The Web **Settings → Channels** page shows a banner at the top with the upgrade commands. Crossing a release line (e.g. 0.4.x → 0.5.x) shows the two-step upgrade (Harness CLI first, then re-add the bundle); within the same line it shows a single `update` command.
+- Sending `/version` in any channel conversation shows the current version and the same hint.
+
+This feature only ever prompts — it never installs or upgrades anything. The browser never contacts the npm registry (the check runs host-side; the page only reads a sanitized result). To disable it or tune the interval, override `channels-control` in your profile patch (a config patch replaces the whole plugin config — keep every field):
+
+```yaml
+- id: channels-control
+  name: '@wsz987/dsh-channels/control'
+  inject: [channels, credentials]
+  config:
+    updateCheck:
+      enabled: true       # set to false to disable the check
+      intervalHours: 24   # minimum hours between two checks
+```
+
 ## Configuration and login
 
 | Channel | Required | Login |
@@ -137,6 +156,7 @@ In any channel conversation you can send slash commands, parsed and executed by 
 | `/new` | Start a fresh session (try it if you hit a bug) |
 | `/help [command]` | List the commands active in the current session, or show one command's usage |
 | `/status` | Show the current session / agent / model status |
+| `/version` | Show the bundle version, Harness compatibility baseline and update hint |
 | `/models [provider]` | List the model providers and their models registered in Harness |
 | `/model [<provider> <model> [<reasoningEffort>]]` | Show or switch the current session's model |
 

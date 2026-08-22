@@ -28,6 +28,7 @@ import { createHelpCommand } from './help.js';
 import { createStatusCommand } from './status.js';
 import { createModelsCommand } from './models.js';
 import { createModelCommand } from './model.js';
+import { createVersionCommand } from './version.js';
 import type { ChannelModelSelectionController } from '../model-selection.js';
 
 /**
@@ -46,6 +47,22 @@ export interface ChannelModelCatalog {
   resolveCallConfig(config: LlmCallConfig, signal?: AbortSignal): Promise<LlmCallConfig>;
 }
 
+/**
+ * Sanitized bundle update status (structural mirror of channel-control's
+ * `BundleUpdateStatus`; channel-harness carries no dependency edge on the
+ * control-plane package — it probes it live via `ctx.get('channelControl')`).
+ */
+export interface ChannelVersionInfo {
+  currentVersion: string;
+  update?: {
+    version: string;
+    tag: 'latest' | 'next';
+    crossLine: boolean;
+    commands: string[];
+  };
+  checkedAt?: number;
+}
+
 /** Bridge-provided capabilities available to channel commands. */
 export interface ChannelCommandDependencies {
   /** Start a brand-new Harness session for the current conversation. */
@@ -58,6 +75,12 @@ export interface ChannelCommandDependencies {
   findCommand(agent: Agent, name: string): CommandDefinition | undefined;
   /** Harness LLM catalog seam (discovery + exact resolution), bridged lazily. */
   llm: ChannelModelCatalog;
+  /**
+   * Live bundle update-status probe for /version (bridged from the plugin ctx
+   * over `ctx.get('channelControl')`). Optional: undefined when the control
+   * plane is absent — /version then degrades to the version-only output.
+   */
+  versionInfo?(): Promise<ChannelVersionInfo | undefined>;
 }
 
 export type ChannelCommandDisposer = () => Promise<void>;
@@ -69,6 +92,7 @@ const commandFactories = [
   createStatusCommand,
   createModelsCommand,
   createModelCommand,
+  createVersionCommand,
 ];
 
 /**

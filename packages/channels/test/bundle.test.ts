@@ -90,11 +90,14 @@ const BUNDLE_CLIENT_URL = new URL('../lib/client.js', import.meta.url);
 const EXPECTED_ITEMS: PatchItem[] = [
   { id: 'channels-service', name: '@wsz987/dsh-channels/service' },
   { id: 'channels-files', name: '@wsz987/dsh-channels/files' },
-  // channel-harness injects the command-plane capabilities: the Harness
-  // `commands` registry, default model/preset composition. `apiProxy` is
-  // deliberately NOT injected: the question backend probes it via `ctx.get()`
-  // so the bundle also boots headless (plan §5 / §21 P0-3).
-  { id: 'channels-harness', name: '@wsz987/dsh-channels/harness', inject: ['channels', 'agents', 'agentDefaultModel', 'agentPresets', 'llm', 'commands'] },
+  // channel-harness injects the command-plane capabilities plus `apiProxy`:
+  // the loader-level service dependency orders this entry after the
+  // api-gateway fiber, so the question-backend probe at apply time is
+  // race-free (a missing inject lets the channel register the official
+  // UserQuestionProvider first and the gateway's registration then fails the
+  // boot with DUPLICATE_PROVIDER). Do not remove `apiProxy` without
+  // replacing this ordering guarantee.
+  { id: 'channels-harness', name: '@wsz987/dsh-channels/harness', inject: ['channels', 'agents', 'agentDefaultModel', 'agentPresets', 'llm', 'commands', 'apiProxy'] },
   // channel-control is the universal control plane: it must load before the
   // channel plugins so ctx.channelControl exists when they register definitions.
   { id: 'channels-control', name: '@wsz987/dsh-channels/control', inject: ['channels', 'credentials'] },

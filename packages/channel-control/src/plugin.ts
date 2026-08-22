@@ -16,11 +16,14 @@ import type { ChannelService } from '@wsz987/channel-core';
 import { ChannelControlService } from './service.js';
 import type { CredentialSeam } from './credentials/manager.js';
 import { ChannelStorageAccessPolicyStore } from './access/policy-store.js';
+import { Config, type Config as ChannelControlConfig } from './config.js';
 
 export const name = 'channel-control';
 export const inject: string[] = ['channels', 'credentials'];
 
-export function apply(ctx: Context): void {
+export { Config };
+
+export function apply(ctx: Context, config: ChannelControlConfig): void {
   const credentials = (ctx as Context & { credentials: CredentialSeam }).credentials;
   const channels = (ctx as Context & { channels: ChannelService }).channels;
 
@@ -37,7 +40,17 @@ export function apply(ctx: Context): void {
       accountId: string,
     ): Promise<string | undefined> =>
       service.definitions.get(channelId)?.resolveOwnerIdentity?.(accountId),
+    // Prompt-only bundle update check over the same durable channel storage.
+    updateCheck: {
+      enabled: config.updateCheck.enabled,
+      intervalHours: config.updateCheck.intervalHours,
+      storage: () => channels.resources.storage,
+    },
   });
+
+  // Fire-and-forget startup check (never blocks activation; offline-tolerant;
+  // prompt-only — it never installs anything).
+  void service.updates.trigger();
 
   // Headless auto-start: definitions registered BEFORE this plugin activates
   // are swept here; definitions registered afterwards (channel plugins

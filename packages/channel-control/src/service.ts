@@ -15,7 +15,7 @@
  * package carries no dependency on any concrete credentials implementation.
  */
 import { Service, type Context } from '@deepseek-ai/cordis';
-import type { ChannelAccessPolicy, ChannelAdapter } from '@wsz987/channel-core';
+import type { ChannelAccessPolicy, ChannelAdapter, ChannelStorage } from '@wsz987/channel-core';
 import { ChannelDefinitionRegistry } from './definitions/registry.js';
 import { CredentialManager, type CredentialSeam } from './credentials/manager.js';
 import { AuthSessionManager } from './auth/session-manager.js';
@@ -23,6 +23,7 @@ import { ControlError } from './errors.js';
 import { ChannelRuntimeManager } from './runtime/manager.js';
 import { ChannelAccessManager } from './access/manager.js';
 import { OwnerClaimSessionManager } from './access/owner-claim.js';
+import { BundleUpdateChecker, type BundleUpdateStatus } from './update-check.js';
 import {
   type ChannelAccessPolicyStore,
   MemoryAccessPolicyStore,
@@ -66,6 +67,18 @@ export interface ChannelControlServiceOptions {
    * definition's `resolveOwnerIdentity(accountId)` when present.
    */
   resolveOwnerIdentity?(channelId: string, accountId: string): Promise<string | undefined>;
+  /**
+   * Prompt-only bundle update check (npm dist-tags of @wsz987/dsh-channels).
+   * Defaults: enabled, 24h TTL, memory-only cache (the plugin wires the shared
+   * durable ChannelStorage).
+   */
+  updateCheck?: {
+    /** Installed bundle version; defaults to this package's lockstep version. */
+    currentVersion?: string;
+    enabled?: boolean;
+    intervalHours?: number;
+    storage?: () => ChannelStorage | undefined;
+  };
 }
 
 const SECRET_SUFFIXES = ['secret', 'Secret', 'token', 'Token'] as const;
@@ -82,6 +95,8 @@ export class ChannelControlService extends Service {
   readonly runtime: ChannelRuntimeManager;
   readonly access: ChannelAccessManager;
   readonly ownerClaims: OwnerClaimSessionManager;
+  /** Prompt-only bundle update check (never installs anything). */
+  readonly updates: BundleUpdateChecker;
 
   constructor(ctx: Context, options: ChannelControlServiceOptions) {
     super(ctx, 'channelControl');
@@ -108,6 +123,14 @@ export class ChannelControlService extends Service {
     this.ownerClaims = new OwnerClaimSessionManager({
       registry: this.definitions,
       store: accessStore,
+      logger: this.ctx.logger('channel-control'),
+      now: options.now,
+    });
+    this.updates = new BundleUpdateChecker({
+      currentVersion: options.updateCheck?.currentVersion,
+      enabled: options.updateCheck?.enabled ?? true,
+      intervalHours: options.updateCheck?.intervalHours ?? 24,
+      getStorage: options.updateCheck?.storage,
       logger: this.ctx.logger('channel-control'),
       now: options.now,
     });
@@ -460,6 +483,17 @@ export class ChannelControlService extends Service {
   /** Cancel an owner-claim session (plan §29). */
   cancelOwnerClaim(channelId: string, claimId: string): void {
     this.ownerClaims.cancel(channelId, claimId);
+  }
+
+  // ---- bundle update check (prompt-only) ------------------------------------
+
+  /**
+   * Sanitized read-only update status for the web control plane and the
+   * channel `/version` command. Serves the cached snapshot immediately and
+   * refreshes in the background when stale — never blocks on the registry.
+   */
+  getUpdateStatus(): Promise<BundleUpdateStatus> {
+    return this.updates.getStatus();
   }
 
 }

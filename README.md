@@ -96,6 +96,25 @@ npx @deepseek-ai/dsh plugin --profile web update -w @wsz987/dsh-channels
 npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 ```
 
+### 新版本提示（仅提示，不自动安装）
+
+运行时会定期检查 npm 上 `@wsz987/dsh-channels` 是否有比本地更新的版本（默认每 24 小时一次；离线或检查失败时静默跳过）。发现新版本时：
+
+- Web「设置 → 渠道」页面顶部会显示新版本提示条，并给出升级命令；跨版本线（如 0.4.x → 0.5.x）时提示两步升级（先升 Harness CLI，再重装 bundle），同版本线提示单条 update 命令。
+- 渠道会话内发送 `/version` 可查看当前版本与同样的升级提示。
+
+该功能只做提示，绝不会自动安装或升级。浏览器不直接访问 npm registry（检查由 host 侧完成，页面只读净化后的结果）。如需关闭或调整频率，可在 profile patch 中覆盖 `channels-control`（注意 patch 是整体替换，需保留完整字段）：
+
+```yaml
+- id: channels-control
+  name: '@wsz987/dsh-channels/control'
+  inject: [channels, credentials]
+  config:
+    updateCheck:
+      enabled: true       # 设为 false 关闭新版本检查
+      intervalHours: 24   # 两次检查的最小间隔（小时）
+```
+
 ## 配置与登录
 
 | 渠道 | 必要信息 | 登录方式 |
@@ -145,6 +164,7 @@ live gate 完成前均不视为生产验证通过。
 | `/new` | 开启全新会话（遇到 bug 可以尝试使用） |
 | `/help [command]` | 查看当前会话实际生效的命令，或单个命令的用法 |
 | `/status` | 查看当前 Session / Agent / 模型状态 |
+| `/version` | 查看当前 bundle 版本、Harness 兼容基线与新版本提示 |
 | `/models [provider]` | 查看 Harness 当前注册的模型 Provider 及其模型 |
 | `/model [<provider> <model> [<reasoningEffort>]]` | 查看或切换当前会话模型 |
 
