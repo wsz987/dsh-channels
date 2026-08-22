@@ -46,7 +46,7 @@ export function registerSendChannelMessageTool(
       text: { type: 'string', description: 'Plain text to send.' },
       attachment_id: {
         type: 'string',
-        description: 'A stored channel attachment id to send as a file part.',
+        description: 'A stored channel attachment id to send using its stored media kind.',
       },
     },
     output: {

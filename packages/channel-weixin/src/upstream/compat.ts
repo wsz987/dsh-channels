@@ -74,7 +74,7 @@ export function toDownloadResult(
 /**
  * Build the CDN media reference embedded into an iLink sendmessage item from an
  * uploaded file's returned fields. Pure shape mapping of the wire reference
- * (aes_key is base64 on the wire — a convention, not an algorithm).
+ * (Tencent 2.4.6 carries base64 of the ASCII hex key on outbound).
  */
 export function toSendMediaRef(uploaded: {
   downloadEncryptedQueryParam?: string;
@@ -86,7 +86,7 @@ export function toSendMediaRef(uploaded: {
     ref.encrypt_query_param = uploaded.downloadEncryptedQueryParam;
   }
   if (uploaded.aeskey) {
-    ref.aes_key = Buffer.from(uploaded.aeskey, 'hex').toString('base64');
+    ref.aes_key = Buffer.from(uploaded.aeskey, 'ascii').toString('base64');
   }
   if (uploaded.fullUrl) ref.full_url = uploaded.fullUrl;
   return ref;

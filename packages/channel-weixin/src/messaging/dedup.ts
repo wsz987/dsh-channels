@@ -18,6 +18,7 @@
  * on replay (no duplicate Agent trigger).
  */
 import type { ChannelStorage } from '@wsz987/channel-core';
+import { z } from 'zod';
 import type { ILinkMessage } from '../ilink/types.js';
 
 /** Optional injectable clock for window pruning. */
@@ -33,6 +34,11 @@ export interface DedupRecord {
   key: string;
   committedAt: number;
 }
+
+const dedupRecordsSchema = z.array(z.object({
+  key: z.string(),
+  committedAt: z.number().finite(),
+}));
 
 /**
  * Stable hash (FNV-1a-ish) used as the final fallback for a missing
@@ -141,11 +147,10 @@ export class PersistentDedupStore implements DedupStore {
     const raw = await this.storage.get(this.key);
     if (raw) {
       try {
-        const parsed = JSON.parse(raw) as DedupRecord[];
-        for (const rec of parsed) {
-          if (rec && typeof rec.key === 'string' && typeof rec.committedAt === 'number') {
-            map.set(rec.key, rec.committedAt);
-          }
+        const parsedJson: unknown = JSON.parse(raw);
+        const parsed = dedupRecordsSchema.safeParse(parsedJson);
+        if (parsed.success) {
+          for (const rec of parsed.data) map.set(rec.key, rec.committedAt);
         }
       } catch {
         // Corrupt dedup window -> start fresh (worst case: a replay re-emits,

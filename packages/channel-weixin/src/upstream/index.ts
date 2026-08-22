@@ -22,6 +22,7 @@ export type {
   WeixinTextParams,
   WeixinImageParams,
   WeixinFileParams,
+  WeixinVideoParams,
   WeixinSendResult,
   QrAuthState,
 } from './port.js';

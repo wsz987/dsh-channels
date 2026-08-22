@@ -1,0 +1,47 @@
+{
+  "toolCallStart": {
+    "msg": {
+      "from_user_id": "",
+      "to_user_id": "fixture-user-001",
+      "client_id": "fixture-client-id-004",
+      "message_type": 2,
+      "message_state": 2,
+      "context_token": "fixture-context-token",
+      "run_id": "fixture-run-001",
+      "item_list": [
+        {
+          "type": 11,
+          "create_time_ms": 1760000005000,
+          "is_completed": false,
+          "tool_call_start_item": {
+            "tool_name": "fixture_tool",
+            "tool_call_id": "fixture-tool-call-001"
+          }
+        }
+      ]
+    }
+  },
+  "toolCallResult": {
+    "msg": {
+      "from_user_id": "",
+      "to_user_id": "fixture-user-001",
+      "client_id": "fixture-client-id-005",
+      "message_type": 2,
+      "message_state": 2,
+      "context_token": "fixture-context-token",
+      "run_id": "fixture-run-001",
+      "item_list": [
+        {
+          "type": 12,
+          "create_time_ms": 1760000006000,
+          "is_completed": true,
+          "tool_call_result_item": {
+            "tool_name": "fixture_tool",
+            "tool_call_id": "fixture-tool-call-001",
+            "status": "completed"
+          }
+        }
+      ]
+    }
+  }
+}

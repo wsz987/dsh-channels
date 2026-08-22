@@ -1,0 +1,33 @@
+{
+  "ret": 0,
+  "msgs": [
+    {
+      "seq": 102,
+      "message_id": 900002,
+      "from_user_id": "fixture-user-001",
+      "to_user_id": "fixture-bot-001",
+      "create_time_ms": 1760000001000,
+      "message_type": 1,
+      "message_state": 2,
+      "item_list": [
+        {
+          "type": 1,
+          "msg_id": "fixture-message-item-002",
+          "ref_msg": {
+            "title": "fixture quoted summary",
+            "message_item": {
+              "type": 1,
+              "text_item": {
+                "text": "fixture quoted text"
+              }
+            }
+          },
+          "text_item": {
+            "text": "fixture reply text"
+          }
+        }
+      ]
+    }
+  ],
+  "get_updates_buf": "fixture-next-update-buffer-quoted"
+}

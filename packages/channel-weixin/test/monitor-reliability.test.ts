@@ -23,6 +23,7 @@ import {
   type DedupStore,
 } from '../src/index.js';
 import type { ILinkClient } from '../src/ilink/client.js';
+import { StaleTokenError } from '../src/ilink/errors.js';
 
 class FakeStorage implements ChannelStorage {
   private readonly map = new Map<string, string>();
@@ -157,6 +158,89 @@ describe('PersistentDedupStore (Case B: crash replay)', () => {
 });
 
 describe('WeixinMonitor reliability', () => {
+  it('hydrates and logs a secret-free media summary before emitting', async () => {
+    const storage = new FakeStorage();
+    const order: string[] = [];
+    const logs: unknown[] = [];
+    const controller = new AbortController();
+    const client = new FakeClient([{
+      msgs: [{
+        message_id: 10,
+        from_user_id: 'user_10',
+        item_list: [{
+          type: 2,
+          image_item: { media: { full_url: 'https://signed.example/private?token=secret' } },
+        }],
+      }],
+    }]);
+    const monitor = new WeixinMonitor({
+      client: client as unknown as ILinkClient,
+      cursor: new SyncCursorStore({ storage, accountId: 'main' }),
+      contextTokens: new ContextTokenStore({ storage, accountId: 'main' }),
+      ctx: {
+        emit: async () => {},
+        logger: {
+          debug() {},
+          info(_message: string, details: unknown) { order.push('log'); logs.push(details); },
+          warn() {},
+          error() {},
+        },
+        secrets: {} as SecretStore,
+        storage,
+        signal: controller.signal,
+      } as ChannelAdapterContext,
+      meta: { channel: 'weixin' as never, accountId: 'main' },
+      beforeEmit: async (event) => {
+        const image = event.message.content[0];
+        if (image?.type === 'image') image.localData = new Uint8Array([1, 2, 3]);
+      },
+      emit: async () => { order.push('emit'); controller.abort(); },
+      reconnect: { enabled: false, baseDelayMs: 0, maxDelayMs: 0 },
+      longPollTimeoutMs: 1000,
+      dedupWindowMs: 60_000,
+    });
+
+    await monitor.start();
+    await monitor.join();
+    expect(order).toEqual(['log', 'emit']);
+    expect(JSON.stringify(logs)).toContain('"localDataBytes":3');
+    expect(JSON.stringify(logs)).not.toContain('signed.example');
+    expect(JSON.stringify(logs)).not.toContain('secret');
+  });
+
+  it('stops terminally on a stale token instead of reconnecting', async () => {
+    const storage = new FakeStorage();
+    const controller = new AbortController();
+    let staleCalls = 0;
+    const states: string[] = [];
+    const client = {
+      notifyStart: async () => ({}),
+      notifyStop: async () => ({}),
+      getUpdates: async () => { throw new StaleTokenError('main'); },
+    } as unknown as ILinkClient;
+    const monitor = new WeixinMonitor({
+      client,
+      cursor: new SyncCursorStore({ storage, accountId: 'main' }),
+      contextTokens: new ContextTokenStore({ storage, accountId: 'main' }),
+      ctx: {
+        emit: async () => {}, logger: { debug() {}, info() {}, warn() {}, error() {} },
+        secrets: {} as SecretStore, storage, signal: controller.signal,
+      } as ChannelAdapterContext,
+      meta: { channel: 'weixin' as never, accountId: 'main' },
+      reconnect: { enabled: true, baseDelayMs: 0, maxDelayMs: 0 },
+      longPollTimeoutMs: 1000,
+      dedupWindowMs: 60_000,
+      onConnectionChange: (state) => states.push(state),
+      onStaleToken: () => { staleCalls += 1; },
+    });
+
+    await monitor.start();
+    await vi.waitFor(() => expect(staleCalls).toBe(1));
+    await monitor.join();
+    expect(states).not.toContain('reconnecting');
+    expect(states.at(-1)).toBe('disconnected');
+  });
+
   it('Case A: emit failure does not commit the message (replay re-emits)', async () => {
     const m1 = msg(1, 'hi');
     const emits: string[] = [];

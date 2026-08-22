@@ -1,0 +1,29 @@
+{
+  "ret": 0,
+  "msgs": [
+    {
+      "seq": 107,
+      "message_id": 900007,
+      "from_user_id": "fixture-bot-001",
+      "to_user_id": "fixture-user-001",
+      "create_time_ms": 1760000006000,
+      "message_type": 2,
+      "message_state": 2,
+      "run_id": "fixture-run-001",
+      "item_list": [
+        {
+          "type": 12,
+          "create_time_ms": 1760000006000,
+          "update_time_ms": 1760000007000,
+          "is_completed": true,
+          "tool_call_result_item": {
+            "tool_name": "fixture_tool",
+            "tool_call_id": "fixture-tool-call-001",
+            "status": "completed"
+          }
+        }
+      ]
+    }
+  ],
+  "get_updates_buf": "fixture-next-update-buffer-tool-result"
+}

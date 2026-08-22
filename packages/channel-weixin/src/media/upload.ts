@@ -20,6 +20,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import { ChannelError } from '@wsz987/channel-core';
 import { aes128Encrypt } from './encrypt.js';
 import type { ILinkGetUploadUrlResponse } from '../ilink/types.js';
+import { getUploadUrlResponseSchema, responseEnvelopeSchema } from '../ilink/schema.js';
+import { buildHeaders } from '../ilink/headers.js';
 
 export interface UploadMediaOptions {
   cdnBaseUrl: string;
@@ -96,13 +98,27 @@ export async function uploadMedia(file: Buffer, opts: UploadMediaOptions): Promi
     const url = opts.apiBaseUrl.replace(/\/$/, '') + '/ilink/bot/getuploadurl';
     const response = await globalThis.fetch(url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...buildHeaders({ token: opts.token }) },
       body: JSON.stringify(req),
     });
     if (!response.ok) throw new ChannelError('CHANNEL_ERROR', 'getuploadurl http ' + response.status);
-    return (await response.json()) as ILinkGetUploadUrlResponse;
+    return response.json();
   });
-  const uploadSlot = await getUploadUrl(request);
+  const rawUploadSlot: unknown = await getUploadUrl(request);
+  const envelope = responseEnvelopeSchema.safeParse(rawUploadSlot);
+  if (envelope.success &&
+      ((envelope.data.ret !== undefined && envelope.data.ret !== 0) ||
+       (envelope.data.errcode !== undefined && envelope.data.errcode !== 0))) {
+    const code = envelope.data.ret !== undefined && envelope.data.ret !== 0
+      ? `ret=${envelope.data.ret}`
+      : `errcode=${envelope.data.errcode}`;
+    throw new ChannelError('CHANNEL_ERROR', `uploadMedia: getuploadurl returned ${code}`);
+  }
+  const parsedUploadSlot = getUploadUrlResponseSchema.safeParse(rawUploadSlot);
+  if (!parsedUploadSlot.success) {
+    throw new ChannelError('CHANNEL_ERROR', 'uploadMedia: getuploadurl returned an invalid response shape');
+  }
+  const uploadSlot = parsedUploadSlot.data;
 
   if (!uploadSlot.upload_full_url && !uploadSlot.upload_param) {
     throw new ChannelError('CHANNEL_UNSUPPORTED', 'uploadMedia: getuploadurl returned no upload slot');

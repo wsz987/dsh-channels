@@ -34,11 +34,15 @@
     "@deepseek-ai/dsh-settings": "0.1.1-rc.2",
     "@deepseek-ai/schemastery": "^3.18.1",
     "@wsz987/channel-control": "workspace:*",
-    "@wsz987/channel-core": "workspace:*"
+    "@wsz987/channel-core": "workspace:*",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@wsz987/channel-testkit": "workspace:*",
     "rimraf": "^6.0.0"
+  },
+  "optionalDependencies": {
+    "silk-wasm": "^3.7.1"
   },
   "license": "MIT"
 }

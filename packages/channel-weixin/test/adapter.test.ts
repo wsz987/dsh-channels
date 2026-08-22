@@ -35,6 +35,8 @@ import {
   aes128Decrypt,
   aes128Encrypt,
   redactMessage,
+  ILinkError,
+  StaleTokenError,
   type HttpTransport,
 } from '../src/index.js';
 import type { WeixinConfig } from '../src/config.js';
@@ -153,6 +155,20 @@ describe('WeixinQrAuth', () => {
     return new WeixinQrAuth({ client, now: () => 1000 });
   }
 
+  it('sends at most ten normalized local tokens when creating a QR code', async () => {
+    const transport = new FakeTransport();
+    let body: unknown;
+    transport.route('/ilink/bot/get_bot_qrcode?bot_type=3', (init) => {
+      body = init?.body;
+      return { qrcode: 'qr', qrcode_img_content: 'img' };
+    });
+    const client = new ILinkClient({ baseUrl: 'https://ilink.test', transport });
+    await client.getBotQrcode({
+      localTokens: [' token-a ', 'token-a', '', ...Array.from({ length: 12 }, (_, index) => `token-${index}`)],
+    });
+    expect(body).toEqual({ local_token_list: ['token-a', ...Array.from({ length: 9 }, (_, index) => `token-${index}`)] });
+  });
+
   it('beginAuth surfaces an AuthChallenge with qrUrl', async () => {
     const transport = new FakeTransport();
     transport.route('/ilink/bot/get_bot_qrcode?bot_type=3', () => ({ qrcode: 'qr1', qrcode_img_content: 'https://weixin.qq.com/q/xx' }));
@@ -201,7 +217,7 @@ describe('WeixinQrAuth', () => {
       status: 'confirmed',
       bot_token: 'tok-secret',
       ilink_bot_id: 'bot-1',
-      baseurl: 'https://final.ilink.test',
+      baseurl: 'https://fake.ilink.test/confirmed',
       ilink_user_id: 'wx-user',
     }));
     const auth = makeAuth(transport);
@@ -210,7 +226,7 @@ describe('WeixinQrAuth', () => {
     expect(poll.state).toBe('authenticated');
     const cred = auth.confirmedCredential;
     expect(cred?.ilinkBotId).toBe('bot-1');
-    expect(cred?.baseUrl).toBe('https://final.ilink.test');
+    expect(cred?.baseUrl).toBe('https://fake.ilink.test/confirmed');
     expect(cred?.token).toBe('tok-secret');
   });
 
@@ -225,6 +241,24 @@ describe('WeixinQrAuth', () => {
     expect(client.baseUrl).toBe('https://ilink-idc.weixin.qq.com');
   });
 
+  it('rejects an untrusted QR redirect without changing the client base URL', async () => {
+    const transport = new FakeTransport();
+    transport.route('/ilink/bot/get_bot_qrcode?bot_type=3', () => ({ qrcode: 'qr1', qrcode_img_content: 'u' }));
+    transport.route('/ilink/bot/get_qrcode_status?qrcode=qr1', () => ({ status: 'scaned_but_redirect', redirect_host: 'attacker.example' }));
+    const client = new ILinkClient({ baseUrl: 'https://fake.ilink.test', transport, now: () => 1000 });
+    const auth = new WeixinQrAuth({ client, now: () => 1000 });
+    const challenge = await auth.beginAuth();
+    await expect(auth.pollAuth(challenge)).resolves.toMatchObject({ state: 'failed' });
+    expect(client.baseUrl).toBe('https://fake.ilink.test');
+  });
+
+  it('rejects non-https and credential-bearing iLink base URLs', () => {
+    expect(() => new ILinkClient({ baseUrl: 'http://ilinkai.weixin.qq.com', transport: new FakeTransport() })).toThrow(/invalid iLink base URL/);
+    const client = new ILinkClient({ baseUrl: 'https://fake.ilink.test', transport: new FakeTransport() });
+    expect(() => client.setBaseUrl('https://user:password@fake.ilink.test')).toThrow(/invalid iLink base URL/);
+    expect(() => client.setBaseUrl('https://fake.ilink.test:8443')).toThrow(/untrusted iLink base URL host/);
+  });
+
   it('need_verifycode surfaces pending; submitVerifyCode resumes', async () => {
     const transport = new FakeTransport();
     transport.route('/ilink/bot/get_bot_qrcode?bot_type=3', () => ({ qrcode: 'qr1', qrcode_img_content: 'u' }));
@@ -234,7 +268,7 @@ describe('WeixinQrAuth', () => {
     const poll = await auth.pollAuth(challenge);
     expect(poll.state).toBe('pending');
     auth.submitVerifyCode('123456');
-    transport.route('/ilink/bot/get_qrcode_status?qrcode=qr1&verify_code=123456', () => ({ status: 'confirmed', bot_token: 't', ilink_bot_id: 'b', baseurl: 'u' }));
+    transport.route('/ilink/bot/get_qrcode_status?qrcode=qr1&verify_code=123456', () => ({ status: 'confirmed', bot_token: 't', ilink_bot_id: 'b', baseurl: 'https://fake.ilink.test' }));
     const poll2 = await auth.pollAuth(challenge);
     expect(poll2.state).toBe('authenticated');
   });
@@ -242,7 +276,7 @@ describe('WeixinQrAuth', () => {
   it('binded_redirect reports authenticated alreadyBound', async () => {
     const transport = new FakeTransport();
     transport.route('/ilink/bot/get_bot_qrcode?bot_type=3', () => ({ qrcode: 'qr1', qrcode_img_content: 'u' }));
-    transport.route('/ilink/bot/get_qrcode_status?qrcode=qr1', () => ({ status: 'binded_redirect', redirect_host: 'h.example' }));
+    transport.route('/ilink/bot/get_qrcode_status?qrcode=qr1', () => ({ status: 'binded_redirect', redirect_host: 'ilink-idc.weixin.qq.com' }));
     const auth = makeAuth(transport);
     const challenge = await auth.beginAuth();
     const poll = await auth.pollAuth(challenge);
@@ -281,9 +315,29 @@ describe('AccountCredentialStore', () => {
     const secrets = new (await import('@wsz987/channel-core')).MemorySecretStore();
     const storage = new MemoryStorage();
     const store = new AccountCredentialStore({ secrets, storage, accountId: 'main', now: () => 1700000000000 });
-    await store.save({ token: 't', ilinkBotId: 'b', baseUrl: 'u' });
+    await store.save({ token: 't', ilinkBotId: 'b', baseUrl: 'https://x' });
     await storage.set('weixin:credential:main', 'not-json');
     expect(await store.load()).toBeUndefined();
+  });
+
+  it('rejects structured metadata with a non-https base URL', async () => {
+    const secrets = new (await import('@wsz987/channel-core')).MemorySecretStore();
+    const storage = new MemoryStorage();
+    await secrets.set('weixin:token:main', 't');
+    await storage.set('weixin:credential:main', JSON.stringify({
+      ilinkBotId: 'b', baseUrl: 'http://attacker.example', savedAt: new Date().toISOString(),
+    }));
+    const store = new AccountCredentialStore({ secrets, storage, accountId: 'main' });
+    expect(await store.load()).toBeUndefined();
+  });
+
+  it('validates credential metadata before writing the token', async () => {
+    const secrets = new (await import('@wsz987/channel-core')).MemorySecretStore();
+    const storage = new MemoryStorage();
+    const store = new AccountCredentialStore({ secrets, storage, accountId: 'main' });
+    await expect(store.save({ token: 't', ilinkBotId: 'b', baseUrl: 'http://attacker.example' }))
+      .rejects.toThrow(/invalid Weixin credential metadata/);
+    expect(await secrets.get('weixin:token:main')).toBeUndefined();
   });
 });
 
@@ -352,6 +406,24 @@ describe('mapper', () => {
     const noCdn = mapInbound({ message_id: 2, from_user_id: 'u', item_list: [{ type: 2, image_item: {} }] } as any, { channel: 'weixin' as never, accountId: 'main' });
     expect(noCdn.message.content[0]!.type).toBe('unsupported');
   });
+
+  it('preserves quoted text and voice transcription without inventing reply ids', () => {
+    const event = mapInbound({
+      message_id: 3,
+      from_user_id: 'u',
+      item_list: [{
+        type: 3,
+        ref_msg: { title: 'previous message', message_item: { type: 1, text_item: { text: 'quoted body' } } },
+        voice_item: { text: 'voice transcript', media: { full_url: 'https://fixture.invalid/voice' } },
+      }],
+    } as any, { channel: 'weixin' as never, accountId: 'main' });
+    expect(event.message.replyTo).toBeUndefined();
+    expect(event.message.content).toMatchObject([
+      { type: 'text', text: '[quoted: previous message | quoted body]' },
+      { type: 'text', text: 'voice transcript' },
+      { type: 'audio' },
+    ]);
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -383,6 +455,45 @@ describe('send payload', () => {
     const body = transport.lastBody('sendmessage');
     expect(body.msg.context_token).toBe('ctx-7');
     expect(body.msg.to_user_id).toBe('user_1');
+  });
+});
+
+describe('ILinkClient response trust boundary', () => {
+  it.each([
+    ['get_bot_qrcode', (client: ILinkClient) => client.getBotQrcode()],
+    ['get_qrcode_status', (client: ILinkClient) => client.getQrcodeStatus('qr')],
+    ['getupdates', (client: ILinkClient) => client.getUpdates()],
+    ['sendmessage', (client: ILinkClient) => client.sendMessage({})],
+    ['getuploadurl', (client: ILinkClient) => client.getUploadUrl({})],
+    ['getconfig', (client: ILinkClient) => client.getConfig({})],
+    ['sendtyping', (client: ILinkClient) => client.sendTyping({})],
+    ['notifystart', (client: ILinkClient) => client.notifyStart()],
+    ['notifystop', (client: ILinkClient) => client.notifyStop()],
+  ] as const)('rejects malformed %s responses', async (endpoint, invoke) => {
+    const transport = new FakeTransport();
+    transport.route(`/ilink/bot/${endpoint === 'get_qrcode_status' ? 'get_qrcode_status?qrcode=qr' : endpoint === 'notifystart' || endpoint === 'notifystop' ? `msg/${endpoint}` : endpoint === 'get_bot_qrcode' ? 'get_bot_qrcode?bot_type=3' : endpoint}`, () => 'malformed');
+    const client = new ILinkClient({ baseUrl: 'https://fake.ilink.test', transport });
+    await expect(invoke(client)).rejects.toMatchObject({ code: 'CHANNEL_ERROR' });
+  });
+
+  it.each([
+    { ret: -14 },
+    { ret: 0, errcode: -14 },
+  ])('classifies either stale-token code form as terminal auth failure: %o', async (response) => {
+    const transport = new FakeTransport();
+    transport.route('/ilink/bot/getupdates', () => response);
+    const client = new ILinkClient({ baseUrl: 'https://fake.ilink.test', transport });
+    await expect(client.getUpdates()).rejects.toBeInstanceOf(StaleTokenError);
+  });
+
+  it.each([
+    { ret: 7 },
+    { ret: 0, errcode: 7 },
+  ])('rejects any non-zero ret or errcode: %o', async (response) => {
+    const transport = new FakeTransport();
+    transport.route('/ilink/bot/getupdates', () => response);
+    const client = new ILinkClient({ baseUrl: 'https://fake.ilink.test', transport });
+    await expect(client.getUpdates()).rejects.toBeInstanceOf(ILinkError);
   });
 });
 

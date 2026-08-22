@@ -20,7 +20,7 @@ import { HarnessError } from '@deepseek-ai/dsh-llm';
 export interface ChannelOutboundRequest {
   /** Plain text payload. */
   text?: string;
-  /** Private-store attachment id whose bytes are sent as a file part. */
+  /** Private-store attachment id whose bytes are sent using its stored media kind. */
   attachmentId?: string;
 }
 

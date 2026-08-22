@@ -2,7 +2,7 @@
  * Outbound attachment resolution (plan §63 / §64).
  *
  * `resolveAttachment` turns a private-store `attachment_id` into bounded raw
- * bytes for an outbound file part, enforcing the Session ACL (the asset's
+ * bytes for an outbound media part, enforcing the Session ACL (the asset's
  * `sessionId` must equal the sender's session). The outbound path is
  * by-private-store-id ONLY: there is NO model-visible `file_path` anywhere in
  * this milestone (plan §64), so the resolver never touches a filesystem path —
@@ -11,16 +11,12 @@
 import type { ChannelInboundAssetStore } from './attachments/store.js';
 import { AssetStoreError } from './attachments/store.js';
 import { DEFAULT_ATTACHMENT_POLICY, rawReadLimit, type AttachmentPolicy } from './attachments/policy.js';
-import { OutboxError } from '@wsz987/channel-harness';
+import { OutboxError, type ResolvedChannelAttachment } from '@wsz987/channel-harness';
 
 /** Byte cap applied when the caller supplies no explicit policy. */
 const DEFAULT_BOUND: AttachmentPolicy = DEFAULT_ATTACHMENT_POLICY;
 
-export interface ResolvedOutboundAttachment {
-  data: Uint8Array;
-  name: string;
-  mimeType: string | undefined;
-}
+export type ResolvedOutboundAttachment = ResolvedChannelAttachment;
 
 /**
  * Resolve a private-store attachment id to bounded bytes for an outbound send
@@ -59,5 +55,10 @@ export async function resolveAttachment(
     }
     throw error;
   }
-  return { data, name: asset.name, mimeType: asset.mimeType };
+  return {
+    kind: asset.kind,
+    data,
+    name: asset.name,
+    ...(asset.mimeType ? { mimeType: asset.mimeType } : {}),
+  };
 }

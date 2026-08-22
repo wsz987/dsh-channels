@@ -56,7 +56,18 @@ function makeAdapter(opts: { proactiveText?: boolean; proactiveMedia?: boolean }
   const sent: OutboundMessage[] = [];
   const adapter = {
     id: 'qq',
-    capabilities: { image: false, file: false },
+    capabilities: {
+      text: true,
+      image: true,
+      file: true,
+      audio: true,
+      video: true,
+      markdown: false,
+      cards: false,
+      reactions: false,
+      threads: false,
+      streaming: 'buffered',
+    },
     outboxCapabilities: {
       proactiveText: opts.proactiveText ?? true,
       proactiveMedia: opts.proactiveMedia ?? true,
@@ -210,6 +221,45 @@ describe('send_channel_message execution (plan §95)', () => {
         const file = sent[0].parts![0] as FilePart;
         expect(file.type).toBe('file');
         expect(Array.from(file.localData!)).toEqual(Array.from(bytes));
+      } finally {
+        await rm(d, { recursive: true, force: true });
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('text + attachment keeps text and preserves the stored media kind', async () => {
+    const dir = await tempRoot();
+    try {
+      const assets = new FileChannelInboundAssetStore({ root: join(dir, 'assets') });
+      const bytes = new Uint8Array([1, 2, 3, 4]);
+      await assets.put({
+        attachmentId: 'video-own',
+        sessionId: 'S',
+        channelId: 'qq',
+        accountId: 'main',
+        conversationId: 'c',
+        messageId: 'm',
+        kind: 'video',
+        name: 'clip.mp4',
+        mimeType: 'video/mp4',
+        data: bytes,
+      });
+      const { adapter, sent } = makeAdapter();
+      const { service, dir: d } = await makeService(adapter, assets);
+      try {
+        const def: any = registerSendChannelMessageTool({ outbox: service });
+        await def.execute({ text: '附言', attachment_id: 'video-own' }, execFor('S'));
+
+        expect(sent).toHaveLength(1);
+        expect(sent[0].text).toBe('附言');
+        expect(sent[0].parts).toHaveLength(1);
+        expect(sent[0].parts![0]).toMatchObject({
+          type: 'video',
+          name: 'clip.mp4',
+          localData: bytes,
+        });
       } finally {
         await rm(d, { recursive: true, force: true });
       }

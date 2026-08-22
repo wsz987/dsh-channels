@@ -20,7 +20,10 @@ export interface ChannelFileDescriptor {
   readable: boolean;
 }
 
+export type ResolvedChannelAttachmentKind = 'image' | 'file' | 'audio' | 'video';
+
 export interface ResolvedChannelAttachment {
+  kind: ResolvedChannelAttachmentKind;
   data: Uint8Array;
   name: string;
   mimeType?: string;

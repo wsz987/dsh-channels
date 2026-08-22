@@ -17,7 +17,14 @@
  * Send errors are NEVER swallowed: they propagate to the tool caller after a
  * diagnostic log.
  */
-import type { ChannelAdapter, ChannelLogger, ChannelTarget, OutboundMessage, SendResult } from '@wsz987/channel-core';
+import type {
+  ChannelAdapter,
+  ChannelLogger,
+  ChannelTarget,
+  MessagePart,
+  OutboundMessage,
+  SendResult,
+} from '@wsz987/channel-core';
 import type { SessionBindingStore } from '../binding-store.js';
 import type { ResolvedChannelAttachment } from '../file-provider.js';
 import type { ChannelOutboundRequest } from './types.js';
@@ -121,14 +128,15 @@ export class ChannelOutboxService {
         );
       }
       const asset = await this.attachmentResolver(request.attachmentId!, sessionId);
-      message.parts = [
-        {
-          type: 'file',
-          localData: asset.data,
-          name: asset.name,
-          ...(asset.mimeType ? { mimeType: asset.mimeType } : {}),
-        },
-      ];
+      if (!adapter.capabilities[asset.kind]) {
+        throw new OutboxError(
+          'OUTBOX_CAPABILITY_UNAVAILABLE',
+          "channel '" + binding.channelId + "' cannot send " + asset.kind
+            + ' attachments (' + asset.kind + '=false)',
+          { sessionId },
+        );
+      }
+      message.parts = [resolvedAttachmentPart(asset)];
     }
 
     this.logger.info(
@@ -141,4 +149,15 @@ export class ChannelOutboxService {
     );
     return result;
   }
+}
+
+type BinaryMessagePart = Extract<MessagePart, { type: 'image' | 'file' | 'audio' | 'video' }>;
+
+function resolvedAttachmentPart(asset: ResolvedChannelAttachment): BinaryMessagePart {
+  return {
+    type: asset.kind,
+    localData: asset.data,
+    name: asset.name,
+    ...(asset.mimeType ? { mimeType: asset.mimeType } : {}),
+  };
 }

@@ -39,11 +39,11 @@ export const MESSAGE_ITEM_TYPE_VOICE = 3;
 export const MESSAGE_ITEM_TYPE_FILE = 4;
 export const MESSAGE_ITEM_TYPE_VIDEO = 5;
 
-/** CDN media reference; `aes_key` is base64-encoded bytes in JSON. */
+/** CDN media reference; Tencent outbound uses base64 of the ASCII hex AES key. */
 export interface ILinkCDNMedia {
   /** Encrypted download query parameter for the CDN URL. */
   encrypt_query_param?: string;
-  /** AES key (base64). */
+  /** Base64 key payload (32-char ASCII hex for Tencent 2.4.6 outbound). */
   aes_key?: string;
   /** 0 = only file id encrypted, 1 = thumbnail/mid image info packaged. */
   encrypt_type?: number;
@@ -101,6 +101,9 @@ export interface ILinkRefMessage {
 /** One item inside `item_list`. */
 export interface ILinkMessageItem {
   type?: number;
+  create_time_ms?: number;
+  update_time_ms?: number;
+  is_completed?: boolean;
   msg_id?: string;
   ref_msg?: ILinkRefMessage;
   text_item?: ILinkTextItem;
@@ -108,6 +111,8 @@ export interface ILinkMessageItem {
   voice_item?: ILinkVoiceItem;
   file_item?: ILinkFileItem;
   video_item?: ILinkVideoItem;
+  tool_call_start_item?: { tool_name?: string; tool_call_id?: string };
+  tool_call_result_item?: { tool_name?: string; tool_call_id?: string; status?: string };
 }
 
 /** Unified inbound message delivered by `getUpdates`. */

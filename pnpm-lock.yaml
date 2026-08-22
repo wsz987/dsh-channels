@@ -327,7 +327,7 @@ importers:
         version: 3.18.1
       '@tencent-connect/qqbot-nodejs':
         specifier: 1.0.4
-        version: 1.0.4
+        version: 1.0.4(silk-wasm@3.7.1)
       '@wsz987/channel-control':
         specifier: workspace:*
         version: link:../channel-control
@@ -492,6 +492,13 @@ importers:
       '@wsz987/channel-core':
         specifier: workspace:*
         version: link:../channel-core
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    optionalDependencies:
+      silk-wasm:
+        specifier: ^3.7.1
+        version: 3.7.1
     devDependencies:
       '@wsz987/channel-testkit':
         specifier: workspace:*
@@ -2586,6 +2593,10 @@ packages:
     resolution: {integrity: sha512-bzyZ1e88w9O1iNJbKnOlvYTrWPDl46O1bG0D3XInv+9tkPrxrN8jUUTiFlDkkmKWgn1M6CfIA13SuGqOa9Korw==}
     engines: {node: '>=14'}
 
+  silk-wasm@3.7.1:
+    resolution: {integrity: sha512-mXPwLRtZxrYV3TZx41jMAeKc80wvmyrcXIcs8HctFxK15Ahz2OJQENYhNgEPeCEOdI6Mbx1NxQsqxzwc3DKerw==}
+    engines: {node: '>=16.11.0'}
+
   slash@3.0.0:
     resolution: {integrity: sha512-g9Q1haeby36OSStwb4ntCGGGaKsaVSjQ68fBxoQcutl5fS1vuY18H3wSt3jFyFtrkx+Kz0V1G85A4MyAdDMi2Q==}
     engines: {node: '>=8'}
@@ -3891,9 +3902,11 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
-  '@tencent-connect/qqbot-nodejs@1.0.4':
+  '@tencent-connect/qqbot-nodejs@1.0.4(silk-wasm@3.7.1)':
     dependencies:
       ws: 8.21.3
+    optionalDependencies:
+      silk-wasm: 3.7.1
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -5137,6 +5150,9 @@ snapshots:
   siginfo@2.0.0: {}
 
   signal-exit@4.1.0: {}
+
+  silk-wasm@3.7.1:
+    optional: true
 
   slash@3.0.0: {}
 

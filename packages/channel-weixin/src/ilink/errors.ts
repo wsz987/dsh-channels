@@ -15,7 +15,7 @@
 import { ChannelError, ChannelSendError } from '@wsz987/channel-core';
 import { STALE_TOKEN_ERRCODE } from './constants.js';
 
-/** iLink protocol-level error (server returned `ret !== 0`). */
+/** iLink protocol-level error (server returned non-zero `ret` or `errcode`). */
 export class ILinkError extends ChannelError {
   /** Upstream ret code (`0` = success). */
   readonly ret: number;
@@ -37,7 +37,7 @@ export class ILinkError extends ChannelError {
   }
 }
 
-/** The bot token is stale / expired (server `errcode === -14`). */
+/** The bot token is stale / expired (server `ret === -14` or `errcode === -14`). */
 export class StaleTokenError extends ChannelError {
   readonly accountId: string;
 
@@ -107,11 +107,13 @@ export function normalizeILinkError(
   if (error instanceof ILinkError || error instanceof StaleTokenError) return error;
 
   const { operation, accountId, ret, errcode, errmsg } = context;
-  if (ret !== undefined && ret !== 0) {
-    if (errcode === STALE_TOKEN_ERRCODE) {
-      return new StaleTokenError(accountId, { cause: error });
-    }
-    return new ILinkError(ret, redactMessage(errmsg) || `weixin ${operation} returned ret=${ret}`, { errcode });
+  if (ret === STALE_TOKEN_ERRCODE || errcode === STALE_TOKEN_ERRCODE) {
+    return new StaleTokenError(accountId, { cause: error });
+  }
+  if ((ret !== undefined && ret !== 0) || (errcode !== undefined && errcode !== 0)) {
+    const code = ret !== undefined && ret !== 0 ? ret : errcode!;
+    const detail = ret !== undefined && ret !== 0 ? `ret=${ret}` : `errcode=${errcode}`;
+    return new ILinkError(code, redactMessage(errmsg) || `weixin ${operation} returned ${detail}`, { errcode });
   }
 
   if (isAbortError(error)) return new ILinkAbortError(operation, { cause: error });

@@ -1,0 +1,10 @@
+{
+  "ret": 0,
+  "msgs": [{
+    "message_id": 900001,
+    "from_user_id": "fixture-user-001",
+    "create_time_ms": 1760000000000,
+    "item_list": [{ "type": 1, "text_item": { "text": "fixture text" } }]
+  }],
+  "get_updates_buf": "fixture-next-update-buffer-text"
+}

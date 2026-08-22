@@ -35,6 +35,8 @@ import { ContextTokenStore } from '../storage/context-token.js';
 import { WeixinMonitor } from '../messaging/monitor.js';
 import { OutboundSender } from '../messaging/send.js';
 import { TypingController } from '../messaging/typing.js';
+import { WeixinConfigManager } from './config-manager.js';
+import { transcodeSilkVoice } from '../media/silk-transcode.js';
 import type {
   WeixinUpstream,
   WeixinUpstreamHostEnv,
@@ -46,10 +48,10 @@ import type {
   WeixinTextParams,
   WeixinImageParams,
   WeixinFileParams,
+  WeixinVideoParams,
   WeixinSendResult,
   WeixinSendTarget,
 } from './port.js';
-import { UpstreamCapabilityError } from './port.js';
 import { aes128Decrypt } from '../media/decrypt.js';
 import type { ILinkCDNMedia, ILinkMessageItem } from '../ilink/types.js';
 
@@ -97,7 +99,7 @@ export class TencentWeixinUpstream implements WeixinUpstream {
   private sender?: OutboundSender;
   private monitor?: WeixinMonitor;
   private typing?: TypingController;
-  private readonly typingTickets = new Map<string, string>();
+  private configManager?: WeixinConfigManager;
   private typingPeer?: string;
   private connected: WeixinConnectionState = 'not-started';
   /** Whether a credential is loaded/persisted (the adapter's "authenticated"). */
@@ -149,6 +151,11 @@ export class TencentWeixinUpstream implements WeixinUpstream {
       cdnBaseUrl: this.client.cdnUrl,
       apiBaseUrl: this.client.baseUrl,
     });
+    this.configManager = new WeixinConfigManager({
+      fetchConfig: (peer) => this.client!.getConfig({ ilink_user_id: peer }),
+      now: this.now,
+      rand: this.rand,
+    });
     this.typing = new TypingController({
       client: this.client,
       enabled: true,
@@ -174,13 +181,19 @@ export class TencentWeixinUpstream implements WeixinUpstream {
     client.setToken(credential.token);
     if (credential.baseUrl) client.setBaseUrl(credential.baseUrl);
     this.authenticated = true;
+    this.configManager?.clear();
     return true;
   }
 
   // ── QR auth (WeixinQrAuth — DSH glue over the iLink client) ──
   async beginQrAuth(): Promise<WeixinQrTicket> {
     this.ensureSession();
-    if (!this.qrAuth) this.qrAuth = new WeixinQrAuth({ client: this.client!, now: this.now });
+    const storedCredential = await this.credentialStore?.load();
+    this.qrAuth = new WeixinQrAuth({
+      client: this.client!,
+      localTokens: storedCredential?.token ? [storedCredential.token] : [],
+      now: this.now,
+    });
     const challenge = await this.qrAuth.beginAuth();
     this.activeQrId = challenge.id;
     this.activeQrExpiresAt = challenge.expiresAt;
@@ -208,6 +221,18 @@ export class TencentWeixinUpstream implements WeixinUpstream {
           userId: cred.userId,
           baseUrl: cred.baseUrl,
         });
+      } else {
+        // `binded_redirect` confirms a locally-held token is still associated
+        // with this bot. Reapply it because a prior stale-token transition
+        // intentionally cleared the in-memory client token.
+        const stored = await this.credentialStore?.load();
+        if (stored) {
+          this.client?.setToken(stored.token);
+          this.client?.setBaseUrl(stored.baseUrl);
+          this.authenticated = true;
+          this.configManager?.clear();
+          if (!this.monitor) await this.startMonitor();
+        }
       }
       return { state: 'authenticated', detail: result.detail, credential: cred ?? undefined };
     }
@@ -239,12 +264,26 @@ export class TencentWeixinUpstream implements WeixinUpstream {
         this.connected = st;
         this.env?.onConnectionChange?.(st);
       },
-      emit: async (event) => {
+      onStaleToken: async () => {
+        this.authenticated = false;
+        this.connected = 'disconnected';
+        this.monitor = undefined;
+        this.client?.setToken(undefined);
+        this.configManager?.clear();
+        await ctx.emit({
+          type: 'auth.changed',
+          channel: 'weixin' as never,
+          accountId: this.config.accountId as never,
+          state: 'expired',
+          detail: 'weixin token expired; scan QR to authenticate again',
+        });
+      },
+      beforeEmit: async (event) => {
         // Download + decrypt inbound media before dispatch so image and file
         // parts can enter the common Harness attachment pipeline.
         await this.enrichInboundMedia(event);
-        await ctx.emit(event);
       },
+      emit: (event) => ctx.emit(event),
     });
     this.monitor = monitor;
     this.connected = 'connected';
@@ -282,9 +321,17 @@ export class TencentWeixinUpstream implements WeixinUpstream {
   }
 
   async sendFile(params: WeixinFileParams): Promise<WeixinSendResult> {
-    // No official file-outbound capability yet (WX5.4). Surface a typed
-    // capability error rather than fake it (plan §15 "do not fake support").
-    throw new UpstreamCapabilityError('sendFile', 'weixin outbound file send is not yet supported by the upstream');
+    this.requireReady();
+    return this.sender!.send(this.targetOf(params), {
+      parts: [{ type: 'file', localData: params.data, name: params.fileName, mimeType: params.mimeType }],
+    });
+  }
+
+  async sendVideo(params: WeixinVideoParams): Promise<WeixinSendResult> {
+    this.requireReady();
+    return this.sender!.send(this.targetOf(params), {
+      parts: [{ type: 'video', localData: params.data, mimeType: params.mimeType }],
+    });
   }
 
   // ── Media download ──
@@ -296,6 +343,20 @@ export class TencentWeixinUpstream implements WeixinUpstream {
   async downloadFile(ref: WeixinMediaRef): Promise<WeixinDownloadResult> {
     const data = await this.downloadAndDecrypt(ref);
     return { data, mimeType: ref.mimeType };
+  }
+
+  async downloadAudio(
+    ref: WeixinMediaRef,
+    options: { encodeType?: number; sampleRate?: number } = {},
+  ): Promise<WeixinDownloadResult> {
+    const data = Buffer.from(await this.downloadAndDecrypt(ref));
+    const decoded = await transcodeSilkVoice(data, options);
+    return { data: new Uint8Array(decoded.data), mimeType: decoded.mimeType };
+  }
+
+  async downloadVideo(ref: WeixinMediaRef): Promise<WeixinDownloadResult> {
+    const data = await this.downloadAndDecrypt(ref);
+    return { data, mimeType: ref.mimeType ?? 'video/mp4' };
   }
 
   // ── Typing (operational, not part of the minimal port) ──
@@ -325,7 +386,7 @@ export class TencentWeixinUpstream implements WeixinUpstream {
       return { authenticated: false, connection: 'not-started' };
     }
     const credential = await this.credentialStore.load().catch(() => undefined);
-    return { authenticated: Boolean(credential?.token), connection: this.connected };
+    return { authenticated: Boolean(credential?.token) && this.authenticated, connection: this.connected };
   }
 
   /** Introspection for tests: the underlying client. */
@@ -343,6 +404,7 @@ export class TencentWeixinUpstream implements WeixinUpstream {
   private requireReady(): void {
     this.ensureSession();
     if (!this.sender) throw new ChannelError('CHANNEL_NOT_STARTED', 'weixin upstream is not initialised');
+    if (!this.authenticated) throw new ChannelError('CHANNEL_AUTH_FAILED', 'weixin is not authenticated; scan QR to continue');
   }
 
   private targetOf(params: WeixinSendTarget): ChannelTarget {
@@ -366,6 +428,7 @@ export class TencentWeixinUpstream implements WeixinUpstream {
     this.client.setToken(cred.token);
     this.client.setBaseUrl(cred.baseUrl || this.client.baseUrl);
     this.authenticated = true;
+    this.configManager?.clear();
     if (!this.sender && this.contextTokens && this.client) {
       this.sender = new OutboundSender({ client: this.client, contextTokens: this.contextTokens });
     }
@@ -376,11 +439,7 @@ export class TencentWeixinUpstream implements WeixinUpstream {
     }
   }
 
-  /**
-   * Hydrate inbound image/file parts with plaintext bytes (WX5.1). Images keep
-   * the existing saveImage path; files gain `localData` for the generic asset
-   * store and read_channel_attachment tool.
-   */
+  /** Hydrate inbound media before the event reaches the attachment pipeline. */
   private async enrichInboundMedia(event: { message: { content: MessagePart[] }; raw?: unknown }): Promise<void> {
     if (!this.client) return;
     const raw = event.raw as { item_list?: ILinkMessageItem[] } | undefined;
@@ -388,13 +447,20 @@ export class TencentWeixinUpstream implements WeixinUpstream {
     const parts = event.message.content;
     const cdnBaseUrl = this.client.cdnUrl;
 
-    for (let i = 0; i < parts.length; i++) {
-      const part = parts[i] as (MessagePart & { localData?: Uint8Array }) | undefined;
-      if (!part || (part.type !== 'image' && part.type !== 'file')) continue;
-      const item = items[i];
+    const consumedItems = new Set<number>();
+    for (const part of parts) {
+      if (part.type !== 'image' && part.type !== 'file' && part.type !== 'audio' && part.type !== 'video') continue;
+      const itemIndex = items.findIndex((candidate, index) =>
+        !consumedItems.has(index) && itemMatchesPart(candidate, part.type),
+      );
+      if (itemIndex < 0) continue;
+      consumedItems.add(itemIndex);
+      const item = items[itemIndex];
       const img = item?.image_item;
       const file = item?.file_item;
-      const media = (img?.media ?? file?.media) as ILinkCDNMedia | undefined;
+      const voice = item?.voice_item;
+      const video = item?.video_item;
+      const media = (img?.media ?? file?.media ?? voice?.media ?? video?.media) as ILinkCDNMedia | undefined;
       if (!media) continue;
       try {
         const ref: WeixinMediaRef = {
@@ -403,13 +469,25 @@ export class TencentWeixinUpstream implements WeixinUpstream {
           encryptQueryParam: media.encrypt_query_param,
           aesKeyHex: img?.aeskey,
           aesKeyBase64: media.aes_key,
-          mimeType: part.mimeType ?? (part.type === 'file' ? mimeHintFromFilename(file?.file_name) : 'image/jpeg'),
+          mimeType: part.mimeType ?? (
+            part.type === 'file'
+              ? mimeHintFromFilename(file?.file_name)
+              : part.type === 'video'
+                ? 'video/mp4'
+                : part.type === 'image'
+                  ? 'image/jpeg'
+                  : undefined
+          ),
         };
         const downloaded = part.type === 'image'
           ? await this.downloadImage(ref)
-          : await this.downloadFile(ref);
+          : part.type === 'file'
+            ? await this.downloadFile(ref)
+            : part.type === 'audio'
+              ? await this.downloadAudio(ref, { encodeType: voice?.encode_type, sampleRate: voice?.sample_rate })
+              : await this.downloadVideo(ref);
         part.localData = downloaded.data;
-        part.mimeType = downloaded.mimeType ?? part.mimeType ?? (part.type === 'image' ? 'image/jpeg' : undefined);
+        part.mimeType = downloaded.mimeType ?? part.mimeType;
         if (part.type === 'file') part.size = downloaded.data.byteLength;
       } catch (error) {
         // Keep delivery alive, but expose the reason. In practice this catches
@@ -471,20 +549,15 @@ export class TencentWeixinUpstream implements WeixinUpstream {
   }
 
   private async resolveTypingTicket(peer?: string): Promise<string | undefined> {
-    if (!peer || !this.client) return undefined;
-    const cached = this.typingTickets.get(peer);
-    if (cached) return cached;
-    try {
-      const config = await this.client.getConfig({ ilink_user_id: peer });
-      if (config.typing_ticket) {
-        this.typingTickets.set(peer, config.typing_ticket);
-        return config.typing_ticket;
-      }
-    } catch {
-      // best effort — no ticket means the indicator silently no-ops upstream.
-    }
-    return undefined;
+    return this.configManager?.resolveTypingTicket(peer);
   }
+}
+
+function itemMatchesPart(item: ILinkMessageItem | undefined, type: MessagePart['type']): boolean {
+  return (type === 'image' && item?.type === 2)
+    || (type === 'audio' && item?.type === 3)
+    || (type === 'file' && item?.type === 4)
+    || (type === 'video' && item?.type === 5);
 }
 
 /** Cheap JPEG/PNG/WebP/GIF sniff for the default mime when none is supplied. */

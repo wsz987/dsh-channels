@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "package": "@tencent-weixin/openclaw-weixin",
+  "version": "2.4.6",
+  "commit": "cef0bfc390393f716903e16d50408118047f87e0",
+  "repository": "Tencent/openclaw-weixin",
+  "sourcePaths": [
+    "src/api/types.ts",
+    "src/cdn/upload.ts",
+    "src/messaging/send.ts",
+    "src/messaging/reply-progress-sender.ts"
+  ],
+  "sanitization": {
+    "containsLiveTraffic": false,
+    "containsCredentials": false,
+    "containsSignedUrls": false,
+    "identifierConvention": "fixture-*"
+  },
+  "verification": {
+    "outboundImageAesKeyEncoding": "ascii-hex-base64; source-confirmed against Tencent 2.4.6",
+    "manifestPin": "not verified by these offline fixtures"
+  }
+}

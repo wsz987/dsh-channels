@@ -1,11 +1,8 @@
 # Upstream Contract Fixtures — weixin @ 2.4.6
 
-Directory placeholder for Milestone M0 (Upstream Boundary Lock).
-
-This directory is a **skeleton** established by M0. Actual payload fixtures do
-NOT exist here yet — they are produced by later milestone work (per-channel
-upstream consolidation + contract capture). The structure below documents WHAT
-will live here.
+Sanitized protocol fixtures captured from the published Tencent source contract
+for M0 (Upstream Boundary Lock). They record wire shapes, not live traffic, and
+must remain usable without Tencent credentials or network access.
 
 ## What will live here
 
@@ -13,12 +10,6 @@ will live here.
   upstream for this channel/version (message envelopes, stream frames, login /
   monitor events). These are the platform-behavior oracle inputs the adapter
   must map.
-- `media/` or `normalized-media-metadata/` — normalized media metadata derived
-  from official upstream media references (download URL / encryption params /
-  upload slot shape) — NOT the algorithm, only the data shape.
-- `target-mapping/` — real target/conversation/sender id shapes produced by the
-  upstream (conversation_id, open_id, session ids, etc.) and their mapping into
-  the Channel Contract `ChannelTarget`.
 - `platform-errors/` — representative upstream error payloads (ret/errcode,
   error codes, stream ack cases) the adapter must recognize.
 - `upload-send-expected-shape/` — expected outbound payload shapes (upload
@@ -37,10 +28,14 @@ so tests can run offline without any live credential.
 
 ## How these fixtures are used
 
-They feed the channel offline contract suites (`pnpm test` /
-`pnpm check:fixtures`) as the compatibility oracle — the shape DSH adapter
-mapping is tested against — and later the `contractFixtures` entries in
-`packages/channel-compat/src/upstream-manifest.ts`.
+The package-local `upstream-fixtures.test.ts` validates this tree as an offline
+compatibility oracle. It intentionally does not use the legacy
+`fixtures/<channel>/*.json` format: these are raw iLink protocol payloads,
+whereas legacy fixtures are mapped Channel Contract events.
+
+The outbound `aes_key` fixtures use Tencent 2.4.6's source-confirmed encoding:
+base64 of the 32-character ASCII hex key. Live delivery remains a separate
+release gate and is not implied by these offline fixtures.
 
 
 Pinned upstream: `@tencent-weixin/openclaw-weixin@2.4.6` (repo `Tencent/openclaw-weixin`).

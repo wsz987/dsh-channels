@@ -1,0 +1,30 @@
+{
+  "ret": 0,
+  "msgs": [
+    {
+      "seq": 104,
+      "message_id": 900004,
+      "from_user_id": "fixture-user-001",
+      "to_user_id": "fixture-bot-001",
+      "create_time_ms": 1760000003000,
+      "message_type": 1,
+      "message_state": 2,
+      "item_list": [
+        {
+          "type": 4,
+          "msg_id": "fixture-message-item-004",
+          "file_item": {
+            "media": {
+              "encrypt_query_param": "fixture-encrypted-file-reference",
+              "aes_key": "MDAxMTIyMzM0NDU1NjY3Nzg4OTlhYWJiY2NkZGVlZmY="
+            },
+            "file_name": "fixture-report.pdf",
+            "md5": "0123456789abcdef0123456789abcdef",
+            "len": "8192"
+          }
+        }
+      ]
+    }
+  ],
+  "get_updates_buf": "fixture-next-update-buffer-file"
+}

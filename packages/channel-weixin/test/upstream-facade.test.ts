@@ -89,7 +89,8 @@ class FakeWeixinUpstream {
     this.sendImageCalls.push({ to: p.to, data: p.data, mimeType: p.mimeType, runId: p.runId });
     return { delivered: true, messageId: 'img' };
   }
-  async sendFile(): Promise<WeixinSendResult> { this.calls.push('sendFile'); return { delivered: true }; }
+  async sendFile(): Promise<WeixinSendResult> { this.calls.push('sendFile'); return { delivered: true, messageId: 'file' }; }
+  async sendVideo(): Promise<WeixinSendResult> { this.calls.push('sendVideo'); return { delivered: true, messageId: 'video' }; }
 
   async downloadImage(ref: WeixinMediaRef): Promise<WeixinDownloadResult> {
     this.calls.push('downloadImage');
@@ -97,6 +98,14 @@ class FakeWeixinUpstream {
   }
   async downloadFile(ref: WeixinMediaRef): Promise<WeixinDownloadResult> {
     this.calls.push('downloadFile');
+    return { data: new Uint8Array([1, 2, 3, 4]), mimeType: ref.mimeType };
+  }
+  async downloadAudio(ref: WeixinMediaRef): Promise<WeixinDownloadResult> {
+    this.calls.push('downloadAudio');
+    return { data: new Uint8Array([1, 2, 3, 4]), mimeType: ref.mimeType };
+  }
+  async downloadVideo(ref: WeixinMediaRef): Promise<WeixinDownloadResult> {
+    this.calls.push('downloadVideo');
     return { data: new Uint8Array([1, 2, 3, 4]), mimeType: ref.mimeType };
   }
 
@@ -136,6 +145,45 @@ describe('FakeWeixinUpstream driving the adapter (plan §96)', () => {
     // localData flows through unchanged (same ArrayBuffer reference).
     expect(fake.sendImageCalls[0]!.data).toBe(bytes);
     expect(fake.sendImageCalls[0]!.mimeType).toBe('image/png');
+    await ctx.dispose();
+    await a.stop();
+  });
+
+  it('adapter sends caption text before media as separate upstream requests', async () => {
+    const ctx = createTestContext(new ChannelService(new Context()));
+    fake.credentialLoaded = true;
+    const a = adapter();
+    await a.start(ctx);
+
+    await a.send(target('user_1'), {
+      text: 'caption',
+      parts: [{ type: 'image', localData: new Uint8Array([1, 2, 3]), mimeType: 'image/png' }],
+    } as any);
+
+    expect(fake.calls.filter((call) => call === 'sendText' || call === 'sendImage')).toEqual(['sendText', 'sendImage']);
+    expect(fake.sendTextCalls[0]?.text).toBe('caption');
+    await ctx.dispose();
+    await a.stop();
+  });
+
+  it('adapter sends every media part in source order and returns the last message id', async () => {
+    const ctx = createTestContext(new ChannelService(new Context()));
+    fake.credentialLoaded = true;
+    const a = adapter();
+    await a.start(ctx);
+
+    const result = await a.send(target('user_1'), {
+      text: 'caption',
+      parts: [
+        { type: 'file', localData: new Uint8Array([1]), name: 'one.txt' },
+        { type: 'image', localData: new Uint8Array([2]), mimeType: 'image/png' },
+        { type: 'video', localData: new Uint8Array([3]), mimeType: 'video/mp4' },
+      ],
+    });
+
+    expect(fake.calls.filter((call) => ['sendText', 'sendFile', 'sendImage', 'sendVideo'].includes(call)))
+      .toEqual(['sendText', 'sendFile', 'sendImage', 'sendVideo']);
+    expect(result).toMatchObject({ delivered: true, messageId: 'video' });
     await ctx.dispose();
     await a.stop();
   });
@@ -366,6 +414,53 @@ describe('real adapter image ingress → localData unchanged (plan §78)', () =>
     expect(filePart).toMatchObject({ name: 'report.pdf', mimeType: 'application/pdf', size: plaintext.byteLength });
     expect(Buffer.from(filePart.localData as Uint8Array)).toEqual(plaintext);
 
+    await ctx.dispose();
+    await a.stop();
+  });
+
+  it('hydrates inbound SILK voice and video without shifting media after transcription text', async () => {
+    const voicePlain = Buffer.from('fixture silk bytes');
+    const videoPlain = Buffer.from('fixture mp4 bytes');
+    const encrypted = [aes128Encrypt(voicePlain, KEY_BUF), aes128Encrypt(videoPlain, KEY_BUF)];
+    let fetchIndex = 0;
+    (globalThis as any).fetch = async () =>
+      new Response(new Uint8Array(encrypted[fetchIndex++]!), { status: 200 }) as unknown as Response;
+
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    await seedCredential(ctx);
+    let calls = 0;
+    transport.route('/ilink/bot/msg/notifystart', () => ({ ret: 0 }));
+    transport.route('/ilink/bot/msg/notifystop', () => ({ ret: 0 }));
+    transport.route('/ilink/bot/getupdates', () => {
+      calls += 1;
+      if (calls > 1) return new Promise(() => {});
+      return {
+        ret: 0,
+        msgs: [{
+          message_id: 102, from_user_id: 'user_1', create_time_ms: 1700000000000,
+          item_list: [
+            { type: 3, voice_item: { text: 'ASR text', encode_type: 6, sample_rate: 16000, media: { full_url: 'https://c/voice', aes_key: KEY_BUF.toString('base64') } } },
+            { type: 5, video_item: { media: { full_url: 'https://c/video', aes_key: KEY_BUF.toString('base64') } } },
+          ],
+        }],
+        get_updates_buf: 'media-buf-next',
+      };
+    });
+
+    const events: any[] = [];
+    service.on((...args: any[]) => events.push(args[0]));
+    const a = adapter();
+    await a.start(ctx);
+    await vi.waitFor(() => expect(events.some((event) => event?.type === 'message.received')).toBe(true), { timeout: 3000 });
+    const content = events.find((event) => event?.type === 'message.received').message.content as any[];
+    expect(content.find((part) => part.type === 'text')).toMatchObject({ text: 'ASR text' });
+    const audio = content.find((part) => part.type === 'audio');
+    const video = content.find((part) => part.type === 'video');
+    expect(audio).toMatchObject({ mimeType: 'audio/silk' });
+    expect(video).toMatchObject({ mimeType: 'video/mp4' });
+    expect(Buffer.from(audio.localData)).toEqual(voicePlain);
+    expect(Buffer.from(video.localData)).toEqual(videoPlain);
     await ctx.dispose();
     await a.stop();
   });

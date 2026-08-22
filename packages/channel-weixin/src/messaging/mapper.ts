@@ -26,6 +26,7 @@ import type {
 } from '@wsz987/channel-core';
 import type { ILinkMessage, ILinkMessageItem, WeixinInboundMeta } from '../ilink/types.js';
 import { stableHash } from './dedup.js';
+import { formatQuotedContext } from './quote.js';
 
 /** Human label for common item types. */
 function itemTypeName(type?: number): string {
@@ -96,6 +97,16 @@ export function mapItem(item: ILinkMessageItem): MessagePart {
   }
 }
 
+/** Map a wire item, preserving both quote context and voice transcription. */
+function mapItemParts(item: ILinkMessageItem): MessagePart[] {
+  const quoted = formatQuotedContext(item.ref_msg);
+  const mapped = mapItem(item);
+  if (item.type === 3 && item.voice_item?.text && mapped.type === 'audio') {
+    return [...quoted, { type: 'text', text: item.voice_item.text }, mapped];
+  }
+  return [...quoted, mapped];
+}
+
 /** Map one raw iLink message into a stable channel event. */
 export function mapInbound(raw: ILinkMessage, meta: WeixinInboundMeta): MessageReceived {
   const from: SenderId = (raw.from_user_id ?? 'unknown') as SenderId;
@@ -104,7 +115,7 @@ export function mapInbound(raw: ILinkMessage, meta: WeixinInboundMeta): MessageR
 
   const parts: MessagePart[] = [];
   for (const item of items) {
-    parts.push(mapItem(item));
+    parts.push(...mapItemParts(item));
   }
   if (parts.length === 0) parts.push({ type: 'unsupported', reason: 'empty item_list' });
 

@@ -1,0 +1,32 @@
+{
+  "ret": 0,
+  "msgs": [
+    {
+      "seq": 103,
+      "message_id": 900003,
+      "from_user_id": "fixture-user-001",
+      "to_user_id": "fixture-bot-001",
+      "create_time_ms": 1760000002000,
+      "message_type": 1,
+      "message_state": 2,
+      "item_list": [
+        {
+          "type": 3,
+          "msg_id": "fixture-message-item-003",
+          "voice_item": {
+            "media": {
+              "encrypt_query_param": "fixture-encrypted-voice-reference",
+              "aes_key": "MDAxMTIyMzM0NDU1NjY3Nzg4OTlhYWJiY2NkZGVlZmY="
+            },
+            "encode_type": 6,
+            "bits_per_sample": 16,
+            "sample_rate": 16000,
+            "playtime": 1840,
+            "text": "fixture speech transcription"
+          }
+        }
+      ]
+    }
+  ],
+  "get_updates_buf": "fixture-next-update-buffer-voice"
+}

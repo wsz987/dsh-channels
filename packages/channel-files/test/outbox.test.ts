@@ -21,7 +21,7 @@ import {
 import { FileChannelInboundAssetStore } from '../src/attachments/store.ts';
 import { DEFAULT_ATTACHMENT_POLICY } from '../src/attachments/policy.ts';
 import { resolveAttachment } from '../src/attachment-resolver.ts';
-import type { ChannelAdapter, ChannelLogger, FilePart, OutboundMessage, SendResult } from '@wsz987/channel-core';
+import type { ChannelAdapter, ChannelLogger, OutboundMessage, SendResult } from '@wsz987/channel-core';
 
 function makeBinding(overrides: Partial<SessionBinding> = {}): SessionBinding {
   return {
@@ -59,7 +59,18 @@ function makeFakeAdapter(opts: {
   const sent: CapturedSend[] = [];
   const adapter = {
     id: opts.id ?? 'qq',
-    capabilities: { image: false, file: false },
+    capabilities: {
+      text: true,
+      image: true,
+      file: true,
+      audio: true,
+      video: true,
+      markdown: false,
+      cards: false,
+      reactions: false,
+      threads: false,
+      streaming: 'buffered',
+    },
     outboxCapabilities: {
       proactiveText: opts.proactiveText ?? true,
       proactiveMedia: opts.proactiveMedia ?? true,
@@ -230,40 +241,101 @@ describe('durable binding authority (plan §58 / §95)', () => {
 });
 
 describe('attachment send (plan §63)', () => {
-  it('attachment_id resolves -> adapter.send carries a FilePart with localData === stored bytes', async () => {
-    const dir = await tempRoot();
+  it.each(['file', 'audio', 'video'] as const)(
+    'attachment_id preserves stored %s kind and localData',
+    async (kind) => {
+      const dir = await tempRoot();
+      try {
+        const bindings = new FileBindingStore(join(dir, 'bindings.json'));
+        await bindings.put(makeBinding({ sessionId: 'S', conversationId: 'c' }));
+        const assets = new FileChannelInboundAssetStore({ root: join(dir, 'assets') });
+        const bytes = new TextEncoder().encode('attachment-bytes');
+        await assets.put({
+          attachmentId: 'att-1',
+          sessionId: 'S',
+          channelId: 'qq',
+          accountId: 'main',
+          conversationId: 'c',
+          messageId: 'm',
+          kind,
+          name: 'report.pdf',
+          mimeType: 'application/pdf',
+          data: bytes,
+        });
+        const { adapter, sent } = makeFakeAdapter();
+        const service = buildService({ bindingStore: bindings, adapter, store: assets });
+        const result = await service.send('S', { attachmentId: 'att-1' });
+        expect(result.delivered).toBe(true);
+        expect(sent).toHaveLength(1);
+        const parts = sent[0].message.parts;
+        expect(parts).toHaveLength(1);
+        const part = parts![0];
+        expect(part.type).toBe(kind);
+        expect('localData' in part && part.localData).toBeInstanceOf(Uint8Array);
+        expect('localData' in part && Array.from(part.localData!)).toEqual(Array.from(bytes));
+        expect('name' in part && part.name).toBe('report.pdf');
+        // The store re-verifies mime by magic sniffing (plan §47): text bytes are
+        // sniffed text/plain, overriding the adapter hint.
+        expect('mimeType' in part && part.mimeType).toBe('text/plain');
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it('a generic resolver can preserve image kind without a channel-specific branch', async () => {
+    const { store, dir } = await tempBindings();
     try {
-      const bindings = new FileBindingStore(join(dir, 'bindings.json'));
-      await bindings.put(makeBinding({ sessionId: 'S', conversationId: 'c' }));
-      const assets = new FileChannelInboundAssetStore({ root: join(dir, 'assets') });
-      const bytes = new TextEncoder().encode('attachment-bytes');
-      await assets.put({
-        attachmentId: 'att-1',
-        sessionId: 'S',
-        channelId: 'qq',
-        accountId: 'main',
-        conversationId: 'c',
-        messageId: 'm',
-        kind: 'file',
-        name: 'report.pdf',
-        mimeType: 'application/pdf',
-        data: bytes,
-      });
+      await store.put(makeBinding({ sessionId: 'S', conversationId: 'c' }));
       const { adapter, sent } = makeFakeAdapter();
-      const service = buildService({ bindingStore: bindings, adapter, store: assets });
-      const result = await service.send('S', { attachmentId: 'att-1' });
-      expect(result.delivered).toBe(true);
-      expect(sent).toHaveLength(1);
-      const parts = sent[0].message.parts;
-      expect(parts).toHaveLength(1);
-      const file = parts![0] as FilePart;
-      expect(file.type).toBe('file');
-      expect(file.localData).toBeInstanceOf(Uint8Array);
-      expect(Array.from(file.localData!)).toEqual(Array.from(bytes));
-      expect(file.name).toBe('report.pdf');
-      // The store re-verifies mime by magic sniffing (plan §47): text bytes are
-      // sniffed text/plain, overriding the adapter hint.
-      expect(file.mimeType).toBe('text/plain');
+      const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+      const service = new ChannelOutboxService({
+        bindingStore: store,
+        getAdapter: () => adapter,
+        attachmentResolver: async () => ({
+          kind: 'image',
+          data: bytes,
+          name: 'photo.png',
+          mimeType: 'image/png',
+        }),
+        logger: silentLogger,
+      });
+
+      await service.send('S', { attachmentId: 'image-1' });
+
+      expect(sent[0].message.parts).toEqual([{
+        type: 'image',
+        localData: bytes,
+        name: 'photo.png',
+        mimeType: 'image/png',
+      }]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed when the adapter cannot send the resolved media kind', async () => {
+    const { store, dir } = await tempBindings();
+    try {
+      await store.put(makeBinding({ sessionId: 'S', conversationId: 'c' }));
+      const { adapter, sent } = makeFakeAdapter();
+      adapter.capabilities.audio = false;
+      const service = new ChannelOutboxService({
+        bindingStore: store,
+        getAdapter: () => adapter,
+        attachmentResolver: async () => ({
+          kind: 'audio',
+          data: new Uint8Array([1, 2]),
+          name: 'voice.wav',
+          mimeType: 'audio/wav',
+        }),
+        logger: silentLogger,
+      });
+
+      await expect(service.send('S', { attachmentId: 'audio-1' })).rejects.toMatchObject({
+        code: 'OUTBOX_CAPABILITY_UNAVAILABLE',
+      });
+      expect(sent).toHaveLength(0);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -316,6 +388,51 @@ describe('proactive capability gate (plan §69 / §71)', () => {
       const service = buildService({ bindingStore: store, adapter });
       const result = await service.send('S', { text: 'hi' });
       expect(result.delivered).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('default derivation allows proactive media when only video=true', async () => {
+    const { store, dir } = await tempBindings();
+    try {
+      await store.put(makeBinding({ sessionId: 'S', conversationId: 'c' }));
+      const sent: OutboundMessage[] = [];
+      const adapter = {
+        id: 'qq',
+        capabilities: {
+          text: true,
+          image: false,
+          file: false,
+          audio: false,
+          video: true,
+          markdown: false,
+          cards: false,
+          reactions: false,
+          threads: false,
+          streaming: 'buffered',
+        },
+        send: async (_target: unknown, message: OutboundMessage): Promise<SendResult> => {
+          sent.push(message);
+          return { delivered: true };
+        },
+      } as unknown as ChannelAdapter;
+      const service = new ChannelOutboxService({
+        bindingStore: store,
+        getAdapter: () => adapter,
+        attachmentResolver: async () => ({
+          kind: 'video',
+          data: new Uint8Array([1, 2, 3]),
+          name: 'clip.mp4',
+          mimeType: 'video/mp4',
+        }),
+        logger: silentLogger,
+      });
+
+      await expect(service.send('S', { attachmentId: 'video-1' })).resolves.toMatchObject({
+        delivered: true,
+      });
+      expect(sent[0].parts?.[0]).toMatchObject({ type: 'video', name: 'clip.mp4' });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

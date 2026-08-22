@@ -1,0 +1,35 @@
+{
+  "getuploadurl": {
+    "media_type": 2,
+    "to_user_id": "fixture-user-001",
+    "rawsize": 16384,
+    "rawfilemd5": "0123456789abcdef0123456789abcdef",
+    "filesize": 16400,
+    "no_need_thumb": true,
+    "aeskey": "00112233445566778899aabbccddeeff"
+  },
+  "sendmessage": {
+    "msg": {
+      "from_user_id": "",
+      "to_user_id": "fixture-user-001",
+      "client_id": "fixture-client-id-003",
+      "message_type": 2,
+      "message_state": 2,
+      "context_token": "fixture-context-token",
+      "run_id": "fixture-run-001",
+      "item_list": [
+        {
+          "type": 5,
+          "video_item": {
+            "media": {
+              "encrypt_query_param": "fixture-encrypted-video-reference",
+              "aes_key": "MDAxMTIyMzM0NDU1NjY3Nzg4OTlhYWJiY2NkZGVlZmY=",
+              "encrypt_type": 1
+            },
+            "video_size": 16400
+          }
+        }
+      ]
+    }
+  }
+}

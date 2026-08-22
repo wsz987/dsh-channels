@@ -12,6 +12,7 @@
  * rounded-trip through config dumps.
  */
 import type { SecretStore } from '@wsz987/channel-core';
+import { z } from 'zod';
 
 export interface WeixinAccountCredential {
   /** Bot token — the secret. Never logged. */
@@ -38,6 +39,15 @@ export interface AccountCredentialStoreOptions {
 /** Storage key prefix for the non-secret credential metadata. */
 const META_KEY_PREFIX = 'weixin:credential:';
 
+const credentialMetadataSchema = z.object({
+  ilinkBotId: z.string().trim().min(1),
+  userId: z.string().trim().min(1).optional(),
+  baseUrl: z.string().url().refine((value) => new URL(value).protocol === 'https:', {
+    message: 'baseUrl must use https',
+  }),
+  savedAt: z.string().trim().min(1),
+});
+
 /** Helper: one JSON field of the credential metadata. */
 export class AccountCredentialStore {
   private readonly secrets: SecretStore;
@@ -62,14 +72,18 @@ export class AccountCredentialStore {
 
   /** Save (or replace) a credential atomically. */
   async save(credential: WeixinAccountCredential & { token?: string }): Promise<void> {
-    await this.secrets.set(this.tokenKey(), credential.token);
     const meta: Omit<WeixinAccountCredential, 'token'> = {
       ilinkBotId: credential.ilinkBotId,
       userId: credential.userId,
       baseUrl: credential.baseUrl,
       savedAt: credential.savedAt ?? new Date(this.now()).toISOString(),
     };
-    await this.storage.set(this.metaKey(), JSON.stringify(meta));
+    const parsed = credentialMetadataSchema.safeParse(meta);
+    if (!parsed.success) {
+      throw new TypeError('invalid Weixin credential metadata');
+    }
+    await this.secrets.set(this.tokenKey(), credential.token);
+    await this.storage.set(this.metaKey(), JSON.stringify(parsed.data));
   }
 
   /** Load the credential; resolves `undefined` when absent or partial. */
@@ -78,8 +92,10 @@ export class AccountCredentialStore {
     const rawMeta = await this.storage.get(this.metaKey());
     if (!token || !rawMeta) return undefined;
     try {
-      const meta = JSON.parse(rawMeta) as Omit<WeixinAccountCredential, 'token'>;
-      if (!meta.ilinkBotId || !meta.baseUrl) return undefined;
+      const parsedJson: unknown = JSON.parse(rawMeta);
+      const parsed = credentialMetadataSchema.safeParse(parsedJson);
+      if (!parsed.success) return undefined;
+      const meta = parsed.data;
       return {
         token,
         ilinkBotId: meta.ilinkBotId,

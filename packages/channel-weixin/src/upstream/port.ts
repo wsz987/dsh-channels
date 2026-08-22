@@ -93,6 +93,11 @@ export interface WeixinFileParams extends WeixinSendTarget {
   mimeType?: string;
 }
 
+export interface WeixinVideoParams extends WeixinSendTarget {
+  data: Uint8Array;
+  mimeType?: string;
+}
+
 /** Result of one outbound send. */
 export interface WeixinSendResult {
   messageId?: string;
@@ -136,11 +141,17 @@ export interface WeixinUpstream {
   sendImage(params: WeixinImageParams): Promise<WeixinSendResult>;
   /** Send a file message. */
   sendFile(params: WeixinFileParams): Promise<WeixinSendResult>;
+  /** Send a video message. */
+  sendVideo(params: WeixinVideoParams): Promise<WeixinSendResult>;
 
   /** Download + decrypt an inbound image (zero-change with legacy download). */
   downloadImage(ref: WeixinMediaRef): Promise<WeixinDownloadResult>;
   /** Download + decrypt an inbound file. */
   downloadFile(ref: WeixinMediaRef): Promise<WeixinDownloadResult>;
+  /** Download + decrypt an inbound audio attachment. */
+  downloadAudio(ref: WeixinMediaRef, options?: { encodeType?: number; sampleRate?: number }): Promise<WeixinDownloadResult>;
+  /** Download + decrypt an inbound video attachment. */
+  downloadVideo(ref: WeixinMediaRef): Promise<WeixinDownloadResult>;
 
   /** True when the bound credential is present and non-empty. */
   hasCredential(): boolean;

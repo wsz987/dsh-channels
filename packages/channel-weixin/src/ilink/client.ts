@@ -19,6 +19,7 @@
  * QR status).
  */
 import pkg from '../../package.json' with { type: 'json' };
+import { z } from 'zod';
 import { FetchTransport, type HttpTransport } from '../transport.js';
 import { buildHeaders } from './headers.js';
 import { buildBaseInfo } from './base-info.js';
@@ -38,6 +39,17 @@ import {
   DEFAULT_QR_POLL_TIMEOUT_MS,
 } from './constants.js';
 import { normalizeILinkError } from './errors.js';
+import {
+  getConfigResponseSchema,
+  getUpdatesResponseSchema,
+  getUploadUrlResponseSchema,
+  notifyResponseSchema,
+  qrCodeResponseSchema,
+  qrStatusResponseSchema,
+  responseEnvelopeSchema,
+  sendMessageResponseSchema,
+  sendTypingResponseSchema,
+} from './schema.js';
 import type {
   ILinkBaseInfo,
   ILinkGetConfigRequest,
@@ -94,12 +106,79 @@ export interface GetUpdatesResult {
   timedOut?: boolean;
 }
 
+/** Optional local state supplied when requesting a QR login challenge. */
+export interface GetBotQrcodeOptions {
+  /** Recent locally-held bot tokens. Values are never logged. */
+  localTokens?: readonly string[];
+  /** External abort signal for the request. */
+  signal?: AbortSignal;
+}
+
+const localTokenArraySchema = z.array(z.unknown());
+const localTokenSchema = z.string().trim().min(1).max(4096);
+const MAX_LOCAL_TOKENS = 10;
+
+interface ILinkResponseEnvelope {
+  ret?: number;
+  errcode?: number;
+  errmsg?: string;
+}
+
+/** Validate, normalize, deduplicate, and bound QR local tokens at the wire boundary. */
+function normalizeLocalTokens(value: unknown): string[] {
+  const parsed = localTokenArraySchema.safeParse(value);
+  if (!parsed.success) return [];
+
+  const tokens: string[] = [];
+  const seen = new Set<string>();
+  for (const item of parsed.data) {
+    const token = localTokenSchema.safeParse(item);
+    if (!token.success || seen.has(token.data)) continue;
+    seen.add(token.data);
+    tokens.push(token.data);
+    if (tokens.length === MAX_LOCAL_TOKENS) break;
+  }
+  return tokens;
+}
+
 function ensureSlash(url: string): string {
   return url.endsWith('/') ? url : `${url}/`;
 }
 
+const OFFICIAL_ILINK_HOST_SUFFIX = 'weixin.qq.com';
+
+function parseIlinkBaseUrl(value: string): URL {
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new TypeError('invalid iLink base URL');
+  }
+  if (
+    url.protocol !== 'https:' ||
+    !url.hostname ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  ) {
+    throw new TypeError('invalid iLink base URL');
+  }
+  return url;
+}
+
+function isOfficialIlinkHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return normalized === OFFICIAL_ILINK_HOST_SUFFIX || normalized.endsWith(`.${OFFICIAL_ILINK_HOST_SUFFIX}`);
+}
+
+function serializeBaseUrl(url: URL): string {
+  return url.toString().replace(/\/+$/, '');
+}
+
 export class ILinkClient {
   private _baseUrl: string;
+  private readonly configuredBaseAuthority: string;
   private readonly cdnBaseUrl: string;
   private _token?: string;
   private readonly timeoutMs: number;
@@ -113,7 +192,9 @@ export class ILinkClient {
 
   constructor(private readonly options: ILinkClientOptions, accountId = 'main') {
     this.accountId = accountId;
-    this._baseUrl = options.baseUrl.replace(/\/+$/, '');
+    const configuredBaseUrl = parseIlinkBaseUrl(options.baseUrl);
+    this.configuredBaseAuthority = configuredBaseUrl.host.toLowerCase();
+    this._baseUrl = serializeBaseUrl(configuredBaseUrl);
     this.cdnBaseUrl = (options.cdnBaseUrl ?? DEFAULT_CDN_BASE_URL).replace(/\/+$/, '');
     this._token = options.token;
     this.timeoutMs = options.timeoutMs ?? 15_000;
@@ -132,9 +213,13 @@ export class ILinkClient {
 
   /** Update the effective base URL (QR redirect / confirmed baseurl). */
   setBaseUrl(baseUrl: string): void {
-    if (baseUrl && baseUrl.trim()) {
-      this._baseUrl = baseUrl.replace(/\/+$/, '');
+    const candidate = parseIlinkBaseUrl(baseUrl);
+    const candidateHost = candidate.hostname.toLowerCase();
+    const candidateAuthority = candidate.host.toLowerCase();
+    if (candidateAuthority !== this.configuredBaseAuthority && !isOfficialIlinkHost(candidateHost)) {
+      throw new TypeError('untrusted iLink base URL host');
     }
+    this._baseUrl = serializeBaseUrl(candidate);
   }
 
   /** Update the bot token (post-QR-confirm). */
@@ -183,15 +268,43 @@ export class ILinkClient {
     }
   }
 
+  private parseResponse<T extends ILinkResponseEnvelope>(
+    schema: z.ZodType<T>,
+    raw: unknown,
+    operation: string,
+  ): T {
+    // Decode the common error envelope first. Error responses are not required
+    // to carry endpoint-specific success fields such as QR content.
+    const envelope = responseEnvelopeSchema.safeParse(raw);
+    if (envelope.success &&
+        ((envelope.data.ret !== undefined && envelope.data.ret !== 0) ||
+         (envelope.data.errcode !== undefined && envelope.data.errcode !== 0))) {
+      throw normalizeILinkError(new Error(envelope.data.errmsg ?? 'iLink protocol error'), {
+        operation,
+        accountId: this.accountId,
+        ret: envelope.data.ret,
+        errcode: envelope.data.errcode,
+        errmsg: envelope.data.errmsg,
+      });
+    }
+    const parsed = schema.safeParse(raw);
+    if (!parsed.success) {
+      throw normalizeILinkError(new Error('invalid iLink response shape'), {
+        operation,
+        accountId: this.accountId,
+      });
+    }
+    const response = parsed.data;
+    return response;
+  }
+
   /** POST /ilink/bot/get_bot_qrcode?bot_type=3 with { local_token_list: [] }. */
-  async getBotQrcode(signal?: AbortSignal): Promise<ILinkQrCodeResponse> {
+  async getBotQrcode(options: GetBotQrcodeOptions = {}): Promise<ILinkQrCodeResponse> {
     const endpoint = `${ENDPOINT_GET_BOT_QRCODE}?bot_type=${encodeURIComponent(DEFAULT_BOT_TYPE)}`;
-    const raw = await this.post(endpoint, { local_token_list: [] }, signal);
-    const value = raw as ILinkQrCodeResponse;
-    return {
-      qrcode: value.qrcode ?? '',
-      qrcode_img_content: value.qrcode_img_content ?? '',
-    };
+    const raw = await this.post(endpoint, {
+      local_token_list: normalizeLocalTokens(options.localTokens),
+    }, options.signal);
+    return this.parseResponse(qrCodeResponseSchema, raw, ENDPOINT_GET_BOT_QRCODE);
   }
 
   /**
@@ -210,7 +323,7 @@ export class ILinkClient {
     }
     try {
       const raw = await this.get(endpoint, opts.signal, DEFAULT_QR_POLL_TIMEOUT_MS);
-      return raw as ILinkQrStatusResponse;
+      return this.parseResponse(qrStatusResponseSchema, raw, ENDPOINT_GET_QRCODE_STATUS);
     } catch (error) {
       if (isClientAbortOrTimeout(error)) {
         return { status: 'wait' };
@@ -233,25 +346,7 @@ export class ILinkClient {
         params.signal,
         timeout,
       );
-      const resp = raw as ILinkGetUpdatesResponse;
-      if (resp.ret !== undefined && resp.ret !== 0) {
-        if (resp.errcode === -14) {
-          throw normalizeILinkError(new Error('stale token'), {
-            operation: ENDPOINT_GET_UPDATES,
-            accountId: this.accountId,
-            ret: resp.ret,
-            errcode: resp.errcode,
-            errmsg: resp.errmsg,
-          });
-        }
-        throw normalizeILinkError(new Error(resp.errmsg ?? `getUpdates ret=${resp.ret}`), {
-          operation: ENDPOINT_GET_UPDATES,
-          accountId: this.accountId,
-          ret: resp.ret,
-          errcode: resp.errcode,
-          errmsg: resp.errmsg,
-        });
-      }
+      const resp = this.parseResponse(getUpdatesResponseSchema, raw, ENDPOINT_GET_UPDATES);
       return {
         msgs: resp.msgs ?? [],
         get_updates_buf: resp.get_updates_buf,
@@ -270,49 +365,40 @@ export class ILinkClient {
   async sendMessage(req: ILinkSendMessageRequest, signal?: AbortSignal): Promise<ILinkSendMessageResponse> {
     const body = { ...req, base_info: req.base_info ?? this.baseInfo() };
     const raw = await this.post(ENDPOINT_SEND_MESSAGE, body, signal);
-    const resp = raw as ILinkSendMessageResponse;
-    if (resp.ret !== undefined && resp.ret !== 0) {
-      throw normalizeILinkError(new Error(resp.errmsg ?? `sendmessage ret=${resp.ret}`), {
-        operation: ENDPOINT_SEND_MESSAGE,
-        accountId: this.accountId,
-        ret: resp.ret,
-        errmsg: resp.errmsg,
-      });
-    }
-    return resp;
+    return this.parseResponse(sendMessageResponseSchema, raw, ENDPOINT_SEND_MESSAGE);
   }
 
   /** POST /ilink/bot/getuploadurl (WX5 media upload slot). */
   async getUploadUrl(req: ILinkGetUploadUrlRequest, signal?: AbortSignal): Promise<ILinkGetUploadUrlResponse> {
     const body = { ...req, base_info: req.base_info ?? this.baseInfo() };
     const raw = await this.post(ENDPOINT_GET_UPLOAD_URL, body, signal);
-    return raw as ILinkGetUploadUrlResponse;
+    return this.parseResponse(getUploadUrlResponseSchema, raw, ENDPOINT_GET_UPLOAD_URL);
   }
 
   /** POST /ilink/bot/getconfig. */
   async getConfig(req: ILinkGetConfigRequest, signal?: AbortSignal): Promise<ILinkGetConfigResponse> {
     const body = { ...req, base_info: req.base_info ?? this.baseInfo() };
     const raw = await this.post(ENDPOINT_GET_CONFIG, body, signal);
-    return raw as ILinkGetConfigResponse;
+    return this.parseResponse(getConfigResponseSchema, raw, ENDPOINT_GET_CONFIG);
   }
 
   /** POST /ilink/bot/sendtyping. */
   async sendTyping(req: ILinkSendTypingRequest, signal?: AbortSignal): Promise<ILinkSendTypingResponse> {
     const body = { ...req, base_info: req.base_info ?? this.baseInfo() };
     const raw = await this.post(ENDPOINT_SEND_TYPING, body, signal);
-    return raw as ILinkSendTypingResponse;
+    return this.parseResponse(sendTypingResponseSchema, raw, ENDPOINT_SEND_TYPING);
   }
 
   /** POST /ilink/bot/msg/notifystart (best effort). */
   async notifyStart(signal?: AbortSignal): Promise<ILinkNotifyResponse> {
     const raw = await this.post(ENDPOINT_NOTIFY_START, { base_info: this.baseInfo() }, signal);
-    return raw as ILinkNotifyResponse;
+    return this.parseResponse(notifyResponseSchema, raw, ENDPOINT_NOTIFY_START);
   }
 
   /** POST /ilink/bot/msg/notifystop (best effort). */
   async notifyStop(signal?: AbortSignal): Promise<ILinkNotifyResponse> {
     const raw = await this.post(ENDPOINT_NOTIFY_STOP, { base_info: this.baseInfo() }, signal);
-    return raw as ILinkNotifyResponse;
+    return this.parseResponse(notifyResponseSchema, raw, ENDPOINT_NOTIFY_STOP);
   }
 }
 

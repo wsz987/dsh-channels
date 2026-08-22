@@ -1,0 +1,33 @@
+{
+  "ret": 0,
+  "msgs": [
+    {
+      "seq": 105,
+      "message_id": 900005,
+      "from_user_id": "fixture-user-001",
+      "to_user_id": "fixture-bot-001",
+      "create_time_ms": 1760000004000,
+      "message_type": 1,
+      "message_state": 2,
+      "item_list": [
+        {
+          "type": 5,
+          "msg_id": "fixture-message-item-005",
+          "video_item": {
+            "media": {
+              "encrypt_query_param": "fixture-encrypted-video-reference",
+              "aes_key": "MDAxMTIyMzM0NDU1NjY3Nzg4OTlhYWJiY2NkZGVlZmY="
+            },
+            "video_size": 16384,
+            "play_length": 2800,
+            "video_md5": "fedcba9876543210fedcba9876543210",
+            "thumb_size": 512,
+            "thumb_height": 360,
+            "thumb_width": 640
+          }
+        }
+      ]
+    }
+  ],
+  "get_updates_buf": "fixture-next-update-buffer-video"
+}

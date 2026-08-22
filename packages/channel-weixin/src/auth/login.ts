@@ -19,6 +19,8 @@ import type { ILinkQrStatus, ILinkQrStatusResponse } from '../ilink/types.js';
 
 export interface WeixinQrAuthOptions {
   client: ILinkClient;
+  /** Recent locally-held bot tokens, supplied by the credential owner. */
+  localTokens?: readonly string[];
   /** Injectable clock (tests). */
   now?: () => number;
   /** Optional expiry budget in ms (default 5 min). */
@@ -71,6 +73,7 @@ export class WeixinQrAuth {
   private readonly client: ILinkClient;
   private readonly now: () => number;
   private readonly expiresInMs: number;
+  private readonly localTokens?: readonly string[];
 
   /** The last known full-fidelity upstream state. */
   private state: WeixinQrAuthInternalState = { ...EMPTY };
@@ -84,6 +87,7 @@ export class WeixinQrAuth {
     this.client = options.client;
     this.now = options.now ?? Date.now;
     this.expiresInMs = options.expiresInMs ?? 3 * 60_000;
+    this.localTokens = options.localTokens;
   }
 
   /** Current full-fidelity internal state. */
@@ -102,7 +106,7 @@ export class WeixinQrAuth {
    */
   async beginAuth(): Promise<AuthChallenge> {
     const started = this.now();
-    const qr = await this.client.getBotQrcode();
+    const qr = await this.client.getBotQrcode({ localTokens: this.localTokens });
     // Reset internal machine for a fresh challenge.
     this.state = { ...EMPTY };
     this.activeId = `weixin-qr-${started}`;
@@ -158,8 +162,13 @@ export class WeixinQrAuth {
       case 'scaned_but_redirect': {
         if (response.redirect_host) {
           const newBase = `https://${response.redirect_host}`;
-          this.client.setBaseUrl(newBase);
-          this.state.baseUrl = newBase;
+          try {
+            this.client.setBaseUrl(newBase);
+            this.state.baseUrl = this.client.baseUrl;
+          } catch {
+            this.state.status = 'failed';
+            return { state: 'failed', detail: 'weixin QR redirect returned an untrusted iLink host' };
+          }
         }
         return { state: 'pending', detail: 'weixin QR scanned; redirecting to IDC host' };
       }
@@ -182,8 +191,13 @@ export class WeixinQrAuth {
         this.state.userId = response.ilink_user_id;
         this.state.alreadyBound = false;
         if (response.baseurl) {
-          this.client.setBaseUrl(response.baseurl);
-          this.state.baseUrl = response.baseurl;
+          try {
+            this.client.setBaseUrl(response.baseurl);
+            this.state.baseUrl = this.client.baseUrl;
+          } catch {
+            this.state.status = 'failed';
+            return { state: 'failed', detail: 'weixin QR confirmation returned an untrusted iLink host' };
+          }
         } else if (!this.client.baseUrl) {
           this.state.baseUrl = this.client.baseUrl;
         }
@@ -193,8 +207,13 @@ export class WeixinQrAuth {
         this.state.alreadyBound = true;
         if (response.redirect_host) {
           const newBase = `https://${response.redirect_host}`;
-          this.client.setBaseUrl(newBase);
-          this.state.baseUrl = newBase;
+          try {
+            this.client.setBaseUrl(newBase);
+            this.state.baseUrl = this.client.baseUrl;
+          } catch {
+            this.state.status = 'failed';
+            return { state: 'failed', detail: 'weixin QR binding returned an untrusted iLink host' };
+          }
         }
         return { state: 'authenticated', detail: 'weixin bot already bound; existing credentials remain valid' };
       }
@@ -222,7 +241,7 @@ export class WeixinQrAuth {
   get confirmedCredential():
     | { token: string; ilinkBotId: string; userId?: string; baseUrl: string }
     | undefined {
-    if (!this.state.botToken || !this.state.ilinkBotId) return undefined;
+    if (this.state.status !== 'confirmed' || !this.state.botToken || !this.state.ilinkBotId) return undefined;
     return {
       token: this.state.botToken,
       ilinkBotId: this.state.ilinkBotId,

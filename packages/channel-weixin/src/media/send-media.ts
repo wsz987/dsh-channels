@@ -15,26 +15,60 @@
  * pure for tests.
  */
 import type { ILinkClient } from '../ilink/client.js';
-import { MESSAGE_ITEM_TYPE_IMAGE, MESSAGE_STATE_FINISH, MESSAGE_TYPE_BOT } from '../ilink/types.js';
+import {
+  MESSAGE_ITEM_TYPE_FILE,
+  MESSAGE_ITEM_TYPE_IMAGE,
+  MESSAGE_ITEM_TYPE_VIDEO,
+  MESSAGE_STATE_FINISH,
+  MESSAGE_TYPE_BOT,
+} from '../ilink/types.js';
 import { randomUUID } from 'node:crypto';
 
 export interface SendMediaOptions {
+  kind?: 'image' | 'file' | 'video';
   to: string;
   media: {
     encrypt_query_param?: string;
     aes_key?: string;
     full_url?: string;
   };
+  /** Plaintext length, required by the file wire shape. */
+  fileSize?: number;
+  /** Ciphertext length, required by the image/video wire shapes. */
+  fileSizeCiphertext?: number;
+  /** Original file name, required for a file item. */
+  fileName?: string;
   contextToken?: string;
   runId?: string;
 }
 
-/** Build the iLink sendmessage payload for a media (image) item. */
+/** Build the iLink sendmessage payload for an image, file, or video item. */
 export function buildSendMediaPayload(options: SendMediaOptions): Record<string, unknown> {
   const media: Record<string, unknown> = {};
   if (options.media.encrypt_query_param) media.encrypt_query_param = options.media.encrypt_query_param;
   if (options.media.aes_key) media.aes_key = options.media.aes_key;
   if (options.media.full_url) media.full_url = options.media.full_url;
+  // Tencent's media send items mark the encrypted media envelope explicitly.
+  media.encrypt_type = 1;
+  const kind = options.kind ?? 'image';
+  const item = kind === 'file'
+    ? {
+        type: MESSAGE_ITEM_TYPE_FILE,
+        file_item: {
+          media,
+          file_name: options.fileName ?? 'attachment',
+          len: String(options.fileSize ?? 0),
+        },
+      }
+    : kind === 'video'
+      ? {
+          type: MESSAGE_ITEM_TYPE_VIDEO,
+          video_item: { media, video_size: options.fileSizeCiphertext ?? 0 },
+        }
+      : {
+          type: MESSAGE_ITEM_TYPE_IMAGE,
+          image_item: { media, mid_size: options.fileSizeCiphertext ?? 0 },
+        };
   return {
     msg: {
       from_user_id: '',
@@ -42,7 +76,7 @@ export function buildSendMediaPayload(options: SendMediaOptions): Record<string,
       client_id: randomUUID(),
       message_type: MESSAGE_TYPE_BOT,
       message_state: MESSAGE_STATE_FINISH,
-      item_list: [{ type: MESSAGE_ITEM_TYPE_IMAGE, image_item: { media } }],
+      item_list: [item],
       context_token: options.contextToken ?? undefined,
       run_id: options.runId ?? undefined,
     },

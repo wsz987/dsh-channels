@@ -12,7 +12,8 @@
  *
  * Flow per round:
  *   load cursor -> getUpdates(cursor, timeout, signal)
- *     -> for each msg: dedup.has -> capture context_token -> map -> emit -> dedup.commit
+ *     -> for each msg: dedup.has -> capture context_token -> map
+ *        -> beforeEmit/hydrate -> sanitized log -> emit -> dedup.commit
  *     -> THEN commit the new cursor
  *
  * R1 ordering guarantees:
@@ -34,6 +35,7 @@ import type { SyncCursorStore } from '../storage/sync-cursor.js';
 import type { ContextTokenStore } from '../storage/context-token.js';
 import { PersistentDedupStore, dedupKey, type DedupStore } from './dedup.js';
 import { mapInbound } from './mapper.js';
+import { StaleTokenError } from '../ilink/errors.js';
 
 export interface MonitorReconnectConfig {
   enabled: boolean;
@@ -60,6 +62,8 @@ export interface WeixinMonitorOptions {
   meta: WeixinInboundMeta;
   /** Dispatch an inbound message event into the pipeline. Injectable for tests. */
   emit?: (event: ReturnType<typeof mapInbound>) => Promise<void>;
+  /** Enrich mapped content before the summary is logged and the event emitted. */
+  beforeEmit?: (event: ReturnType<typeof mapInbound>) => Promise<void>;
   reconnect: MonitorReconnectConfig;
   /** Initial long-poll timeout. */
   longPollTimeoutMs: number;
@@ -71,6 +75,8 @@ export interface WeixinMonitorOptions {
   now?: () => number;
   /** Called on health/connection transitions. */
   onConnectionChange?: (state: 'connected' | 'reconnecting' | 'disconnected') => void;
+  /** Terminal credential invalidation; never enters the reconnect loop. */
+  onStaleToken?: (error: StaleTokenError) => void | Promise<void>;
 }
 
 export class WeixinMonitor {
@@ -80,10 +86,12 @@ export class WeixinMonitor {
   private readonly ctx: ChannelAdapterContext;
   private readonly meta: WeixinInboundMeta;
   private readonly emitMsg: (event: ReturnType<typeof mapInbound>) => Promise<void>;
+  private readonly beforeEmit?: (event: ReturnType<typeof mapInbound>) => Promise<void>;
   private readonly reconnect: MonitorReconnectConfig;
   private readonly dedup: DedupStore;
   private readonly now: () => number;
   private readonly onConnectionChange?: (state: 'connected' | 'reconnecting' | 'disconnected') => void;
+  private readonly onStaleToken?: (error: StaleTokenError) => void | Promise<void>;
 
   private running = false;
   private loop?: Promise<void>;
@@ -96,6 +104,7 @@ export class WeixinMonitor {
     this.ctx = options.ctx;
     this.meta = options.meta;
     this.emitMsg = options.emit ?? ((event) => this.ctx.emit(event));
+    this.beforeEmit = options.beforeEmit;
     this.reconnect = options.reconnect;
     this.dedup = options.dedup ?? new PersistentDedupStore({
       storage: options.ctx.storage,
@@ -105,6 +114,7 @@ export class WeixinMonitor {
     });
     this.now = options.now ?? Date.now;
     this.onConnectionChange = options.onConnectionChange;
+    this.onStaleToken = options.onStaleToken;
     this.nextLongPollTimeoutMs = options.longPollTimeoutMs;
   }
 
@@ -169,6 +179,11 @@ export class WeixinMonitor {
         // A client-side long-poll timeout is normal control flow; retry.
       } catch (error) {
         if (signal.aborted || !this.running) break;
+        if (error instanceof StaleTokenError) {
+          this.running = false;
+          await this.onStaleToken?.(error);
+          break;
+        }
         this.onConnectionChange?.('reconnecting');
         attempt += 1;
         if (!this.reconnect.enabled) break;
@@ -209,13 +224,14 @@ export class WeixinMonitor {
       await this.contextTokens.set(msg.from_user_id, msg.context_token);
     }
     const event = mapInbound(msg, this.meta);
-    await this.emitMsg(event);
-    // The upstream callback hydrates media before dispatch. Log afterward so
-    // localDataBytes reports the final adapter-visible state, not raw mapping.
+    await this.beforeEmit?.(event);
+    // The summary must precede ctx.emit so diagnostics survive downstream
+    // failures. It contains only stable identifiers and sanitized part facts.
     this.ctx.logger.info(
       `[channel-weixin] inbound message ${event.message.id} from ${event.sender.id} in ${event.conversation.id}`,
-      { parts: summarizeParts(event.message.content) },
+      { parts: summarizeInboundParts(event.message.content) },
     );
+    await this.emitMsg(event);
     // Only after a successful emit is the message a committed dedup entry.
     await this.dedup.commit(key);
   }
@@ -228,15 +244,14 @@ export class WeixinMonitor {
 
 
 /** Compact per-part summary for inbound message logs (debug diagnostics). */
-function summarizeParts(parts: readonly MessagePart[]): unknown[] {
+export function summarizeInboundParts(parts: readonly MessagePart[]): unknown[] {
   return parts.map((part) => {
     switch (part.type) {
       case 'text':
-        return { type: 'text', text: part.text.slice(0, 80) };
+        return { type: 'text', length: part.text.length };
       case 'image':
         return {
           type: 'image',
-          url: part.url,
           resourceRef: part.resourceRef,
           mimeType: part.mimeType,
           localDataBytes: part.localData?.byteLength,
@@ -252,9 +267,27 @@ function summarizeParts(parts: readonly MessagePart[]): unknown[] {
           ingressFailure: part.ingressFailure,
         };
       case 'audio':
-        return { type: 'audio', durationMs: part.durationMs, localDataBytes: part.localData?.byteLength };
+        return {
+          type: 'audio',
+          resourceRef: part.resourceRef,
+          name: part.name,
+          mimeType: part.mimeType,
+          size: part.size,
+          durationMs: part.durationMs,
+          localDataBytes: part.localData?.byteLength,
+          ingressFailure: part.ingressFailure,
+        };
       case 'video':
-        return { type: 'video', durationMs: part.durationMs, localDataBytes: part.localData?.byteLength };
+        return {
+          type: 'video',
+          resourceRef: part.resourceRef,
+          name: part.name,
+          mimeType: part.mimeType,
+          size: part.size,
+          durationMs: part.durationMs,
+          localDataBytes: part.localData?.byteLength,
+          ingressFailure: part.ingressFailure,
+        };
       default:
         return { type: part.type };
     }

@@ -163,7 +163,38 @@ describe('sendMedia / buildSendMediaPayload', () => {
     }) as any;
     expect(payload.msg.to_user_id).toBe('user_1');
     expect(payload.msg.run_id).toBe('run-9');
-    expect(payload.msg.item_list).toEqual([{ type: 2, image_item: { media: { encrypt_query_param: 'e', aes_key: 'ak' } } }]);
+    expect(payload.msg.item_list).toEqual([{
+      type: 2,
+      image_item: {
+        media: { encrypt_query_param: 'e', aes_key: 'ak', encrypt_type: 1 },
+        mid_size: 0,
+      },
+    }]);
+  });
+
+  it('builds Tencent 2.4.6 file and video item shapes', () => {
+    const file = buildSendMediaPayload({
+      kind: 'file', to: 'user_1', media: { encrypt_query_param: 'e', aes_key: 'ak' },
+      fileName: 'report.pdf', fileSize: 1024, fileSizeCiphertext: 1040,
+    }) as any;
+    expect(file.msg.item_list).toEqual([{
+      type: 4,
+      file_item: {
+        media: { encrypt_query_param: 'e', aes_key: 'ak', encrypt_type: 1 },
+        file_name: 'report.pdf', len: '1024',
+      },
+    }]);
+
+    const video = buildSendMediaPayload({
+      kind: 'video', to: 'user_1', media: { encrypt_query_param: 'e', aes_key: 'ak' }, fileSizeCiphertext: 2080,
+    }) as any;
+    expect(video.msg.item_list).toEqual([{
+      type: 5,
+      video_item: {
+        media: { encrypt_query_param: 'e', aes_key: 'ak', encrypt_type: 1 },
+        video_size: 2080,
+      },
+    }]);
   });
 });
 
@@ -201,6 +232,78 @@ describe('OutboundSender image path', () => {
     expect((sent[0].msg.item_list[0] as any).image_item.media.encrypt_query_param).toBeTruthy();
     expect((sent[0].msg.item_list[0] as any).image_item.media.aes_key).toBeTruthy();
     expect(sent[0].msg.run_id).toBe('run-1');
+  });
+
+  it('sends caption text before media and encodes the ASCII hex AES key', async () => {
+    const storage = new MemoryStorage();
+    const ct = new ContextTokenStore({ storage, accountId: 'main' });
+    const sent: any[] = [];
+    let uploadSlotCalls = 0;
+    const client = {
+      cdnUrl: 'https://cdn',
+      baseUrl: 'https://api',
+      token: undefined,
+      sendMessage: async (payload: any) => { sent.push(payload); return { ret: 0 }; },
+      getUploadUrl: async () => {
+        uploadSlotCalls += 1;
+        return { upload_full_url: 'https://cdn/put', upload_param: 'up-enc' };
+      },
+    } as any;
+    const sender = new OutboundSender({
+      client,
+      contextTokens: ct,
+      upload: async () => new Response(null, { status: 200, headers: { 'x-encrypted-param': 'download-enc' } }),
+    });
+
+    await sender.send(target('user_1', 'run-caption'), {
+      text: 'caption',
+      parts: [{ type: 'image', localData: Buffer.from('image'), mimeType: 'image/jpeg' }],
+    } as any);
+
+    expect(sent.map((payload) => payload.msg.item_list[0].type)).toEqual([1, 2]);
+    expect(sent[0].msg.item_list[0].text_item.text).toBe('caption');
+    const encodedKey = sent[1].msg.item_list[0].image_item.media.aes_key;
+    expect(Buffer.from(encodedKey, 'base64').toString('ascii')).toMatch(/^[0-9a-f]{32}$/);
+    expect(sent.map((payload) => payload.msg.run_id)).toEqual(['run-caption', 'run-caption']);
+    expect(uploadSlotCalls).toBe(1);
+  });
+
+  it('uploads and sends every media part in source order', async () => {
+    const storage = new MemoryStorage();
+    const ct = new ContextTokenStore({ storage, accountId: 'main' });
+    const sent: any[] = [];
+    let uploadSlotCalls = 0;
+    const client = {
+      cdnUrl: 'https://cdn',
+      baseUrl: 'https://api',
+      token: undefined,
+      sendMessage: async (payload: any) => { sent.push(payload); return { ret: 0 }; },
+      getUploadUrl: async () => {
+        uploadSlotCalls += 1;
+        return { upload_full_url: 'https://cdn/put', upload_param: 'up-enc' };
+      },
+    } as any;
+    const sender = new OutboundSender({
+      client,
+      contextTokens: ct,
+      upload: async () => new Response(null, { status: 200, headers: { 'x-encrypted-param': 'download-enc' } }),
+    });
+
+    const result = await sender.send(target('user_1', 'run-multi'), {
+      text: 'caption',
+      parts: [
+        { type: 'file', localData: Buffer.from('file'), name: 'one.txt' },
+        { type: 'image', localData: Buffer.from('image'), mimeType: 'image/jpeg' },
+        { type: 'video', localData: Buffer.from('video'), mimeType: 'video/mp4' },
+      ],
+    });
+
+    expect(sent.map((payload) => payload.msg.item_list[0].type)).toEqual([1, 4, 2, 5]);
+    expect(sent.map((payload) => payload.msg.run_id)).toEqual([
+      'run-multi', 'run-multi', 'run-multi', 'run-multi',
+    ]);
+    expect(uploadSlotCalls).toBe(3);
+    expect(result.messageId).toBe(sent[3].msg.client_id);
   });
 });
 

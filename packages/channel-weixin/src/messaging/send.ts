@@ -24,6 +24,8 @@ import type {
   OutboundMessage,
   SendResult,
   ImagePart,
+  FilePart,
+  VideoPart,
 } from '@wsz987/channel-core';
 import { collectText } from '@wsz987/channel-core';
 import { ChannelError } from '@wsz987/channel-core';
@@ -36,7 +38,7 @@ import {
 } from '../ilink/types.js';
 import { redactMessage } from '../ilink/errors.js';
 import { uploadMedia } from '../media/upload.js';
-import type { UploadedMedia } from '../media/upload.js';
+import { WX5_MEDIA_TYPE_FILE, WX5_MEDIA_TYPE_IMAGE, WX5_MEDIA_TYPE_VIDEO } from '../media/upload.js';
 import { sendMedia } from '../media/send-media.js';
 
 export interface OutboundSenderOptions {
@@ -112,20 +114,35 @@ export class OutboundSender {
     const runId = target.runId ?? this.defaultRunId ?? randomUUID();
     const contextToken = await this.contextTokens.get(to);
 
-    const image = firstImage(message.parts);
+    const media = outboundMediaParts(message.parts);
+    const text = message.text ?? collectText(message.parts ?? []);
     try {
-      if (image?.localData && image.localData.byteLength > 0) {
-        await this.sendImage(to, image, contextToken, runId);
-        return { delivered: true };
-      }
-
-      // Voice/file/video outbound remain unimplemented (WX5.2-5.4): refuse an
-      // explicit non-text media part instead of silently dropping it.
+      // Validate the complete request before sending a caption, otherwise a
+      // rejected media part would leave a misleading partial delivery.
       if (hasUnsupportedMediaPart(message.parts)) {
-        throw new ChannelError('CHANNEL_UNSUPPORTED', 'outbound voice/file/video are not yet supported on weixin');
+        throw new ChannelError('CHANNEL_UNSUPPORTED', 'weixin outbound media requires local bytes; voice is not supported');
+      }
+      // Tencent 2.4.6 sends an optional caption as its own TEXT request before
+      // the media request; each item_list contains exactly one item.
+      let messageId: string | undefined;
+      if (media.length > 0 && text) {
+        const caption = buildSendTextPayload({ to, text, contextToken, runId });
+        await this.client.sendMessage(caption);
+        messageId = (caption.msg as { client_id: string }).client_id;
+      }
+      for (const part of media) {
+        messageId = part.type === 'image'
+          ? await this.sendImage(to, part, contextToken, runId)
+          : part.type === 'file'
+            ? await this.sendFile(to, part, contextToken, runId)
+            : await this.sendVideo(to, part, contextToken, runId);
+      }
+      if (media.length > 0) {
+        return { delivered: true, ...(messageId ? { messageId } : {}) };
       }
 
-      const text = message.text ?? collectText(message.parts ?? []);
+      // Voice has no established Tencent 2.4.6 outbound path. File/video need
+      // local bytes for the encrypted CDN upload, so reject URL-only parts.
       const payload = buildSendTextPayload({ to, text, contextToken, runId });
       await this.client.sendMessage(payload);
       return { delivered: true, messageId: (payload.msg as { client_id: string }).client_id };
@@ -137,47 +154,95 @@ export class OutboundSender {
 
   private async sendImage(
     to: string,
-    image: ImagePart,
+    image: UploadableImagePart,
     contextToken: string | undefined,
     runId: string,
-  ): Promise<UploadedMedia> {
+  ): Promise<string> {
+    return this.uploadAndSend(to, image, contextToken, runId, 'image');
+  }
+
+  private async sendFile(
+    to: string,
+    file: UploadableFilePart,
+    contextToken: string | undefined,
+    runId: string,
+  ): Promise<string> {
+    return this.uploadAndSend(to, file, contextToken, runId, 'file');
+  }
+
+  private async sendVideo(
+    to: string,
+    video: UploadableVideoPart,
+    contextToken: string | undefined,
+    runId: string,
+  ): Promise<string> {
+    return this.uploadAndSend(to, video, contextToken, runId, 'video');
+  }
+
+  private async uploadAndSend(
+    to: string,
+    part: WeixinOutboundMediaPart,
+    contextToken: string | undefined,
+    runId: string,
+    kind: 'image' | 'file' | 'video',
+  ): Promise<string> {
     if (!this.client.cdnUrl && !this.cdnBaseUrl) {
-      throw new ChannelError('CHANNEL_UNSUPPORTED', 'outbound image upload requires a CDN base URL');
+      throw new ChannelError('CHANNEL_UNSUPPORTED', 'outbound media upload requires a CDN base URL');
     }
     const cdnBaseUrl = this.cdnBaseUrl ?? this.client.cdnUrl;
     const apiBaseUrl = this.apiBaseUrl ?? this.client.baseUrl;
-
-    const uploaded = await uploadMedia(Buffer.from(image.localData!), {
+    const mediaType = kind === 'image'
+      ? WX5_MEDIA_TYPE_IMAGE
+      : kind === 'file'
+        ? WX5_MEDIA_TYPE_FILE
+        : WX5_MEDIA_TYPE_VIDEO;
+    const uploaded = await uploadMedia(Buffer.from(part.localData), {
       cdnBaseUrl,
       apiBaseUrl,
       toUserId: to,
       token: this.client.token,
-      getUploadUrl: this.getUploadUrl,
+      mediaType,
+      getUploadUrl: this.getUploadUrl ?? ((request) => this.client.getUploadUrl(request)),
       upload: this.uploadFn,
     });
-    // The CDN media reference for the sendmessage item: aes_key is base64 (the
-    // JSON transport convention), matching ILinkCDNMedia.aes_key.
-    await sendMedia(this.client, {
+    // Tencent 2.4.6 base64-encodes the 32-character ASCII hex key, not the
+    // decoded 16 raw key bytes.
+    const sent = await sendMedia(this.client, {
       to,
+      kind,
       media: {
         encrypt_query_param: uploaded.downloadEncryptedQueryParam,
-        aes_key: uploaded.aeskey ? Buffer.from(uploaded.aeskey, 'hex').toString('base64') : undefined,
+        aes_key: uploaded.aeskey ? Buffer.from(uploaded.aeskey, 'ascii').toString('base64') : undefined,
       },
+      fileSize: uploaded.fileSize,
+      fileSizeCiphertext: uploaded.fileSizeCiphertext,
+      fileName: kind === 'file' ? part.name : undefined,
       contextToken,
       runId,
     });
-    return uploaded;
+    return sent.messageId;
   }
 }
 
-/** First image part with downloadable local bytes. */
-function firstImage(parts: OutboundMessage['parts']): ImagePart | undefined {
-  if (!parts) return undefined;
-  return parts.find((p): p is ImagePart => p.type === 'image');
+type UploadableImagePart = ImagePart & { localData: Uint8Array };
+type UploadableFilePart = FilePart & { localData: Uint8Array };
+type UploadableVideoPart = VideoPart & { localData: Uint8Array };
+type WeixinOutboundMediaPart = UploadableImagePart | UploadableFilePart | UploadableVideoPart;
+
+function outboundMediaParts(parts: OutboundMessage['parts']): WeixinOutboundMediaPart[] {
+  if (!parts) return [];
+  return parts.filter((part): part is WeixinOutboundMediaPart =>
+    (part.type === 'image' || part.type === 'file' || part.type === 'video') &&
+    part.localData !== undefined &&
+    part.localData.byteLength > 0,
+  );
 }
 
-/** True when the message carries a non-image, non-text media part (voice/file/video). */
+/** True when the message carries an unsupported or non-uploadable media part. */
 function hasUnsupportedMediaPart(parts: OutboundMessage['parts']): boolean {
   if (!parts) return false;
-  return parts.some((p) => p.type === 'audio' || p.type === 'file' || p.type === 'video');
+  return parts.some((p) =>
+    p.type === 'audio' ||
+    ((p.type === 'image' || p.type === 'file' || p.type === 'video') && (!p.localData || p.localData.byteLength === 0)),
+  );
 }

@@ -26,6 +26,8 @@ import type {
   OutboundMessage,
   SendResult,
   ImagePart,
+  FilePart,
+  VideoPart,
 } from '@wsz987/channel-core';
 import { ChannelError, collectText } from '@wsz987/channel-core';
 import { redactMessage } from './ilink/errors.js';
@@ -57,8 +59,8 @@ export interface WeixinAdapterDeps {
 export type AdapterUpstreamLike = (
   & Pick<WeixinUpstream,
       | 'id' | 'beginQrAuth' | 'pollQrAuth' | 'submitVerifyCode'
-      | 'sendText' | 'sendImage' | 'sendFile'
-      | 'downloadImage' | 'downloadFile' | 'hasCredential'>
+      | 'sendText' | 'sendImage' | 'sendFile' | 'sendVideo'
+      | 'downloadImage' | 'downloadFile' | 'downloadAudio' | 'downloadVideo' | 'hasCredential'>
   & {
     bind(env: import('./upstream/port.js').WeixinUpstreamHostEnv): void;
     loadCredential(): Promise<boolean>;
@@ -80,9 +82,9 @@ export class WeixinAdapter implements ChannelAdapter {
   readonly capabilities: ChannelCapabilities = {
     text: true,
     image: true,
-    file: false,
+    file: true,
     audio: false,
-    video: false,
+    video: true,
     markdown: false,
     cards: false,
     reactions: false,
@@ -156,22 +158,42 @@ export class WeixinAdapter implements ChannelAdapter {
     const to = target.conversationId;
     const runId = target.runId;
 
-    const image = firstImage(message.parts);
+    const media = outboundMediaParts(message.parts);
     try {
-      if (image?.localData && image.localData.byteLength > 0) {
-        const res = await this.upstream.sendImage({
-          to,
-          runId,
-          data: image.localData,
-          mimeType: image.mimeType,
-        });
-        return res;
-      }
       if (hasUnsupportedMediaPart(message.parts)) {
-        throw new ChannelError('CHANNEL_UNSUPPORTED', 'outbound voice/file/video are not yet supported on weixin');
+        throw new ChannelError('CHANNEL_UNSUPPORTED', 'weixin outbound media requires local bytes; voice is not supported');
       }
       const text = message.text ?? collectText(message.parts ?? []);
-      return this.upstream.sendText({ to, runId, text });
+      let result: SendResult | undefined;
+      if (media.length > 0 && text) {
+        result = await this.upstream.sendText({ to, runId, text });
+      }
+      for (const part of media) {
+        if (part.type === 'image') {
+          result = await this.upstream.sendImage({
+            to,
+            runId,
+            data: part.localData,
+            mimeType: part.mimeType,
+          });
+        } else if (part.type === 'file') {
+          result = await this.upstream.sendFile({
+            to,
+            runId,
+            data: part.localData,
+            fileName: part.name ?? 'attachment',
+            mimeType: part.mimeType,
+          });
+        } else {
+          result = await this.upstream.sendVideo({
+            to,
+            runId,
+            data: part.localData,
+            mimeType: part.mimeType,
+          });
+        }
+      }
+      return result ?? this.upstream.sendText({ to, runId, text });
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
       throw new ChannelError('CHANNEL_SEND_FAILED', redactMessage(messageText), { cause: error });
@@ -270,16 +292,24 @@ export class WeixinAdapter implements ChannelAdapter {
   }
 }
 
-/** First image part with downloadable local bytes. */
-function firstImage(parts: OutboundMessage['parts']): ImagePart | undefined {
-  if (!parts) return undefined;
-  return parts.find((p): p is ImagePart => p.type === 'image');
+type WeixinOutboundMediaPart = (ImagePart | FilePart | VideoPart) & { localData: Uint8Array };
+
+function outboundMediaParts(parts: OutboundMessage['parts']): WeixinOutboundMediaPart[] {
+  if (!parts) return [];
+  return parts.filter((part): part is WeixinOutboundMediaPart =>
+    (part.type === 'image' || part.type === 'file' || part.type === 'video') &&
+    part.localData !== undefined &&
+    part.localData.byteLength > 0,
+  );
 }
 
-/** True when the message carries a non-image, non-text media part (voice/file/video). */
+/** True when the message carries unsupported or non-uploadable media. */
 function hasUnsupportedMediaPart(parts: OutboundMessage['parts']): boolean {
   if (!parts) return false;
-  return parts.some((p) => p.type === 'audio' || p.type === 'file' || p.type === 'video');
+  return parts.some((p) =>
+    p.type === 'audio' ||
+    ((p.type === 'image' || p.type === 'file' || p.type === 'video') && (!p.localData || p.localData.byteLength === 0)),
+  );
 }
 
 /** Minimal token redaction for send-failure messages (no pattern dependency here). */

@@ -70,6 +70,15 @@ export { mapInbound, mapItem } from './messaging/mapper.js';
 export { WeixinMonitor, CursorCommitError, type WeixinMonitorOptions } from './messaging/monitor.js';
 export { OutboundSender, buildSendTextPayload, type OutboundSenderOptions } from './messaging/send.js';
 export { TypingController, type TypingControllerOptions } from './messaging/typing.js';
+export { formatQuotedContext } from './messaging/quote.js';
+export {
+  transcodeSilkVoice,
+  SILK_ENCODE_TYPE,
+  DEFAULT_SILK_SAMPLE_RATE,
+  type SilkTranscodeOptions,
+  type SilkTranscodeResult,
+} from './media/silk-transcode.js';
+export { WeixinConfigManager, type WeixinConfigManagerOptions } from './upstream/config-manager.js';
 export { FetchTransport, type HttpTransport, type HttpRequestInit } from './transport.js';
 export { manifest, type WeixinManifest } from './manifest.js';
 export {
@@ -86,6 +95,7 @@ export {
   type WeixinTextParams,
   type WeixinImageParams,
   type WeixinFileParams,
+  type WeixinVideoParams,
   type WeixinSendResult,
 } from './upstream/index.js';
 // WX5 media.
