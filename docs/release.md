@@ -55,9 +55,11 @@ the published version by `changeset version` at release time.
    `.changeset/*.md`.
 2. **Review** — review the changeset file (package list + bump level + summary)
    and merge it to `main` together with the code change.
-3. **Version** — run `pnpm changeset version`: consumes pending changesets,
-   bumps the version fields, rewrites internal `workspace:*` dependencies
-   and updates changelogs.
+3. **Version** — run `pnpm release:version -- beta` for a beta or
+   `pnpm release:version -- stable` for a stable release. The wrapper enters or
+   exits Changesets prerelease mode, runs `changeset version`, synchronizes the
+   private root manifest with the bundle version, and prints the exact tag to
+   create. Do not edit package versions by hand.
 4. **Tag** — commit the version bump, then push a release tag:
    `git tag vX.Y.Z && git push origin vX.Y.Z`.
 5. **Publish** — the tag push runs `.github/workflows/release.yml`, which
@@ -66,6 +68,10 @@ the published version by `changeset version` at release time.
    are skipped so a partial release can be retried safely.
 
 Steps 3–5 are the tag-driven release flow (see the workflow section below).
+
+The beta command produces prerelease SemVer such as `0.5.0-beta.0`; therefore
+the matching tag is `v0.5.0-beta.0`. A plain `v0.5.0` is stable and the publish
+workflow assigns it to npm `latest`, not `beta`.
 
 ## Prebuilt artifacts
 

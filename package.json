@@ -30,6 +30,7 @@
     "changeset": "changeset",
     "version": "changeset version",
     "release": "changeset publish",
+    "release:version": "node scripts/release-version.mjs",
     "test:release": "node --test scripts/release-scripts.test.mjs",
     "release:verify": "node scripts/release-verify.mjs",
     "release:pack": "node scripts/release-pack.mjs",

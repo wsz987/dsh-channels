@@ -13,6 +13,11 @@ import {
   releasePackages,
   validateWorkspaceManifests,
 } from './release-family.mjs';
+import {
+  assertReleaseChannel,
+  assertVersionMatchesChannel,
+  syncRootVersion,
+} from './release-version.mjs';
 
 function entry(name, version, dependencies = {}, extra = {}) {
   return {
@@ -101,6 +106,24 @@ test('npm dist-tag follows the bundle release channel', () => {
   assert.equal(npmDistTag('0.10.0-beta.1', undefined), 'beta');
   assert.equal(npmDistTag('0.10.0', undefined), 'latest');
   assert.equal(npmDistTag('0.10.0', 'next'), 'next');
+});
+
+test('release version preparation distinguishes beta and stable versions', () => {
+  assert.doesNotThrow(() => assertReleaseChannel('beta'));
+  assert.doesNotThrow(() => assertReleaseChannel('stable'));
+  assert.throws(() => assertReleaseChannel('next'), /beta\|stable/);
+
+  assert.doesNotThrow(() => assertVersionMatchesChannel('0.5.0-beta.0', 'beta'));
+  assert.doesNotThrow(() => assertVersionMatchesChannel('0.5.0', 'stable'));
+  assert.throws(() => assertVersionMatchesChannel('0.5.0', 'beta'), /beta prerelease/);
+  assert.throws(() => assertVersionMatchesChannel('0.5.0-beta.0', 'stable'), /stable version/);
+});
+
+test('release version preparation keeps the private root version aligned with the bundle', () => {
+  const manifest = { name: 'dsh-channels', version: '0.4.2', private: true };
+  assert.equal(syncRootVersion(manifest, '0.5.0-beta.0'), true);
+  assert.equal(manifest.version, '0.5.0-beta.0');
+  assert.equal(syncRootVersion(manifest, '0.5.0-beta.0'), false);
 });
 
 test('workspace verification rejects invalid public metadata', () => {
