@@ -38,7 +38,7 @@ development/governance packages (`channel-compat`, `channel-testkit`,
 | @wsz987/channel-dingtalk  | 0.5.0-beta.0   |
 | @wsz987/channel-lark      | 0.5.0-beta.0   |
 | @wsz987/channel-telegram  | 0.5.0-beta.0   |
-| @wsz987/dsh-channels      | 0.5.0-beta.1   |
+| @wsz987/dsh-channels      | 0.5.0-beta.0   |
 `apps/*` are private (`"private": true`) and never published.
 
 Internal workspace dependencies are declared as `workspace:*` and rewritten to
