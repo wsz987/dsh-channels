@@ -29,20 +29,20 @@ and contract testkit aligned with the contract version they validate.
 
 | Package                | Version |
 | ---------------------- | ------- |
-| @wsz987/channel-core      | 0.4.2   |
-| @wsz987/channel-harness   | 0.4.2   |
-| @wsz987/channel-control   | 0.4.2   |
-| @wsz987/channel-files     | 0.4.2   |
-| @wsz987/channel-web       | 0.4.2   |
-| @wsz987/channel-weixin    | 0.4.2   |
-| @wsz987/channel-qq        | 0.4.2   |
-| @wsz987/channel-dingtalk  | 0.4.2   |
-| @wsz987/channel-lark      | 0.4.2   |
-| @wsz987/channel-telegram  | 0.4.2   |
-| @wsz987/dsh-channels      | 0.4.2   |
-| @wsz987/channel-compat    | 0.2.0   |
-| @wsz987/channel-testkit   | 0.2.0   |
-| @wsz987/channel-verify    | 0.1.0   |
+| @wsz987/channel-core      | 0.5.0-beta.0   |
+| @wsz987/channel-harness   | 0.5.0-beta.0   |
+| @wsz987/channel-control   | 0.5.0-beta.0   |
+| @wsz987/channel-files     | 0.5.0-beta.0   |
+| @wsz987/channel-web       | 0.5.0-beta.0   |
+| @wsz987/channel-weixin    | 0.5.0-beta.0   |
+| @wsz987/channel-qq        | 0.5.0-beta.0   |
+| @wsz987/channel-dingtalk  | 0.5.0-beta.0   |
+| @wsz987/channel-lark      | 0.5.0-beta.0   |
+| @wsz987/channel-telegram  | 0.5.0-beta.0   |
+| @wsz987/dsh-channels      | 0.5.0-beta.0   |
+| @wsz987/channel-compat    | 0.2.1-beta.0   |
+| @wsz987/channel-testkit   | 0.3.0-beta.0   |
+| @wsz987/channel-verify    | 0.2.0-beta.0   |
 `apps/*` are private (`"private": true`) and never published.
 
 Internal workspace dependencies are declared as `workspace:*` and rewritten to
