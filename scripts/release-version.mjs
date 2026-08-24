@@ -29,6 +29,12 @@ export function syncRootVersion(rootManifest, version) {
   return true;
 }
 
+export function releaseChannelFromArgs(args) {
+  const values = args[0] === '--' ? args.slice(1) : args;
+  if (values.length !== 1) return undefined;
+  return values[0];
+}
+
 function readJson(url) {
   return JSON.parse(readFileSync(url, 'utf8'));
 }
@@ -79,7 +85,7 @@ export function prepareReleaseVersion(channel) {
 const invokedPath = process.argv[1] ? pathToFileURL(process.argv[1]).href : undefined;
 if (invokedPath === import.meta.url) {
   try {
-    prepareReleaseVersion(process.argv[2]);
+    prepareReleaseVersion(releaseChannelFromArgs(process.argv.slice(2)));
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;

@@ -16,6 +16,7 @@ import {
 import {
   assertReleaseChannel,
   assertVersionMatchesChannel,
+  releaseChannelFromArgs,
   syncRootVersion,
 } from './release-version.mjs';
 
@@ -117,6 +118,13 @@ test('release version preparation distinguishes beta and stable versions', () =>
   assert.doesNotThrow(() => assertVersionMatchesChannel('0.5.0', 'stable'));
   assert.throws(() => assertVersionMatchesChannel('0.5.0', 'beta'), /beta prerelease/);
   assert.throws(() => assertVersionMatchesChannel('0.5.0-beta.0', 'stable'), /stable version/);
+});
+
+test('release version preparation accepts pnpm arguments with or without a separator', () => {
+  assert.equal(releaseChannelFromArgs(['beta']), 'beta');
+  assert.equal(releaseChannelFromArgs(['--', 'stable']), 'stable');
+  assert.equal(releaseChannelFromArgs([]), undefined);
+  assert.equal(releaseChannelFromArgs(['beta', 'stable']), undefined);
 });
 
 test('release version preparation keeps the private root version aligned with the bundle', () => {
