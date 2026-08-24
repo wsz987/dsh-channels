@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT_MANIFEST = new URL('../package.json', import.meta.url);
 const BUNDLE_MANIFEST = new URL('../packages/channels/package.json', import.meta.url);
@@ -40,9 +40,12 @@ function readJson(url) {
 }
 
 function runChangeset(args) {
-  const command = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
-  const result = spawnSync(command, ['exec', 'changeset', ...args], {
-    cwd: new URL('..', import.meta.url),
+  const pnpmEntry = process.env.npm_execpath;
+  if (!pnpmEntry) {
+    throw new Error('release versioning must be run through the pnpm script');
+  }
+  const result = spawnSync(process.execPath, [pnpmEntry, 'exec', 'changeset', ...args], {
+    cwd: fileURLToPath(new URL('..', import.meta.url)),
     stdio: 'inherit',
   });
   if (result.error) throw result.error;
