@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -83,6 +84,11 @@ test('release packages are public and dependency ordered', () => {
       < packages.findIndex(({ name }) => name === RELEASE_BUNDLE),
   );
   assert.equal(bundleVersion(validateWorkspaceManifests(entries)), '0.9.0');
+});
+
+test('Changesets does not version private workspace packages', () => {
+  const config = JSON.parse(readFileSync(new URL('../.changeset/config.json', import.meta.url), 'utf8'));
+  assert.deepEqual(config.privatePackages, { version: false, tag: false });
 });
 
 test('release tag matches the independently versioned bundle', () => {
