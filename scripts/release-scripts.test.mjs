@@ -47,9 +47,6 @@ test('release packages are public and dependency ordered', () => {
     '@wsz987/channel-dingtalk',
     '@wsz987/channel-lark',
     '@wsz987/channel-telegram',
-    '@wsz987/channel-compat',
-    '@wsz987/channel-testkit',
-    '@wsz987/channel-verify',
     '@wsz987/dsh-channels',
   ]);
   const entries = [
@@ -102,10 +99,10 @@ test('release allowlist rejects an omitted workspace dependency', () => {
     entry(
       name,
       name === RELEASE_BUNDLE ? '0.9.0' : '0.1.0',
-      name === RELEASE_BUNDLE ? { '@wsz987/not-released': 'workspace:*' } : {},
+      name === RELEASE_BUNDLE ? { '@wsz987/channel-testkit': 'workspace:*' } : {},
     ),
   );
-  entries.push(entry('@wsz987/not-released', '0.1.0'));
+  entries.push(entry('@wsz987/channel-testkit', '0.1.0'));
   assert.throws(() => releasePackages(entries), /depends on non-release workspace package/);
 });
 
