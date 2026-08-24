@@ -1,5 +1,12 @@
 # @wsz987/dsh-channels
 
+## 0.5.0-beta.1
+
+### Patch Changes
+
+- Restore the runtime-only npm release allowlist. Development and governance
+  packages remain workspace tooling and are not packed or published.
+
 ## 0.5.0-beta.0
 
 ### Minor Changes

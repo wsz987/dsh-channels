@@ -19,13 +19,12 @@ Every release-family package is versioned **independently** — Changesets is
 configured with no `fixed` / `linked` groups
 (`.changeset/config.json`, `baseBranch: main`, `access: public`).
 
-The automated release family is an explicit allowlist: the bundle, its ten
+The automated release family is an explicit allowlist: the bundle plus its ten
 runtime dependencies (`channel-core`, `channel-harness`, `channel-control`,
 `channel-files`, `channel-web`, and the five built-in adapters `channel-weixin`,
-`channel-qq`, `channel-dingtalk`, `channel-lark`, `channel-telegram`), plus the
-three public adapter-authoring/governance packages (`channel-compat`,
-`channel-testkit`, `channel-verify`). This keeps the published verification CLI
-and contract testkit aligned with the contract version they validate.
+`channel-qq`, `channel-dingtalk`, `channel-lark`, `channel-telegram`). The
+development/governance packages (`channel-compat`, `channel-testkit`,
+`channel-verify`) are not packed or published by this workflow.
 
 | Package                | Version |
 | ---------------------- | ------- |
@@ -39,10 +38,7 @@ and contract testkit aligned with the contract version they validate.
 | @wsz987/channel-dingtalk  | 0.5.0-beta.0   |
 | @wsz987/channel-lark      | 0.5.0-beta.0   |
 | @wsz987/channel-telegram  | 0.5.0-beta.0   |
-| @wsz987/dsh-channels      | 0.5.0-beta.0   |
-| @wsz987/channel-compat    | 0.2.1-beta.0   |
-| @wsz987/channel-testkit   | 0.3.0-beta.0   |
-| @wsz987/channel-verify    | 0.2.0-beta.0   |
+| @wsz987/dsh-channels      | 0.5.0-beta.1   |
 `apps/*` are private (`"private": true`) and never published.
 
 Internal workspace dependencies are declared as `workspace:*` and rewritten to
@@ -286,7 +282,7 @@ PRs do not trigger it:
    versioned `@wsz987/dsh-channels` bundle;
 4. runs release-script tests, build, typecheck, the full test suite, fixtures,
    manifests, doctor and bundle validation;
-5. packs the fourteen allowlisted release-family packages in dependency order,
+5. packs the eleven allowlisted release-family packages in dependency order,
    checks the packed manifests and records SHA-512 checksums;
 6. uploads the exact tarballs and downloads them in an isolated publish job;
 7. installs npm 11.5.1 and publishes missing versions with npm Trusted

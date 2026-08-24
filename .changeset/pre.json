@@ -21,6 +21,7 @@
   "changesets": [
     "attachment-gateway-p0-p1",
     "channel-turn-error-notice",
-    "harness-rc2-baseline"
+    "harness-rc2-baseline",
+    "retry-runtime-beta"
   ]
 }
