@@ -1,6 +1,6 @@
 {
   "name": "@wsz987/channel-compat",
-  "version": "0.2.1-beta.0",
+  "version": "0.2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/wsz987/dsh-channels.git"

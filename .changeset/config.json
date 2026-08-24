@@ -11,5 +11,9 @@
     "version": false,
     "tag": false
   },
-  "ignore": []
+  "ignore": [
+    "@wsz987/channel-testkit",
+    "@wsz987/channel-compat",
+    "@wsz987/channel-verify"
+  ]
 }

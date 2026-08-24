@@ -88,6 +88,15 @@ test('Changesets does not version private workspace packages', () => {
   assert.deepEqual(config.privatePackages, { version: false, tag: false });
 });
 
+test('Changesets ignores development and governance packages', () => {
+  const config = JSON.parse(readFileSync(new URL('../.changeset/config.json', import.meta.url), 'utf8'));
+  assert.deepEqual(config.ignore, [
+    '@wsz987/channel-testkit',
+    '@wsz987/channel-compat',
+    '@wsz987/channel-verify',
+  ]);
+});
+
 test('release tag matches the independently versioned bundle', () => {
   assert.doesNotThrow(() => assertReleaseTag('tag', 'v0.9.0', '0.9.0'));
   assert.doesNotThrow(() => assertReleaseTag(undefined, undefined, '0.9.0'));

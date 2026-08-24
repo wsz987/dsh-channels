@@ -23,22 +23,23 @@ The automated release family is an explicit allowlist: the bundle plus its ten
 runtime dependencies (`channel-core`, `channel-harness`, `channel-control`,
 `channel-files`, `channel-web`, and the five built-in adapters `channel-weixin`,
 `channel-qq`, `channel-dingtalk`, `channel-lark`, `channel-telegram`). The
-development/governance packages (`channel-compat`, `channel-testkit`,
-`channel-verify`) are not packed or published by this workflow.
+ignored development/governance packages (`channel-compat`, `channel-testkit`,
+`channel-verify`) are excluded by Changesets and are not versioned, packed or
+published by this workflow.
 
-| Package                | Version |
-| ---------------------- | ------- |
-| @wsz987/channel-core      | 0.5.0-beta.0   |
-| @wsz987/channel-harness   | 0.5.0-beta.0   |
-| @wsz987/channel-control   | 0.5.0-beta.0   |
-| @wsz987/channel-files     | 0.5.0-beta.0   |
-| @wsz987/channel-web       | 0.5.0-beta.0   |
-| @wsz987/channel-weixin    | 0.5.0-beta.0   |
-| @wsz987/channel-qq        | 0.5.0-beta.0   |
-| @wsz987/channel-dingtalk  | 0.5.0-beta.0   |
-| @wsz987/channel-lark      | 0.5.0-beta.0   |
-| @wsz987/channel-telegram  | 0.5.0-beta.0   |
-| @wsz987/dsh-channels      | 0.5.0-beta.0   |
+| Package                    | Target stable version |
+| -------------------------- | --------------------- |
+| @wsz987/channel-core       | 0.5.0                 |
+| @wsz987/channel-harness    | 0.5.0                 |
+| @wsz987/channel-control    | 0.5.0                 |
+| @wsz987/channel-files      | 0.5.0                 |
+| @wsz987/channel-web        | 0.5.0                 |
+| @wsz987/channel-weixin     | 0.5.0                 |
+| @wsz987/channel-qq         | 0.5.0                 |
+| @wsz987/channel-dingtalk   | 0.5.0                 |
+| @wsz987/channel-lark       | 0.5.0                 |
+| @wsz987/channel-telegram   | 0.5.0                 |
+| @wsz987/dsh-channels       | 0.5.0                 |
 `apps/*` are private (`"private": true`) and never published.
 
 Internal workspace dependencies are declared as `workspace:*` and rewritten to
@@ -59,7 +60,7 @@ the published version by `changeset version` at release time.
 4. **Tag** — commit the version bump, then push a release tag:
    `git tag vX.Y.Z && git push origin vX.Y.Z`.
 5. **Publish** — the tag push runs `.github/workflows/release.yml`, which
-   verifies and packs every public workspace package, then publishes those
+   verifies and packs every allowlisted runtime package, then publishes those
    exact tarballs with npm Trusted Publishing. Versions already present on npm
    are skipped so a partial release can be retried safely.
 
