@@ -305,11 +305,39 @@ export function fileTypeFromName(name: string): LarkFileType {
   }
 }
 
-/** Build the minimal interactive card JSON used for streaming replies. */
+/**
+ * Build an Interactive Card payload for streaming replies.
+ *
+ * Lark supports two card schemas:
+ *
+ * - **1.0** (`elements: [{ tag: 'div', text: { tag: 'lark_md', ... } }]`):
+ *   legacy; the `lark_md` text type only renders a SUBSET of Markdown
+ *   (bold, italic, links, inline code; headings/lists/blockquotes/tables
+ *   fall through as raw Markdown text). Several Lark docs still show this
+ *   shape, which is why most third-party bots ship it and silently lose
+ *   headings/lists/tables.
+ * - **2.0** (`schema: '2.0'`, `body.elements: [{ tag: 'markdown', ... }]`):
+ *   the supported schema since Lark deprecated 1.0 for new bots; the
+ *   `markdown` element renders the full Lark-flavoured Markdown (headings,
+ *   ordered/unordered lists, code blocks, blockquotes, tables, links,
+ *   bold/italic, inline code, strikethrough).
+ *
+ * Empirically verified: when the agent reply contains Markdown the user
+ * expects to see rendered (lists, tables, headings), only the 2.0 schema
+ * renders them. Reference: <https://open.feishu.cn/document/common-capabilities/message-card/message-cards-content/using-markdown-tags>.
+ *
+ * Trade-off: 2.0 schema only patches the `body.elements[0].content` field
+ * — same `im.v1.message.patch` flow, so streaming semantics are unchanged.
+ * One supported element type per card, which matches our current usage
+ * (the reply body is a single Markdown stream).
+ */
 export function cardContent(text: string): string {
   return JSON.stringify({
-    config: { wide_screen_mode: true, update_multi: true },
-    elements: [{ tag: 'div', text: { tag: 'lark_md', content: text } }],
+    schema: '2.0',
+    config: { wide_screen_mode: true },
+    body: {
+      elements: [{ tag: 'markdown', content: text }],
+    },
   });
 }
 

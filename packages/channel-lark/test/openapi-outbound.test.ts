@@ -199,7 +199,11 @@ describe('LarkOpenApiOutbound card operations', () => {
       data: { receive_id: 'oc_456', msg_type: 'interactive' },
     });
     expect(JSON.parse((call?.payload as LarkCreateMessagePayload).data.content)).toMatchObject({
-      config: { update_multi: true },
+      schema: '2.0',
+      config: { wide_screen_mode: true },
+      body: {
+        elements: [{ tag: 'markdown' }],
+      },
     });
   });
 
