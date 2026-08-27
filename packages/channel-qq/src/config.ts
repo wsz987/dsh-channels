@@ -39,7 +39,7 @@ export interface QQConfig {
    * stored here; the secret is resolved via `ctx.credentials` at startup.
    */
   appSecretRef: string;
-  /** Whether the bot has markdown permission. */
+  /** Whether ordinary bot replies may use Markdown. Interactive keyboard questions use the new QQ Markdown wire format regardless. */
   markdownSupport: boolean;
   streaming: QQStreamingConfig;
   dedup: QQDedupConfig;

@@ -30,8 +30,9 @@ import { ChannelError, SecureRemoteMediaFetcher } from '@wsz987/channel-core';
 import type { QQBotInboundMessage } from '@tencent-connect/qqbot-nodejs';
 import type { QQConfig } from './config.js';
 import { InboundProcessor } from './inbound.js';
+import { mapInteraction } from './interaction-mapper.js';
 import { OutboundSender } from './outbound.js';
-import { TencentQQSdkClient, type QQSdkClient } from './sdk-client.js';
+import { TencentQQSdkClient, type QQInteractionLike, type QQSdkClient } from './sdk-client.js';
 import { QQStreamingReply } from './streaming-reply.js';
 import { manifest as qqManifest, type QQManifest } from './manifest.js';
 
@@ -92,6 +93,9 @@ export class QQAdapter implements ChannelAdapter {
       cards: false,
       reactions: false,
       threads: false,
+      // Native inline keyboard round-trip (P1): `OutboundMessage.actions` →
+      // QQ inline keyboard, button presses → `interaction.received`.
+      interactiveActions: true,
       // Directional, per-kind media precision:
       // inbound 'bytes' — the inbound path hydrates every binary kind through
       // `SecureRemoteMediaFetcher` before emit (image/file/audio/video);
@@ -159,6 +163,10 @@ export class QQAdapter implements ChannelAdapter {
 
     this.client.onMessage((message) => {
       void this.handleInbound(message);
+    });
+
+    this.client.onInteraction((event) => {
+      void this.handleInteraction(event);
     });
 
     // Never `await bot.start()` inline — it resolves only on stop/abort and
@@ -258,6 +266,52 @@ export class QQAdapter implements ChannelAdapter {
 
   private handleInbound(message: QQBotInboundMessage): Promise<void> {
     return this.inbound.handle(message);
+  }
+
+  private async handleInteraction(event: QQInteractionLike): Promise<void> {
+    // QQ requires an interaction ACK within ~5s; ACK fire-and-forget first so
+    // the platform is satisfied regardless of how long Harness answer
+    // resolution takes. Never awaits Harness resolution before ACKing.
+    if (event.id) {
+      void this.client
+        .acknowledgeInteraction(event.id, 0)
+        .catch((error) =>
+          this.ctx?.logger.debug('[channel-qq] interaction ACK failed', {
+            interactionId: event.id,
+            error: error instanceof Error ? error.message : error,
+          }),
+        );
+    }
+
+    const result = mapInteraction(event, {
+      channel: this.id as never,
+      accountId: this.config.accountId as never,
+    });
+
+    if (!result.ok) {
+      // Fail closed: never emit a guessed event (security doc). Drop with a
+      // debug note — no raw payload dump.
+      this.ctx?.logger.debug('[channel-qq] dropped interaction', { reason: result.reason });
+      return;
+    }
+
+    const ev = result.event;
+    // Inbound summary (project rule): no raw payload dump.
+    this.ctx?.logger.info(
+      `[channel-qq] interaction from ${ev.sender.id} in ${ev.conversation.id}`,
+      {
+        channel: this.id,
+        accountId: this.config.accountId,
+        conversationType: ev.conversation.type,
+        interactionId: ev.interactionId,
+      },
+    );
+
+    // Adapter only emits the canonical event; the Harness Access Gate
+    // authorizes (never implement ACL here).
+    if (this.ctx) {
+      await this.ctx.emit(ev);
+    }
   }
 
   private emitAuth(state: 'authenticated' | 'expired' | 'failed' | 'pending' | 'unknown'): Promise<void> {

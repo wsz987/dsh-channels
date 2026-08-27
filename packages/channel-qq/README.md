@@ -57,7 +57,15 @@ Streaming is target-aware:
 | text / image / file / audio / video | ✅ |
 | markdown | depends on `markdownSupport` |
 | cards / reactions / threads | ❌ |
+| interactive actions | ✅（新版 QQ Markdown inline keyboard） |
 | streaming | `native` (C2C) / `buffered` (default) |
+
+Interactive questions always use the new QQ Markdown keyboard payload
+(`msg_type=2`, `markdown.content`, `keyboard`). Button callbacks use action
+type `1` and require the `INTERACTION` Gateway intent. Ordinary text replies
+continue to follow `markdownSupport`. The QQ Bot account must have the current
+Markdown/interactive-message platform capability; this is a live platform
+entitlement and cannot be proven from local configuration alone.
 
 ## Upstream
 

@@ -294,11 +294,28 @@ export type ChannelEvent =
 
 ```text
 message.received
+interaction.received      （当前 Telegram / QQ；Lark / DingTalk 原生按钮跟进中）
 auth.changed
 connection.changed
 ```
 
 其余类型已稳定，为后续渠道生态预留。
+
+### Harness question presentation（`ask_user_question` 展示模型）
+
+`channel-harness` 通过 `adapter.capabilities` 协商展示质量，不按渠道 id 分支：
+
+```text
+interactiveActions -> 原生按钮（OutboundMessage.actions + interaction.received）
+否则 text          -> 编号文字兜底（1. xxx / 2. xxx，数字/选项文字/自定义/跳过 回答）
+```
+
+准入只看 `text: true`（且存在 active reply context / binding / 无并发 pending），
+`interactiveActions` 只决定「按钮还是文字」，绝不决定「能否承接 Harness 问题」。
+群聊/线程文字回答通过平台 `replyTo` 或每道题生成的短关联码（`Q-XXXXXX`）关联；
+`interaction.received` 当前由 Telegram / QQ 实现，Lark / DingTalk 原生按钮按官方
+SDK 能力逐步补齐（各自完成 round-trip + live gate 后才开启
+`interactiveActions: true`）。
 
 ---
 

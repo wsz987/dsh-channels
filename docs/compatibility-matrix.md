@@ -57,7 +57,20 @@ status: as-built
 | unknown slash | 0.1.1-rc.2 | offline | `commands.test.ts` / bridge（reject，不进 LLM） |
 | `/model` | 0.1.1-rc.2 | offline | `commands-model.test.ts`、`commands-help-status-models.test.ts` |
 | reasoning effort | 0.1.1-rc.2 | offline | `commands-model.test.ts`（effort 解析与透传） |
-| `ask_user_question` | 0.1.1-rc.2 | offline | `question-presenter/-apiproxy-backend/-direct-backend.test.ts` |
+| `ask_user_question` | 0.1.1-rc.2 | offline | `question-presenter/-apiproxy-backend/-direct-backend.test.ts`；渠道矩阵见下方 |
+
+`ask_user_question` 渠道矩阵（Harness 选择题/确认问题的展示与回答方式，P0 统一文本兜底）：
+
+```text
+Telegram : actions + text（原生按钮 + 文字回答）
+Weixin   : text（编号文字回复）
+QQ       : actions + text（新版 QQ Markdown keyboard + @机器人编号文字回答）
+DingTalk : text / native pending（P0 文本兜底；互动卡片 callback 跟进）
+Lark     : text / native pending（P0 文本兜底；V2 卡片按钮 callback 跟进）
+```
+
+所有内置渠道 `text: true` 均可完成 `ask_user_question`；`interactiveActions: true`
+（当前 Telegram / QQ）优先显示原生按钮，其余自动降级为编号文字回复。
 | question multi select | 0.1.1-rc.2 | offline | `question-presenter.test.ts`（multi-select 只提交最新集合） |
 | question custom answer | 0.1.1-rc.2 | offline | `question-presenter.test.ts`（批量问题含自定义文本答案） |
 | plan-review intent | 0.1.1-rc.2 | offline | `question-presenter.test.ts`（intent/detail/header 透传，approve 主按钮） |

@@ -113,7 +113,9 @@ describe('createQQDefinition', () => {
     expect(definition.access).toMatchObject({
       directMessages: true,
       groups: true,
+      mentions: true,
       ownerDiscovery: 'platform',
+      defaults: { requireMention: true },
     });
     expect(definition.setup.authMethods).toEqual(['credentials']);
     // The configured appId deep-links into the QQ openclaw console.

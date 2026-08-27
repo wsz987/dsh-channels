@@ -48,10 +48,18 @@ export {
   adaptLogger,
   mediaOpts,
   decodeDataUri,
+  QQ_MINIMAL_INTENTS,
+  QQ_BUTTON_ACTION_TYPE,
+  QQ_BUTTON_PERMISSION_TYPE,
+  QQ_BUTTON_STYLE_PRIMARY,
+  QQ_BUTTON_STYLE_DEFAULT,
   type QQSdkClient,
   type QQReplyTarget,
   type QQStreamTarget,
   type QQStreamSession,
+  type QQInteractionLike,
+  type QQInlineKeyboardLike,
+  type QQKeyboardButton,
   type MediaOptions,
 } from './sdk-client.js';
 export { InboundProcessor } from './inbound.js';
@@ -59,9 +67,10 @@ export { hydrateMediaParts, type MediaHydratorOptions } from './media-hydrator.j
 // One-version compatibility alias: the hydrator was renamed
 // image-hydrator → media-hydrator; keep the legacy names importable for now.
 export { hydrateImageParts, type ImageHydratorOptions } from './image-hydrator.js';
-export { OutboundSender, toReplyTarget } from './outbound.js';
+export { OutboundSender, toReplyTarget, toQqKeyboard } from './outbound.js';
 export { QQStreamingReply } from './streaming-reply.js';
 export { mapInbound, mapMessageParts, type QQInboundMeta } from './mapper.js';
+export { mapInteraction, type QQInteractionMapping, type QQInteractionDropReason } from './interaction-mapper.js';
 export { manifest, type QQManifest } from './manifest.js';
 
 export function apply(ctx: Context, config: QQConfig, deps: QQAdapterDeps = {}): void {

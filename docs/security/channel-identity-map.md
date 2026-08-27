@@ -20,7 +20,8 @@ mention 支持。所有 ID 一律作为 **opaque string** 处理（在 Harness a
 - canonical conversation.id：C2C `senderId`（= sender.id）；Group `groupOpenid`
 - dm/group：C2C → dm；Group → group
 - owner discovery：`platform`（QQ 私聊仅创建者；不显示本地 claim）
-- mention：descriptor 先 `false`，完成 activation contract 后再置 `true`
+- mention：新版 Gateway 的 `GROUP_AT_MESSAGE_CREATE` → `mentionedBot=true`，
+  `GROUP_MESSAGE_CREATE` → `false`；descriptor 为 `true`，新群规则默认要求 @
 - fact：映射稳定；QQ 私聊仅创建者（`platform`，不显示本地 claim）
 
 ## DingTalk

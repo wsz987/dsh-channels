@@ -45,6 +45,23 @@ describe('mapInbound', () => {
     );
     expect(event.conversation).toEqual({ id: 'group_789', type: 'group' });
     expect(event.sender).toEqual({ id: 'user_321', name: 'bob' });
+    expect(event.message.activation?.mentionedBot).toBe(false);
+  });
+
+  it('maps a new-QQ group-at event to a strict mention fact and strips the leading bot marker', () => {
+    const event = mapInbound(
+      inbound({
+        rawEventType: 'GROUP_AT_MESSAGE_CREATE',
+        kind: 'group',
+        senderId: 'user_321',
+        groupOpenid: 'group_789',
+        content: '<@!bot_app_id> 2',
+        replyTarget: { scope: 'group', targetId: 'group_789', msgId: 'msg_grp_at_1' },
+      }),
+      meta,
+    );
+    expect(event.message.activation?.mentionedBot).toBe(true);
+    expect(event.message.content).toEqual([{ type: 'text', text: '2' }]);
   });
 
   it('parses createdAt from the ISO timestamp and preserves raw', () => {

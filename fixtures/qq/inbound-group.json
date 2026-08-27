@@ -31,6 +31,7 @@
     "message": {
       "id": "msg_grp_1",
       "content": [{ "type": "text", "text": "hello group" }],
+      "activation": { "mentionedBot": true },
       "createdAt": 1786672860000
     },
     "raw": {

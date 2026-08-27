@@ -29,11 +29,18 @@ export const testLogger = {
 
 export class QuestionAdapter {
   readonly id = 'telegram';
-  readonly capabilities = { interactiveActions: true };
+  readonly capabilities: { text: boolean; interactiveActions: boolean };
   readonly sent: OutboundMessage[] = [];
   readonly edited: OutboundMessage[] = [];
   editGate?: Promise<void>;
   failSend = false;
+
+  constructor(options: { interactiveActions?: boolean } = {}) {
+    this.capabilities = {
+      text: true,
+      interactiveActions: options.interactiveActions ?? true,
+    };
+  }
 
   async send(_target: unknown, message: OutboundMessage) {
     if (this.failSend) throw new Error('send failed');
@@ -52,7 +59,7 @@ export function message(
   text: string,
   senderId = 'owner',
   conversationId = 'chat-1',
-  options: { type?: 'dm' | 'group'; replyTo?: string; threadId?: string } = {},
+  options: { type?: 'dm' | 'group'; replyTo?: string; threadId?: string; mentionedBot?: boolean } = {},
 ): MessageReceived {
   return {
     type: 'message.received',
@@ -68,6 +75,9 @@ export function message(
       id: `m-${text}` as never,
       content: [{ type: 'text', text }],
       ...(options.replyTo ? { replyTo: options.replyTo as never } : {}),
+      ...(options.mentionedBot !== undefined
+        ? { activation: { mentionedBot: options.mentionedBot } }
+        : {}),
     },
   };
 }
@@ -145,8 +155,11 @@ export function setupPresenter(options: {
   timeoutMs?: number;
   conversationType?: 'dm' | 'group';
   threadId?: string;
+  interactiveActions?: boolean;
 } = {}) {
-  const adapter = new QuestionAdapter();
+  const adapter = new QuestionAdapter({
+    interactiveActions: options.interactiveActions ?? true,
+  });
   const { apiProxy, responses } = makeApiProxy();
   const replyContexts = new ReplyContextStore();
   if (options.active !== false) {

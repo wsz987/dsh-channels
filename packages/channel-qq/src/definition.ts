@@ -190,9 +190,13 @@ export function createQQDefinition(options: QQDefinitionOptions): ChannelDefinit
     access: {
       directMessages: true,
       groups: true,
-      mentions: false,
+      // New QQ gateway distinguishes GROUP_AT_MESSAGE_CREATE from ordinary
+      // GROUP_MESSAGE_CREATE; the mapper publishes this as a strict boolean
+      // activation fact.
+      mentions: true,
       ownerDiscovery: 'platform',
       identityLabels: { user: 'QQ User OpenID', group: 'QQ Group OpenID' },
+      defaults: { requireMention: true },
     },
 
     async getConfiguredState(): Promise<ConfiguredState> {

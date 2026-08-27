@@ -51,6 +51,9 @@ export function mapInbound(msg: QQBotInboundMessage, meta: QQInboundMeta): Messa
       id: msg.messageId as MessageId,
       content: mapMessageParts(msg),
       createdAt: Date.parse(msg.timestamp),
+      ...(group
+        ? { activation: { mentionedBot: msg.rawEventType === 'GROUP_AT_MESSAGE_CREATE' } }
+        : {}),
     },
     raw: msg.raw,
   };
@@ -66,8 +69,9 @@ export function mapInbound(msg: QQBotInboundMessage, meta: QQInboundMeta): Messa
 export function mapMessageParts(msg: QQBotInboundMessage): MessagePart[] {
   const parts: MessagePart[] = [];
 
-  if (msg.content) {
-    parts.push(...textParts(msg.content));
+  const content = normalizeInboundText(msg);
+  if (content) {
+    parts.push(...textParts(content));
   }
 
   for (const attachment of msg.attachments ?? []) {
@@ -82,6 +86,16 @@ export function mapMessageParts(msg: QQBotInboundMessage): MessagePart[] {
   }
 
   return parts;
+}
+
+/**
+ * New QQ group-at events are a reliable activation fact. Their textual body
+ * may still start with the platform `<@...>` marker; remove only that leading
+ * addressed-bot marker so Harness sees the user's actual answer (`2`, etc.).
+ */
+function normalizeInboundText(msg: QQBotInboundMessage): string {
+  if (msg.rawEventType !== 'GROUP_AT_MESSAGE_CREATE') return msg.content;
+  return msg.content.replace(/^\s*<@!?[^>]+>\s*/u, '').trimStart();
 }
 
 /** Map one SDK inbound attachment to a structured part (or undefined). */
