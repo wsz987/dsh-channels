@@ -22,6 +22,8 @@
 12. **Access policy 变更无需重启 adapter**（每次 inbound 直读）。
 13. **Owner Claim 永不进入 Agent / Session / Binding / Command plane**。
 14. **channel-harness 必须注入 Access Policy Resolver**；未接线不得进入放行路径。
+15. **群聊命令仅 Owner 可执行**：解析出斜杠命令后，只有 canonical
+    `sender.id === policy.ownerId` 才能进入命令面；缺少 owner 或不匹配一律拒绝。
 
 ## Policy Schema
 
@@ -64,10 +66,16 @@
 3. Load policy（missing/invalid → DROP）
 4. Security Authorization（DM/group/sender）
 5. Activation Gate（requireMention）
-6. 之后才进入 conversation key / parseCommand / /stop / Session / Binding / Agent
+6. `parseCommand`；群聊命令执行 Owner Gate
+7. 之后才进入 conversation key / `/stop` / Session / Binding / Agent
 
 > `/stop` 的 admission 点移到 Access Gate 之后：未授权用户绝对不能 cancel 本机 Agent，
 > 同时已授权 `/stop` 的 fast-path scheduling 语义保持不变。
+
+群聊命令 Owner Gate 不识别或查询各平台的“群管理员”角色，也不增加渠道特判。普通群消息
+仍按群规则授权；任何斜杠命令（包括未知命令和未来新增命令）默认只有已识别的
+`policy.ownerId` 可以执行。拒绝发生在 `/stop` generation bump、Session、Binding、Workspace
+和 Agent 之前。
 
 ## Owner
 

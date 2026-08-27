@@ -1174,6 +1174,11 @@ PDF 解析使用 `unpdf`（PDF.js），DOCX 使用 `mammoth`，XLSX 使用 `xlsx
   （已 parse 出命令名但 registry miss），渠道回复一条「未知命令：/xxx，输入 /help
   查看命令。」提示，**绝**不作为普通用户输入交给模型（与官方 rc.2 Host 一致）；Agent
   scope 会 shadow 同名 global（同 scope 重名注册直接报错）。
+- **群聊命令 Owner Gate**：普通群消息通过统一 Access Gate 后，任何已解析的斜杠命令
+  仍必须满足 canonical `sender.id === policy.ownerId`；缺少 owner 或不匹配时统一拒绝。
+  Gate 位于 `/stop` fast path 和任何 Session / Binding / Workspace / Agent 副作用之前，
+  覆盖内置、全局、未知及未来新增命令。各 Adapter 不识别平台群管理员，也不实现渠道
+  私有命令 ACL。
 - **通用控制面 + Web 设置**（`channel-control` + `channel-web`，见上文「通用 Channel
   Control Plane」）：扫码 / 设备授权 / 凭证表单统一为 `AuthSession` 模型，浏览器只
   消费净化的 `PublicAuthSession`，Secret 永不离开进程。

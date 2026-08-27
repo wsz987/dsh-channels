@@ -70,6 +70,22 @@ const denyAllowlist: ChannelAccessPolicy = {
   groupPolicy: 'disabled',
   groups: {},
 };
+const openGroupWithOwner: ChannelAccessPolicy = {
+  version: 1,
+  preset: 'custom',
+  ownerId: 'owner_123',
+  dmPolicy: 'disabled',
+  allowFrom: [],
+  groupPolicy: 'allowlist',
+  groups: {
+    group_123: {
+      enabled: true,
+      senderPolicy: 'open',
+      allowFrom: [],
+      requireMention: false,
+    },
+  },
+};
 
 class StubResolver implements ChannelAccessPolicyResolver {
   resolveState: ResolvedAccessPolicy = { state: 'present', policy: openDm };
@@ -152,6 +168,14 @@ function makeMessageEvent(overrides: Partial<MessageReceived> = {}): MessageRece
 
 function textEvent(id: string, text: string): Partial<MessageReceived> {
   return { message: { id, content: [{ type: 'text', text }] } };
+}
+
+function groupMessageEvent(senderId: string, id: string, text: string): MessageReceived {
+  return makeMessageEvent({
+    conversation: { id: 'group_123', type: 'group' },
+    sender: { id: senderId },
+    ...textEvent(id, text),
+  });
 }
 
 interface Fixture {
@@ -391,5 +415,53 @@ describe('Fail-closed Access Gate', () => {
     // immediately — i.e. authorized /stop keeps its scheduling semantics.
     expect(gateway.cancels.length).toBeGreaterThan(0);
     expect(adapter.sent.map((s) => s.text)).toContain('已停止当前任务。');
+  });
+
+  it('denies a group command from a non-owner before session creation', async () => {
+    const { gateway, bindingStore, resolver, adapter, bridge } = makeFixture(new StubResolver());
+    resolver.resolveState = { state: 'present', policy: openGroupWithOwner };
+
+    await bridge.handleChannelEvent(groupMessageEvent('member_123', 'm1', '/new'));
+
+    expect(gateway.createCalls).toHaveLength(0);
+    expect(gateway.followups).toHaveLength(0);
+    expect(await bindingStore.get('weixin:main:group_123')).toBeUndefined();
+    expect(adapter.sent.map((s) => s.text)).toContain('群聊指令仅所有者可用。');
+  });
+
+  it('denies a group /stop from a non-owner without cancelling the live agent', async () => {
+    const { gateway, resolver, adapter, bridge } = makeFixture(new StubResolver());
+    resolver.resolveState = { state: 'present', policy: openGroupWithOwner };
+    await bridge.handleChannelEvent(groupMessageEvent('member_123', 'm1', 'hello'));
+    expect(gateway.createCalls).toHaveLength(1);
+
+    await bridge.handleChannelEvent(groupMessageEvent('member_123', 'm2', '/stop'));
+
+    expect(gateway.cancels).toHaveLength(0);
+    expect(adapter.sent.map((s) => s.text)).toContain('群聊指令仅所有者可用。');
+  });
+
+  it('allows the identified owner to execute group commands', async () => {
+    const { gateway, resolver, adapter, bridge } = makeFixture(new StubResolver());
+    resolver.resolveState = { state: 'present', policy: openGroupWithOwner };
+    await bridge.handleChannelEvent(groupMessageEvent('owner_123', 'm1', 'hello'));
+
+    await bridge.handleChannelEvent(groupMessageEvent('owner_123', 'm2', '/stop'));
+
+    expect(gateway.cancels.length).toBeGreaterThan(0);
+    expect(adapter.sent.map((s) => s.text)).toContain('已停止当前任务。');
+  });
+
+  it('denies every group command when no owner has been identified', async () => {
+    const { gateway, resolver, adapter, bridge } = makeFixture(new StubResolver());
+    resolver.resolveState = {
+      state: 'present',
+      policy: { ...openGroupWithOwner, ownerId: undefined },
+    };
+
+    await bridge.handleChannelEvent(groupMessageEvent('member_123', 'm1', '/help'));
+
+    expect(gateway.createCalls).toHaveLength(0);
+    expect(adapter.sent.map((s) => s.text)).toContain('群聊指令仅所有者可用。');
   });
 });
