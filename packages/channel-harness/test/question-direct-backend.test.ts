@@ -171,4 +171,39 @@ describe('DirectQuestionBackend (official UserQuestionProvider, headless)', () =
     });
     await expect(ask).resolves.toEqual({ answers: [{ id: 'plan_review', selected: ['放弃'] }] });
   });
+
+  // P0 §7.2 — a text-only adapter (interactiveActions=false) presented via the
+  // Direct backend must NOT trigger ASK_ABORTED, and a text answer resolves
+  // the provider promise. The Direct backend declines only when the presenter
+  // itself declines (no binding / adapter absent / text unsupported).
+  it('keeps a text-only adapter ask alive and resolves it with a text answer', async () => {
+    const { backend, sink, userQuestions } = setup(true);
+    const provider = userQuestions.getRegistered()!;
+    // Presenter-side admission is capability-driven (see question-presenter
+    // tests); here we emulate the sink accepting the question — the Direct
+    // backend must not abort just because the adapter has no buttons.
+    const ask = provider.ask({ questions: [planReviewQuestion], agent: fakeAgent });
+    await vi.waitFor(() => expect(sink.requests).toHaveLength(1));
+
+    const answers = [{ id: 'plan_review', selected: [], custom: '需要修改' }];
+    await backend.resolve({
+      key: sink.requests[0]!.key,
+      sessionId: 'session-1',
+      answer: { answers },
+    });
+    await expect(ask).resolves.toEqual({ answers });
+    expect(sink.settled).toHaveLength(0);
+  });
+
+  it('declines (ASK_ABORTED) when the presenter cannot take ownership', async () => {
+    const { backend, sink, userQuestions } = setup(false);
+    const provider = userQuestions.getRegistered()!;
+    const ask = provider.ask({ questions: [planReviewQuestion], agent: fakeAgent });
+    await vi.waitFor(() => expect(sink.requests).toHaveLength(1));
+
+    // Sink returns false (e.g. adapter absent / text unsupported): the ask
+    // fails fast instead of hanging — headless has no other answer surface.
+    await expect(ask).rejects.toMatchObject({ code: 'ASK_ABORTED' });
+    expect(sink.settled).toHaveLength(0);
+  });
 });

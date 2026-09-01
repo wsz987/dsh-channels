@@ -20,6 +20,24 @@ export interface ConversationRef {
   id: ConversationId;
   type: 'dm' | 'group';
   threadId?: ThreadId;
+
+  /**
+   * Human/platform-facing identifier discovered by the adapter at the trust
+   * boundary (e.g. QQ group number alongside the canonical `group_openid`).
+   *
+   * NEVER used for runtime authorization: the Access Gate exact-matches
+   * `conversation.id` only. `externalId` exists for control-plane display and
+   * canonical↔external identity mapping; it must not replace or rewrite the
+   * canonical `id`.
+   */
+  externalId?: string;
+
+  /**
+   * Optional human-readable conversation title (e.g. group display name).
+   *
+   * NEVER used for authorization — display metadata only.
+   */
+  name?: string;
 }
 
 export interface SenderRef {

@@ -12,12 +12,14 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { Context } from '@deepseek-ai/cordis';
-import { ChannelService, ChannelError, type MessageReceived } from '@wsz987/channel-core';
+import { ChannelService, ChannelError, type InteractionReceived, type MessageReceived } from '@wsz987/channel-core';
 import { createTestContext } from '@wsz987/channel-testkit';
 import {
   LarkSdkUpstream,
   HttpLarkUpstream,
   InboundProcessor,
+  CARD_ACTION_EVENT_KEY,
+  toGatewayInteraction,
   toGatewayRaw,
   MESSAGE_EVENT_KEY,
 } from '../src/index.ts';
@@ -72,6 +74,10 @@ class FakeOutbound implements LarkUpstream {
     return Promise.resolve({});
   }
 
+  sendInteractive(): Promise<unknown> {
+    return Promise.resolve({});
+  }
+
   createCard(): Promise<CardCreateResult> {
     return Promise.resolve({ cardId: 'fake-card' });
   }
@@ -85,6 +91,10 @@ class FakeOutbound implements LarkUpstream {
   }
 
   failCard(): Promise<unknown> {
+    return Promise.resolve({});
+  }
+
+  updateInteractive(): Promise<unknown> {
     return Promise.resolve({});
   }
 }
@@ -163,6 +173,18 @@ function v1Event(data: LarkMessageEventData = flatEvent()): Record<string, unkno
     schema: '2.0',
     header: { event_id, event_type: event_type ?? MESSAGE_EVENT_KEY, token, create_time },
     event: rest,
+  };
+}
+
+function cardActionEvent(): Record<string, unknown> {
+  return {
+    schema: '2.0',
+    header: { event_id: 'evt_card_1', event_type: CARD_ACTION_EVENT_KEY, create_time: '1700000000000' },
+    event: {
+      context: { open_message_id: 'om_card_1', open_chat_id: 'oc_group_1' },
+      operator: { open_id: 'ou_user_1' },
+      action: { tag: 'button', value: { actionId: 'question:option:1' } },
+    },
   };
 }
 
@@ -319,6 +341,80 @@ describe('toGatewayRaw (v1 message event → gateway raw shape)', () => {
 });
 
 describe('LarkSdkUpstream.receive', () => {
+  it('uses the official SDK normalizer for card actions and emits an interaction envelope', async () => {
+    const client = new FakeWsClient();
+    const upstream = new LarkSdkUpstream({
+      client,
+      outbound: new FakeOutbound(),
+      resolveChatType: async (chatId) => chatId === 'oc_group_1' ? 'group' : undefined,
+    });
+    const controller = new AbortController();
+    const received: unknown[] = [];
+    const loop = upstream.receive(controller.signal, (raw) => received.push(raw));
+
+    await vi.waitFor(() => expect(client.starts).toBe(1), { timeout: 2000 });
+    expect(registeredKeys(client)).toContain(CARD_ACTION_EVENT_KEY);
+    await client.emit(cardActionEvent());
+    await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: 2000 });
+    expect(received[0]).toEqual({
+      type: 'interaction',
+      msgId: 'om_card_1',
+      eventId: 'evt_card_1',
+      senderId: 'ou_user_1',
+      conversationId: 'oc_group_1',
+      chatType: 'group',
+      interactionId: 'om_card_1',
+      action: 'question:option:1',
+      value: { actionId: 'question:option:1' },
+    });
+    controller.abort();
+    await loop;
+  });
+
+  it('fails closed when the official chat mode cannot be resolved for a card action', async () => {
+    const raw = cardActionEvent();
+    await expect(toGatewayInteraction(raw.event, async () => undefined)).resolves.toBeUndefined();
+  });
+
+  it('routes an SDK-normalized action through InboundProcessor as interaction.received', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    const client = new FakeWsClient();
+    const upstream = new LarkSdkUpstream({
+      client,
+      outbound: new FakeOutbound(),
+      resolveChatType: async () => 'group',
+    });
+    const processor = new InboundProcessor({
+      ctx,
+      meta: { channel: 'lark' as never, accountId: 'main' as never },
+      dedupEnabled: true,
+      dedupWindowMs: 5000,
+    });
+    const listener = vi.fn();
+    service.on(listener);
+    const controller = new AbortController();
+    const loop = upstream.receive(controller.signal, (raw) => {
+      void processor.handle(raw).catch(() => undefined);
+    });
+
+    await vi.waitFor(() => expect(client.starts).toBe(1), { timeout: 2000 });
+    await client.emit(cardActionEvent());
+    await vi.waitFor(() => {
+      expect(listener.mock.calls.some((call) => call[0]?.type === 'interaction.received')).toBe(true);
+    }, { timeout: 2000 });
+    const event = listener.mock.calls
+      .map((call) => call[0] as InteractionReceived)
+      .find((candidate) => candidate.type === 'interaction.received')!;
+    expect(event).toMatchObject({
+      conversation: { id: 'oc_group_1', type: 'group' },
+      sender: { id: 'ou_user_1' },
+      action: 'question:option:1',
+    });
+    controller.abort();
+    await loop;
+  });
+
   it('registers the message event and connects, then disconnects on abort', async () => {
     const client = new FakeWsClient();
     const upstream = sdkUpstream(client, new FakeOutbound());

@@ -131,6 +131,21 @@ describe('ChannelControlService.getAccess', () => {
       expect.objectContaining({ code: 'CLAIM_NOT_SUPPORTED' }),
     );
   });
+
+  it('does not retain a stale platform owner when the provider scope has rotated', async () => {
+    let owner: string | undefined = 'owner-a';
+    const { service } = harness([
+      makeDef('qq', platformPrivateDescriptor, {
+        resolveOwnerIdentity: async () => owner,
+      }),
+    ]);
+    const initial = await service.getAccess('qq');
+    expect(initial.owner).toMatchObject({ configured: true, id: 'owner-a', source: 'platform' });
+    owner = undefined;
+    const rotated = await service.getAccess('qq');
+    expect(rotated.owner.configured).toBe(false);
+    expect(rotated.policy?.ownerId).toBeUndefined();
+  });
 });
 
 describe('ChannelControlService.saveAccess', () => {

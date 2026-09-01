@@ -125,7 +125,7 @@ DeepSeek Harness / Cordis
 | Weixin | `@wsz987/channel-weixin` | Tencent iLink `source-port` | upstream fixture `2.4.6`，manifest live pin 待完成 | `experimental` | 无 setup 字段；QR | text/image；buffered |
 | QQ | `@wsz987/channel-qq` | Tencent 官方 SDK | `@tencent-connect/qqbot-nodejs@1.0.4` | `tested`* | AppID + AppSecret | text/image/file/audio/video；C2C native stream |
 | DingTalk | `@wsz987/channel-dingtalk` | 官方 Stream SDK + OpenAPI | `dingtalk-stream@2.1.5` | `tested`* | ClientID + ClientSecret；device/credentials | text/image/file/audio/cards；edit stream |
-| Lark/Feishu | `@wsz987/channel-lark` | 官方 Node SDK | `@larksuiteoapi/node-sdk@1.73.0` | `tested`* | AppID + AppSecret；credentials/hybrid | text/image/file/audio/cards/reactions/threads；edit stream |
+| Lark/Feishu | `@wsz987/channel-lark` | 官方 Node SDK | `@larksuiteoapi/node-sdk@1.73.1` | `tested`* | AppID + AppSecret；credentials/hybrid | text/image/file/audio/cards/reactions/threads/interactive actions；edit stream |
 | Telegram | `@wsz987/channel-telegram` | Bot API HTTP 直连 | manifest `Bot API >=10.2` | `experimental` | Bot token | text/image/file/audio/video/threads；Rich Markdown + streaming |
 
 \* `tested` 当前主要指 contract/fixture/offline SDK tests 已通过；**不等于真实平台权限与账号 live gate 已通过**。
@@ -223,6 +223,7 @@ Tenant / 应用身份权限：
 
 事件：
 - im.message.receive_v1
+- card.action.trigger（原生卡片按钮）
 ```
 
 当前实现还使用：
@@ -231,6 +232,7 @@ Tenant / 应用身份权限：
 im.v1.image.create
 im.v1.file.create
 im.v1.message.patch
+im.v1.chat.get（卡片按钮回调的会话类型确认）
 message reaction add/remove（Typing）
 ```
 
@@ -238,6 +240,7 @@ message reaction add/remove（Typing）
 
 - 图片/文件资源上传权限
 - 卡片/消息 patch 所需权限
+- `im.v1.chat.get` 所需的当前群信息读取权限（卡片按钮启用时，无法读取则 fail-closed）
 - `card.typingIndicator=true` 时 reaction 相关权限
 - 如果产品需要群聊中“非 @ 消息”，需申请对应的敏感“群组全部消息”权限，而不是只依赖 `group_at_msg`
 
@@ -265,7 +268,7 @@ GROUP_AND_C2C
 INTERACTION
 ```
 
-**当前 DSH 风险点**：
+**CODE-CONFIRMED**：当前 DSH 已显式传入最小 intent mask：
 
 ```ts
 new QQBot({
@@ -275,20 +278,13 @@ new QQBot({
   markdownSupport,
   transport: 'websocket',
   tokenPrefetch: 'sync',
-  // 没有显式传 intents
+  intents: QQ_MINIMAL_INTENTS,
 })
 ```
 
-腾讯 SDK 在未指定时默认 `FULL_INTENTS`。
-
-这会导致：
-
-- DSH 实际只监听主要 `message` 事件，却可能申请更多 intents
-- App 未被允许这些 intents 时，Gateway 可能返回：
-  - `4914 INSUFFICIENT_INTENTS`
-  - `4915 DISALLOWED_INTENTS`
-
-**建议 P1 修复**：让 QQ adapter 明确声明最小 intents，或做 DSH-side configurable intent mask，不再依赖 SDK `FULL_INTENTS` 默认值。
+`QQ_MINIMAL_INTENTS = GROUP_AND_C2C | INTERACTION`，不再依赖 SDK 的
+`FULL_INTENTS` 默认值。真实 QQ live gate 仍需确认目标 App 已获准这两项，否则 Gateway
+可能返回 `4914 INSUFFICIENT_INTENTS` / `4915 DISALLOWED_INTENTS`。
 
 另外：
 
@@ -345,6 +341,11 @@ AI Card
 
 具体 OpenAPI 权限名称以**当次官方 API 文档的“权限要求”**为准，不要从旧博客或第三方镜像猜名字。
 
+群消息 @ 激活：官方机器人回调提供 `isInAtList`。当前 DSH stream upstream 在 zod
+信任边界校验该字段，并映射为 `message.activation.mentionedBot`；缺失字段不作猜测。
+因此 DingTalk descriptor 声明 `mentions: true`，新群规则默认 `requireMention: true`。
+这只证明离线代码链路，真实应用仍需 live gate 验证回调在目标群中的取值。
+
 ### 6.4 Telegram
 
 Telegram Bot API 没有 Lark 风格 OAuth scope 表。
@@ -376,14 +377,9 @@ getUpdates allowed_updates=['message', 'callback_query']
 
 **CODE-CONFIRMED**：仓库 manifest 与 fixtures 已迁移到 **Bot API 10.2**，`auto` 使用 Rich Markdown；最低支持版本为 10.2，不维护旧 Bot API server。状态仍为 `experimental`，Rich output、draft streaming、callback 与 429 recovery 仍需真实 Bot live gate。
 
-**CODE-CONFIRMED / RELEASE-BLOCKING**：当前仍有三项不能由离线测试掩盖的实现缺口：
-
-1. `sendMedia()` 尚未像 text/edit 方法一样解析并检查 Bot API `{ ok, result, ... }`
-   envelope；`ok: false` 可能被上层当作 delivered。
-2. 普通 `message` mapper 与 `dedupKey()` 仍对不可信 update 使用 TypeScript cast，未建立
-   完整 zod trust-boundary schema。
-3. `callback_query.message/chat` 在 schema 中可缺失，mapper 却会回退为 sender-id DM；
-   inline-message callback 没有可靠 conversation identity，发布前应 fail closed 或建立单独 contract。
+**CODE-CONFIRMED**：`sendMedia()` 已校验 Bot API `ok` envelope；普通 message/update 与
+callback payload 已经过 zod trust-boundary schema；缺少 `message.chat` 的 callback query
+会 fail closed。剩余工作是真实 Bot live gate，不再有这三项离线 release blocker。
 
 ### 6.5 Weixin iLink
 
@@ -436,18 +432,16 @@ Granted（真实检测）
 Missing（真实检测失败）
 ```
 
-### P1 — QQ intents 应最小化
+### CODE-CONFIRMED — QQ intents 已最小化
 
-当前 DSH 没传 `intents`，官方 SDK 默认 `FULL_INTENTS`。
-
-建议：
+当前 DSH 已按实际事件面显式传入：
 
 ```text
-DSH 当前使用什么事件
+GROUP_AND_C2C | INTERACTION
     ↓
-计算最小 intent mask
+QQ_MINIMAL_INTENTS
     ↓
-显式传入 QQBot
+显式传入 QQBot；live gate 核验 App 权限
 ```
 
 而不是请求所有 intents。
@@ -459,11 +453,11 @@ DSH minimum:  >=10.2
 官方当前:     10.2 (2026-07-14)
 ```
 
-进入 live gate 前先修复：
+离线 release blockers 已修复；进入 live gate 时确认：
 
-1. media response envelope 必须校验 `ok` 并保留结构化错误
-2. message/update payload 必须经 zod `safeParse` 后再进入 mapper
-3. 无 `message.chat` 的 callback query 必须 fail closed，禁止伪造成 DM
+1. media response envelope 的结构化错误行为符合真实 Bot API
+2. message/update 与 callback schema 覆盖真实 payload
+3. 无 `message.chat` 的 callback query 保持 fail closed
 4. 明确接受 polling 启动会删除已有 webhook 的运维语义
 
 随后执行：
@@ -718,10 +712,10 @@ Stable Core
 优先顺序：
 
 1. 保持 `channel-web` 不展示静态 permission 状态；恢复前先实现真实 permission checker
-2. QQ 显式最小 intents
+2. QQ 用真实 App 完成最小 intents live gate
 3. Telegram 完成 Bot API 10.2 Rich Message 真实 live gate
 4. Weixin 完成真实 iLink live gate 并 pin version/commit
-5. Lark/DingTalk 把真实平台 permission/event/API 要求整理成机器可读 metadata，未来再接真实 permission checker
+5. Lark 把真实平台 permission/event/API 要求整理成机器可读 metadata，未来再接真实 permission checker；DingTalk mention activation 已接入但仍需 live gate
 
 详细矩阵与官方来源见 `references/`。
 
@@ -747,6 +741,7 @@ Snapshot: `main@78655a40a266c4122ecd0c030b0a882fdb92f2df` (2026-08-19)
 | cards | ❌ | ❌ | ✅ | ✅ | ❌ |
 | reactions | ❌ | ❌ | ❌ | ✅ | ❌ |
 | threads | ❌ | ❌ | ❌ | ✅ | ✅ |
+| group @ activation | ❌ (no groups) | ✅ | ✅ (`isInAtList`) | ⚠️ raw `mentions[]`, bot identity pending | ✅ |
 | streaming | buffered | C2C native / else buffered | edit | edit | edit |
 
 > Capability 以 `adapter.ts` 为实现事实。协议参考能做但 DSH 没实现的能力不能写成支持。
@@ -947,7 +942,7 @@ token
 | Weixin | source-port | `Tencent/openclaw-weixin` / `@tencent-weixin/openclaw-weixin` | live pin pending; fixtures `2.4.6` | experimental |
 | QQ | sdk | `@tencent-connect/qqbot-nodejs` | `1.0.4` | tested |
 | DingTalk | sdk | `dingtalk-stream` | `2.1.5` | tested |
-| Lark | sdk | `@larksuiteoapi/node-sdk` | `1.73.0` | tested |
+| Lark | sdk | `@larksuiteoapi/node-sdk` | `1.73.1` | tested |
 | Telegram | source/direct HTTP | Telegram Bot API | `>=10.2` | experimental |
 
 ## 4. Actual interface surface
@@ -1059,7 +1054,8 @@ sendVideo
 | P2P receive | `im:message.p2p_msg:readonly` | core |
 | Group @ receive | `im:message.group_at_msg:readonly` | core |
 | Send as bot | `im:message:send_as_bot` | core |
-| Event subscription | `im.message.receive_v1` | core |
+| Event subscription | `im.message.receive_v1` + `card.action.trigger` | core + native buttons |
+| Card action chat mode | `im.v1.chat.get` + current chat-read permission | native buttons, LIVE-REQUIRED |
 | Image/file resources | current image/file resource upload permission | if media enabled |
 | Message reaction | reaction permission | if typingIndicator enabled |
 | All group messages | sensitive all-group-message permission | only if product requires non-@ messages |
@@ -1075,7 +1071,8 @@ sendVideo
 | Interaction | `INTERACTION` only if used |
 | Markdown | platform Markdown entitlement; `markdownSupport=true` only after granted |
 
-**Current issue**: SDK default is `FULL_INTENTS` because DSH does not pass `intents`.
+**Current status**: DSH explicitly passes `GROUP_AND_C2C | INTERACTION` through
+`QQ_MINIMAL_INTENTS`; live verification must confirm the target App is entitled to both.
 
 ### DingTalk
 
@@ -1195,6 +1192,7 @@ im:message.p2p_msg:readonly
 im:message.group_at_msg:readonly
 im:message:send_as_bot
 im.message.receive_v1
+card.action.trigger
 ```
 
 ## QQ
@@ -1397,13 +1395,13 @@ For each target channel:
 
 ## I. Mandatory known checks (snapshot 2026-08-19)
 
-- [ ] QQ: verify DSH does not accidentally rely on SDK `FULL_INTENTS`.
+- [x] QQ: DSH explicitly uses `QQ_MINIMAL_INTENTS`; it does not rely on SDK `FULL_INTENTS`.
 - [ ] QQ: `markdownSupport=true` only when platform permission exists.
 - [x] Telegram: align manifest and fixtures to Bot API 10.2; live gate remains pending.
 - [x] Telegram: document that polling startup deletes an existing webhook.
-- [ ] Telegram: validate media Bot API envelopes before reporting delivery.
-- [ ] Telegram: replace raw message/update casts with zod trust-boundary parsing.
-- [ ] Telegram: fail closed for callback queries without `message.chat`.
+- [x] Telegram: validate media Bot API envelopes before reporting delivery.
+- [x] Telegram: replace raw message/update casts with zod trust-boundary parsing.
+- [x] Telegram: fail closed for callback queries without `message.chat`.
 - [ ] Weixin: keep file outbound unsupported until concrete upstream supports it.
 - [ ] Weixin: replace pending live version/commit after real gate.
 - [ ] Weixin: do not treat `channels.weixin.qq.com` as iLink protocol documentation.

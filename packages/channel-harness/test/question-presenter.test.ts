@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { QuestionAdapter } from './question-test-utils.ts';
 import {
   actionId,
   interaction,
@@ -126,6 +127,19 @@ describe('ChannelQuestionPresenter', () => {
     }))).resolves.toBe(true);
     expect(responses).toHaveLength(1);
     expect(adapter.sent[0]?.replyPrompt).toBeDefined();
+  });
+
+  it('consumes an explicitly @mentioned numeric answer to an actions question in a group', async () => {
+    const { backend, presenter, responses } = setupPresenter({ conversationType: 'group' });
+    await backend.handleMuxEnvelope(muxEnvelope(requestedFrame([packageManagerQuestion])));
+
+    await expect(presenter.handleChannelEvent(message('2', 'owner', 'chat-1', {
+      type: 'group',
+      mentionedBot: true,
+    }))).resolves.toBe(true);
+    expect((responses[0] as any).result.value.answer.answers).toEqual([
+      { id: 'pkg_mgr', selected: ['pnpm'] },
+    ]);
   });
 
   it('supports multi-select toggles and submits only the latest selected set', async () => {
@@ -275,5 +289,243 @@ describe('ChannelQuestionPresenter', () => {
       ok: false,
       error: { code: 'cancelled' },
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // P0 text fallback (interactiveActions=false) — plan §7.1 T1..T15
+  // -------------------------------------------------------------------------
+
+  function replyTokenOf(adapter: QuestionAdapter): string {
+    const text = adapter.sent.at(-1)?.text ?? '';
+    const match = text.match(/Q-[0-9A-F]{6}/);
+    if (!match) throw new Error(`no reply token in rendered text: ${JSON.stringify(text)}`);
+    return match[0];
+  }
+
+  it('T1: accepts a question on a text-only adapter without buttons', async () => {
+    const { adapter, backend } = setupPresenter({ interactiveActions: false });
+    await backend.handleMuxEnvelope(muxEnvelope(requestedFrame([packageManagerQuestion])));
+
+    expect(adapter.sent).toHaveLength(1);
+    expect(adapter.sent[0]?.actions).toBeUndefined();
+    expect(adapter.sent[0]?.text).toContain('1. npm (推荐)');
+    expect(adapter.sent[0]?.text).toContain('2. pnpm');
+    expect(adapter.sent[0]?.text).toContain('3. yarn');
+    expect(adapter.sent[0]?.text).toContain('回复 1 / 2 / 3，或直接回复选项文字。');
+  });
+
+  it('T2: options without description still render numbered in text mode', async () => {
+    const { adapter, backend } = setupPresenter({ interactiveActions: false });
+    await backend.handleMuxEnvelope(muxEnvelope(requestedFrame([planReviewQuestion])));
+
+    expect(adapter.sent[0]?.text).toContain('1. 执行');
+    expect(adapter.sent[0]?.text).toContain('2. 需要修改');
+    expect(adapter.sent[0]?.text).toContain('3. 放弃');
+  });
+
+  it('T3: a DM numeric reply selects the matching option', async () => {
+    const { backend, presenter, responses } = setupPresenter({ interactiveActions: false });
+    await backend.handleMuxEnvelope(muxEnvelope(requestedFrame([packageManagerQuestion])));
+
+    await expect(presenter.handleChannelEvent(message('2'))).resolves.toBe(true);
+    expect((responses[0] as any).result.value.answer.answers).toEqual([
+      { id: 'pkg_mgr', selected: ['pnpm'] },
+    ]);
+  });
+
+  it('T4: an exact option label reply selects that option', async () => {
+    const { backend, presenter, responses } = setupPresenter({ interactiveActions: false });
+    await backend.handleMuxEnvelope(muxEnvelope(requestedFrame([packageManagerQuestion])));
+
+    await expect(presenter.handleChannelEvent(message('pnpm'))).resolves.toBe(true);
+    expect((responses[0] as any).result.value.answer.answers).toEqual([
+      { id: 'pkg_mgr', selected: ['pnpm'] },
+    ]);
+  });
+
+  it('T5: unmatched text becomes a custom answer', async () => {
+    const { backend, presenter, responses } = setupPresenter({ interactiveActions: false });
+    await backend.handleMuxEnvelope(muxEnvelope(requestedFrame([packageManagerQuestion])));
+
+    await expect(presenter.handleChannelEvent(message('bun'))).resolves.toBe(true);
+    expect((responses[0] as any).result.value.answer.answers).toEqual([
+      { id: 'pkg_mgr', selected: [], custom: 'bun' },
+    ]);
+  });
+
+  it('T6: multi-select text reply selects options in options order', async () => {
+    const { backend, presenter, responses } = setupPresenter({ interactiveActions: false });
+    await backend.handleMuxEnvelope(muxEnvelope(requestedFrame([
+      { ...packageManagerQuestion, multiSelect: true },
+    ]), 'rpc-multi'));
+
+    await expect(presenter.handleChannelEvent(message('1,3'))).resolves.toBe(true);
+    expect((responses[0] as any).result.value.answer.answers).toEqual([
+      { id: 'pkg_mgr', selected: ['npm (推荐)', 'yarn'] },
+    ]);
+  });
+
+  it('T7: an out-of-range multi-select reply stays pending and can be retried', async () => {
+    const { adapter, backend, presenter, responses } = setupPresenter({ interactiveActions: false });
+    await backend.handleMuxEnvelope(muxEnvelope(requestedFrame([
+      { ...packageManagerQuestion, multiSelect: true },
+    ]), 'rpc-multi'));
+
+    await expect(presenter.handleChannelEvent(message('1,9'))).resolves.toBe(true);
+    expect(responses).toHaveLength(0);
+    expect(adapter.sent.at(-1)?.text).toBe('选项无效，请回复 1-3；多选可回复 1,3。');
+
+    await expect(presenter.handleChannelEvent(message('1,2'))).resolves.toBe(true);
+    expect((responses[0] as any).result.value.answer.answers).toEqual([
+      { id: 'pkg_mgr', selected: ['npm (推荐)', 'pnpm'] },
+    ]);
+  });
+
+  it('T8: batched questions collect a numeric then a custom text answer', async () => {
+    const { backend, presenter, responses } = setupPresenter({ interactiveActions: false });
+    await backend.handleMuxEnvelope(muxEnvelope(requestedFrame([
+      packageManagerQuestion,
+      { id: 'location', header: '位置', question: '项目放在哪里？' },
+    ]), 'rpc-batch'));
+
+    await expect(presenter.handleChannelEvent(message('2'))).resolves.toBe(true);
+    await expect(presenter.handleChannelEvent(message('D:/workspace/demo'))).resolves.toBe(true);
+    expect((responses[0] as any).result.value.answer.answers).toEqual([
+      { id: 'pkg_mgr', selected: ['pnpm'] },
+      { id: 'location', selected: [], custom: 'D:/workspace/demo' },
+    ]);
+  });
+
+  it('T9: plan-review text fallback keeps intent/detail/header and the protocol label', async () => {
+    const { adapter, backend, presenter, responses } = setupPresenter({ interactiveActions: false });
+    await backend.handleMuxEnvelope(muxEnvelope(requestedFrame([planReviewQuestion]), 'rpc-plan'));
+
+    expect(adapter.sent[0]?.text).toContain('计划评审');
+    expect(adapter.sent[0]?.text).toContain('1. 重构问题后端');
+    expect(adapter.sent[0]?.text).toContain('1. 执行');
+    expect(adapter.sent[0]?.actions).toBeUndefined();
+
+    await expect(presenter.handleChannelEvent(message('1'))).resolves.toBe(true);
+    expect((responses[0] as any).result.value.answer.answers).toEqual([
+      { id: 'plan_review', selected: ['执行'] },
+    ]);
+  });
+
+  it('T10: a slash command while a question is pending is not consumed', async () => {
+    const { backend, presenter, responses } = setupPresenter({ interactiveActions: false });
+    await backend.handleMuxEnvelope(muxEnvelope(requestedFrame([packageManagerQuestion])));
+
+    await expect(presenter.handleChannelEvent(message('/stop'))).resolves.toBe(false);
+    expect(responses).toHaveLength(0);
+  });
+
+  it('T11: group replies correlating via replyTo are still accepted in text mode', async () => {
+    const { adapter, backend, presenter, responses } = setupPresenter({
+      interactiveActions: false,
+      conversationType: 'group',
+    });
+    // A free-text question renders with a replyPrompt, so the presenter keeps
+    // the sent messageId as promptMessageId — replyTo correlation applies.
+    await backend.handleMuxEnvelope(muxEnvelope(requestedFrame([
+      { id: 'location', question: '项目放在哪里？' },
+    ])));
+    const promptId = '1';
+
+    await expect(presenter.handleChannelEvent(message('unrelated', 'owner', 'chat-1', { type: 'group' })))
+      .resolves.toBe(false);
+    await expect(presenter.handleChannelEvent(message('D:/workspace/demo', 'owner', 'chat-1', {
+      type: 'group',
+      replyTo: promptId,
+    }))).resolves.toBe(true);
+    expect(responses).toHaveLength(1);
+    expect(adapter.sent[0]?.replyPrompt).toBeDefined();
+  });
+
+  it('T12: group replies carrying the replyToken are accepted and stripped', async () => {
+    const { adapter, backend, presenter, responses } = setupPresenter({
+      interactiveActions: false,
+      conversationType: 'group',
+    });
+    await backend.handleMuxEnvelope(muxEnvelope(requestedFrame([packageManagerQuestion])));
+
+    const token = replyTokenOf(adapter);
+    expect(token).toMatch(/^Q-[0-9A-F]{6}$/);
+    expect(adapter.sent[0]?.text).toContain(`如果当前渠道无法关联回复，请发送：${token} 2`);
+
+    // Unrelated group message without the token is not consumed.
+    await expect(presenter.handleChannelEvent(message('unrelated', 'owner', 'chat-1', { type: 'group' })))
+      .resolves.toBe(false);
+
+    // Token-prefixed answers are accepted; the token is stripped before parsing.
+    await expect(presenter.handleChannelEvent(message(`${token} 2`, 'owner', 'chat-1', { type: 'group' })))
+      .resolves.toBe(true);
+    expect((responses[0] as any).result.value.answer.answers).toEqual([
+      { id: 'pkg_mgr', selected: ['pnpm'] },
+    ]);
+  });
+
+  it('T12b: token correlation also accepts colon and @-mention forms', async () => {
+    const { adapter, backend, presenter, responses } = setupPresenter({
+      interactiveActions: false,
+      conversationType: 'group',
+    });
+    await backend.handleMuxEnvelope(muxEnvelope(requestedFrame([packageManagerQuestion]), 'rpc-colon'));
+    const tokenColon = replyTokenOf(adapter);
+    await expect(presenter.handleChannelEvent(message(
+      `${tokenColon}: 1`, 'owner', 'chat-1', { type: 'group' },
+    ))).resolves.toBe(true);
+
+    await backend.handleMuxEnvelope(muxEnvelope(requestedFrame([packageManagerQuestion]), 'rpc-mention'));
+    const tokenMention = replyTokenOf(adapter);
+    await expect(presenter.handleChannelEvent(message(
+      `@bot ${tokenMention} 3`, 'owner', 'chat-1', { type: 'group' },
+    ))).resolves.toBe(true);
+
+    expect((responses[0] as any).result.value.answer.answers).toEqual([
+      { id: 'pkg_mgr', selected: ['npm (推荐)'] },
+    ]);
+    expect((responses[1] as any).result.value.answer.answers).toEqual([
+      { id: 'pkg_mgr', selected: ['yarn'] },
+    ]);
+  });
+
+  it('T13: a wrong sender cannot answer a pending question', async () => {
+    const { backend, presenter, responses } = setupPresenter({ interactiveActions: false });
+    await backend.handleMuxEnvelope(muxEnvelope(requestedFrame([packageManagerQuestion])));
+
+    await expect(presenter.handleChannelEvent(message('2', 'other-user'))).resolves.toBe(false);
+    expect(responses).toHaveLength(0);
+    await expect(presenter.handleChannelEvent(message('2'))).resolves.toBe(true);
+    expect(responses).toHaveLength(1);
+  });
+
+  it('T14: external settlement clears the pending question so later numbers are not swallowed', async () => {
+    const { backend, presenter, responses } = setupPresenter({ interactiveActions: false });
+    await backend.handleMuxEnvelope(muxEnvelope(requestedFrame([packageManagerQuestion])));
+    await backend.handleMuxEnvelope(muxEnvelope({
+      type: 'question/resolved',
+      sessionId: 'session-1',
+      questionRpcId: 'rpc-1',
+      outcome: 'answered',
+    }, 'resolution-event'));
+
+    await expect(presenter.handleChannelEvent(message('2'))).resolves.toBe(false);
+    expect(responses).toHaveLength(0);
+  });
+
+  it('T15: text-mode questions time out and cancel like actions mode', async () => {
+    vi.useFakeTimers();
+    const { adapter, backend, presenter, responses } = setupPresenter({
+      timeoutMs: 1_000,
+      interactiveActions: false,
+    });
+    await backend.handleMuxEnvelope(muxEnvelope(requestedFrame([packageManagerQuestion])));
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect((responses[0] as any).result).toMatchObject({
+      ok: false,
+      error: { code: 'cancelled' },
+    });
+    expect(adapter.sent.at(-1)?.text).toContain('问题已超时');
   });
 });

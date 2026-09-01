@@ -13,12 +13,34 @@
  * field (`detail` / `header` / `options` / `multiSelect` / `intent`) is
  * carried verbatim; nothing is stripped or re-encoded here.
  */
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import type {
   AskUserQuestionAnswerItem,
   AskUserQuestionItem,
 } from '@deepseek-ai/dsh-user-questions/types';
 import type { ChannelTarget } from '@wsz987/channel-core';
+
+/**
+ * How a question batch is presented on a channel conversation:
+ * - `'actions'` — the adapter supports `interactiveActions`; native buttons.
+ * - `'text'`    — text-only fallback; numbered options + free-text answers.
+ *
+ * Internal to `channel-harness`; NOT part of the public Channel Contract.
+ * Decided by capability negotiation (never by channel id).
+ */
+export type QuestionPresentationMode = 'actions' | 'text';
+
+/**
+ * Mint a short correlation token for a text-presented question (e.g.
+ * `Q-A13F7C`). It is a route/typing correlate for group/thread replies only,
+ * NEVER an auth credential — Authorization stays with the Access Gate +
+ * `allowedSenderId`. Kept short (not a UUID) so it is comfortable to type in
+ * group chat.
+ */
+export function newReplyToken(prefix = 'Q-'): string {
+  const hex = randomBytes(3).toString('hex').toUpperCase();
+  return `${prefix}${hex}`;
+}
 
 /** What one bound channel action button does when pressed. */
 export interface PendingQuestionAction {
@@ -67,6 +89,14 @@ export interface PendingChannelQuestion {
    */
   allowedSenderId: string;
   actionIds: Set<string>;
+  /** How this batch is presented (capability-negotiated, never channel id). */
+  presentationMode: QuestionPresentationMode;
+  /**
+   * Short correlation token for group/thread text replies when the platform
+   * cannot (or does not) map `replyTo` reliably. Regenerated per question via
+   * {@link advance}. Not a secret; never a substitute for authorization.
+   */
+  replyToken?: string;
   /** Message that a free-text response must reply to in a group or forum. */
   promptMessageId?: string;
   messageId?: string;

@@ -294,11 +294,28 @@ export type ChannelEvent =
 
 ```text
 message.received
+interaction.received      （当前 Telegram / QQ；Lark / DingTalk 原生按钮跟进中）
 auth.changed
 connection.changed
 ```
 
 其余类型已稳定，为后续渠道生态预留。
+
+### Harness question presentation（`ask_user_question` 展示模型）
+
+`channel-harness` 通过 `adapter.capabilities` 协商展示质量，不按渠道 id 分支：
+
+```text
+interactiveActions -> 原生按钮（OutboundMessage.actions + interaction.received）
+否则 text          -> 编号文字兜底（1. xxx / 2. xxx，数字/选项文字/自定义/跳过 回答）
+```
+
+准入只看 `text: true`（且存在 active reply context / binding / 无并发 pending），
+`interactiveActions` 只决定「按钮还是文字」，绝不决定「能否承接 Harness 问题」。
+群聊/线程文字回答通过平台 `replyTo` 或每道题生成的短关联码（`Q-XXXXXX`）关联；
+`interaction.received` 当前由 Telegram / QQ 实现，Lark / DingTalk 原生按钮按官方
+SDK 能力逐步补齐（各自完成 round-trip + live gate 后才开启
+`interactiveActions: true`）。
 
 ---
 
@@ -1157,6 +1174,11 @@ PDF 解析使用 `unpdf`（PDF.js），DOCX 使用 `mammoth`，XLSX 使用 `xlsx
   （已 parse 出命令名但 registry miss），渠道回复一条「未知命令：/xxx，输入 /help
   查看命令。」提示，**绝**不作为普通用户输入交给模型（与官方 rc.2 Host 一致）；Agent
   scope 会 shadow 同名 global（同 scope 重名注册直接报错）。
+- **群聊命令 Owner Gate**：普通群消息通过统一 Access Gate 后，任何已解析的斜杠命令
+  仍必须满足 canonical `sender.id === policy.ownerId`；缺少 owner 或不匹配时统一拒绝。
+  Gate 位于 `/stop` fast path 和任何 Session / Binding / Workspace / Agent 副作用之前，
+  覆盖内置、全局、未知及未来新增命令。各 Adapter 不识别平台群管理员，也不实现渠道
+  私有命令 ACL。
 - **通用控制面 + Web 设置**（`channel-control` + `channel-web`，见上文「通用 Channel
   Control Plane」）：扫码 / 设备授权 / 凭证表单统一为 `AuthSession` 模型，浏览器只
   消费净化的 `PublicAuthSession`，Secret 永不离开进程。

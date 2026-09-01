@@ -140,6 +140,14 @@ describe('group access mode mapping', () => {
     });
   });
 
+  it('keeps mention gating on each named group rule, independently of the global rule', () => {
+    const named = createNamedGroupAccessRule(ownerId, true);
+    const opened = withGroupAccessMode(policy(), 'open', ownerId, false);
+    expect(named.requireMention).toBe(true);
+    expect(opened.defaultGroupRule?.requireMention).toBe(false);
+    expect(named).not.toBe(opened.defaultGroupRule);
+  });
+
   it('removes the global default rule when switching to named groups', () => {
     const named = withGroupAccessMode(withGroupAccessMode(policy(), 'open', ownerId), 'allowlist', ownerId);
     expect(named.groupPolicy).toBe('allowlist');

@@ -50,6 +50,9 @@ export interface ChannelWebDefinition {
    */
   preferredSetupMethod?: SetupMethod;
 
+  /** Web-only visibility for the optional specified-member editor. */
+  memberPicker?: boolean;
+
 }
 
 /**
@@ -71,6 +74,7 @@ export const CHANNEL_WEB: Record<string, ChannelWebDefinition> = {
     titleKey: 'channelQq',
     introKey: 'setupIntro',
     docsUrl: 'https://q.qq.com/qqbot/',
+    memberPicker: false,
   },
 
   dingtalk: {
@@ -80,6 +84,7 @@ export const CHANNEL_WEB: Record<string, ChannelWebDefinition> = {
     introKey: 'setupIntroDingtalk',
     docsUrl: 'https://open.dingtalk.com/document/',
     preferredSetupMethod: 'device',
+    memberPicker: false,
   },
 
   lark: {
@@ -89,6 +94,7 @@ export const CHANNEL_WEB: Record<string, ChannelWebDefinition> = {
     introKey: 'setupIntroLark',
     docsUrl: 'https://open.feishu.cn/document/',
     preferredSetupMethod: 'credentials',
+    memberPicker: true,
 
     authRequiresConfigured: {
       hybrid: ['appId', 'appSecret'],
@@ -101,6 +107,7 @@ export const CHANNEL_WEB: Record<string, ChannelWebDefinition> = {
     titleKey: 'channelTelegram',
     introKey: 'setupIntroTelegram',
     docsUrl: 'https://core.telegram.org/bots',
+    memberPicker: true,
   },
 } satisfies Record<string, ChannelWebDefinition>;
 

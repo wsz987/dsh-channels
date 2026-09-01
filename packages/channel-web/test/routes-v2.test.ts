@@ -109,6 +109,8 @@ interface Fakes {
     confirmOwnerClaim: Array<[string, string]>;
     cancelOwnerClaim: Array<[string, string]>;
     getUpdateStatus: number[];
+    listConversations: string[];
+    findConversation: Array<[string, string]>;
   };
 }
 
@@ -146,6 +148,8 @@ function makeControl(
     confirmOwnerClaim: [],
     cancelOwnerClaim: [],
     getUpdateStatus: [],
+    listConversations: [],
+    findConversation: [],
   };
   const requireKnown = (channelId: string): void => {
     if (channelId !== KNOWN) throw new ControlError('CONTROL_DEFINITION_NOT_FOUND');
@@ -259,6 +263,33 @@ function makeControl(
     async cancelOwnerClaim(channelId, claimId) {
       requireKnown(channelId);
       calls.cancelOwnerClaim.push([channelId, claimId]);
+    },
+    async listConversations(channelId) {
+      requireKnown(channelId);
+      calls.listConversations.push(channelId);
+      return [
+        {
+          type: 'group',
+          canonicalId: 'OPEN_A',
+          externalId: '123456789',
+          firstSeenAt: 1,
+          lastSeenAt: 2,
+        },
+      ];
+    },
+    async findConversation(channelId, externalId) {
+      requireKnown(channelId);
+      calls.findConversation.push([channelId, externalId]);
+      if (externalId === '123456789') {
+        return {
+          type: 'group',
+          canonicalId: 'OPEN_A',
+          externalId: '123456789',
+          firstSeenAt: 1,
+          lastSeenAt: 2,
+        };
+      }
+      return undefined;
     },
     async getUpdateStatus() {
       calls.getUpdateStatus.push(1);
@@ -829,6 +860,59 @@ describe('owner-claim lifecycle', () => {
     expect(status).toBe(204);
     expect(fresh.calls.cancelOwnerClaim).toEqual([[KNOWN, 'claim-1']]);
     expect(body).toBeNull();
+  });
+});
+
+describe('conversation identity directory', () => {
+  it('GET /channels/:id/conversations → { conversations } display DTOs', async () => {
+    const fresh = makeControl();
+    const handler = wireV2(fresh.control);
+    const { status, body } = await invokeDirect(handler, {
+      method: 'GET',
+      url: '/dsh-channels/api/v2/channels/qq/conversations',
+    });
+    expect(status).toBe(200);
+    const payload = body as { conversations: Array<{ canonicalId: string; externalId?: string }> };
+    expect(payload.conversations).toHaveLength(1);
+    expect(payload.conversations[0]).toMatchObject({
+      canonicalId: 'OPEN_A',
+      externalId: '123456789',
+    });
+    expect(fresh.calls.listConversations).toEqual([KNOWN]);
+  });
+
+  it('GET /channels/:id/conversations → 404 for unknown channels', async () => {
+    const fresh = makeControl();
+    const handler = wireV2(fresh.control);
+    const { status, body } = await invokeDirect(handler, {
+      method: 'GET',
+      url: '/dsh-channels/api/v2/channels/nope/conversations',
+    });
+    expect(status).toBe(404);
+    expect((body as { error?: { code?: string } }).error?.code).toBe('CHANNEL_NOT_FOUND');
+  });
+
+  it('GET by-external resolves an observed 群号 to its canonical id', async () => {
+    const fresh = makeControl();
+    const handler = wireV2(fresh.control);
+    const { status, body } = await invokeDirect(handler, {
+      method: 'GET',
+      url: '/dsh-channels/api/v2/channels/qq/conversations/by-external/123456789',
+    });
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ canonicalId: 'OPEN_A', externalId: '123456789' });
+    expect(fresh.calls.findConversation).toEqual([[KNOWN, '123456789']]);
+  });
+
+  it('GET by-external of an unknown 群号 → 404 CONVERSATION_NOT_FOUND (never guessed)', async () => {
+    const fresh = makeControl();
+    const handler = wireV2(fresh.control);
+    const { status, body } = await invokeDirect(handler, {
+      method: 'GET',
+      url: '/dsh-channels/api/v2/channels/qq/conversations/by-external/999999999',
+    });
+    expect(status).toBe(404);
+    expect((body as { error?: { code?: string } }).error?.code).toBe('CONVERSATION_NOT_FOUND');
   });
 });
 

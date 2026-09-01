@@ -6,7 +6,7 @@ import { ChannelSendError } from '@wsz987/channel-core';
 import type { ChannelTarget } from '@wsz987/channel-core';
 import { MediaFileType } from '@tencent-connect/qqbot-nodejs';
 import { FakeQQSdkClient, decodeDataUri, mediaOpts } from '../src/sdk-client.ts';
-import { OutboundSender, toReplyTarget } from '../src/outbound.ts';
+import { OutboundSender, toReplyTarget, toQqKeyboard } from '../src/outbound.ts';
 
 const silentLogger = {
   debug: () => {},
@@ -170,6 +170,97 @@ describe('mediaOpts — localData → base64 fileData (M7B)', () => {
     const opts = mediaOpts({ parts: [{ type: 'file', url: 'https://e/r.pdf', localData: bytes }] });
     expect(opts.fileData).toBe(Buffer.from(bytes).toString('base64'));
     expect(opts.url).toBeUndefined();
+  });
+});
+
+describe('OutboundSender — actions → inline keyboard', () => {
+  it('text with actions sends as explicit Markdown with keyboard (not plain text/media)', async () => {
+    const client = new FakeQQSdkClient();
+    const sender = new OutboundSender(client, silentLogger);
+    const result = await sender.send(targetFn(), {
+      text: 'choose one',
+      actions: [{ actions: [{ id: 'uq_a', label: 'npm' }, { id: 'uq_b', label: 'pnpm' }] }],
+    });
+    expect(client.keyboardCalls).toHaveLength(1);
+    expect(client.keyboardCalls[0]?.target).toEqual({ scope: 'c2c', targetId: 'conv_1', msgId: undefined });
+    expect(client.keyboardCalls[0]?.text).toBe('choose one');
+    expect(client.keyboardCalls[0]?.format).toBe('markdown');
+    expect(result.messageId).toBe('out-kbd-1');
+    expect(client.textCalls).toHaveLength(0);
+    expect(client.mediaCalls).toHaveLength(0);
+  });
+
+  it('text without actions still uses sendText', async () => {
+    const client = new FakeQQSdkClient();
+    const sender = new OutboundSender(client, silentLogger);
+    await sender.send(targetFn(), { text: 'plain' });
+    expect(client.textCalls).toHaveLength(1);
+    expect(client.keyboardCalls).toHaveLength(0);
+  });
+
+  it('media + actions falls back to a media send (buttons unsupported on QQ media); actions dropped', async () => {
+    const client = new FakeQQSdkClient();
+    const clientLogger = { ...silentLogger } as typeof silentLogger & { debugCalls: unknown[] };
+    const sender = new OutboundSender(client, {
+      ...clientLogger,
+      debug: (msg: unknown) => {
+        clientLogger.debugCalls = clientLogger.debugCalls ?? [];
+        clientLogger.debugCalls.push(msg);
+      },
+    });
+    await sender.send(targetFn(), {
+      text: 'caption',
+      parts: [{ type: 'image', url: 'https://e/p.png' }],
+      actions: [{ actions: [{ id: 'uq_a', label: 'npm' }] }],
+    });
+    expect(client.mediaCalls).toHaveLength(1);
+    expect(client.keyboardCalls).toHaveLength(0);
+    expect(client.textCalls).toHaveLength(0);
+    // Documented behavior note is logged at debug.
+    expect(clientLogger.debugCalls?.some((m) => String(m).includes('buttons unsupported'))).toBe(true);
+  });
+});
+
+describe('toQqKeyboard', () => {
+  it('maps one DSH action row → one QQ keyboard row, action id in data+id, label mapped', () => {
+    const kbd = toQqKeyboard([
+      {
+        actions: [
+          { id: 'uq_1', label: '执行' },
+          { id: 'uq_2', label: '放弃', style: 'primary' },
+        ],
+      },
+    ]);
+    expect(kbd.content.rows).toHaveLength(1);
+    const buttons = kbd.content.rows[0]!.buttons;
+    expect(buttons).toHaveLength(2);
+    expect(buttons[0]!).toEqual({
+      id: 'uq_1',
+      render_data: { label: '执行', visited_label: '执行', style: 0 },
+      action: {
+        type: 1,
+        permission: { type: 2 },
+        data: 'uq_1',
+        click_limit: 1,
+      },
+    });
+    // `primary` style maps to QQ style 1; default maps to 0.
+    expect(buttons[1]!.render_data.style).toBe(1);
+    expect(buttons[1]!.action.data).toBe('uq_2');
+    expect(buttons[1]!.render_data.label).toBe('放弃');
+  });
+
+  it('maps multiple rows, non-primary styles fall back to default style 0', () => {
+    const kbd = toQqKeyboard([
+      { actions: [{ id: 'uq_1', label: 'a' }] },
+      { actions: [{ id: 'uq_2', label: 'b', style: 'danger' }, { id: 'uq_3', label: 'c', style: 'success' }] },
+    ]);
+    expect(kbd.content.rows).toHaveLength(2);
+    expect(kbd.content.rows[0]!.buttons).toHaveLength(1);
+    expect(kbd.content.rows[1]!.buttons).toHaveLength(2);
+    // success/danger are not QQ-supported → default style 0, never invented.
+    expect(kbd.content.rows[1]!.buttons[0]!.render_data.style).toBe(0);
+    expect(kbd.content.rows[1]!.buttons[1]!.render_data.style).toBe(0);
   });
 });
 

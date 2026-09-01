@@ -21,7 +21,8 @@ import type {
   OutboundMessage,
   SenderId,
 } from '@wsz987/channel-core';
-import { textParts } from '@wsz987/channel-core';
+import { ChannelError, textParts } from '@wsz987/channel-core';
+import { z } from 'zod';
 
 export interface DingTalkInboundMeta {
   channel: ChannelId;
@@ -48,7 +49,28 @@ interface DingTalkRaw {
   durationMs?: number;
   title?: string;
   richTextImages?: Array<{ pictureUrl?: string; downloadCode?: string }>;
+  /** Adapter-computed activation fact from the official callback. */
+  mentionedBot?: boolean;
   [key: string]: unknown;
+}
+
+const dingtalkRawSchema = z.object({
+  type: z.string().optional(),
+  msgId: z.string().optional(),
+  eventId: z.string().optional(),
+  senderId: z.string().optional(),
+  conversationId: z.string().optional(),
+  conversationType: z.string().optional(),
+  content: z.string().optional(),
+  mentionedBot: z.boolean().optional(),
+}).passthrough();
+
+function parseDingTalkRaw(raw: unknown): DingTalkRaw {
+  const parsed = dingtalkRawSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new ChannelError('CHANNEL_ERROR', 'dingtalk inbound payload is invalid');
+  }
+  return parsed.data;
 }
 
 /** True only for genuine http(s) locators. */
@@ -67,7 +89,7 @@ export function simpleHash(input: string): string {
 
 /** Map one raw dingtalk message into the stable channel event shape. */
 export function mapInbound(raw: unknown, meta: DingTalkInboundMeta): MessageReceived {
-  const value = raw as DingTalkRaw;
+  const value = parseDingTalkRaw(raw);
   const sender: SenderId = (value.senderId ?? 'unknown') as SenderId;
   // DingTalk payloads carry a conversation id; fall back to the sender when
   // the gateway omits it (direct/one-off payloads).
@@ -90,6 +112,7 @@ export function mapInbound(raw: unknown, meta: DingTalkInboundMeta): MessageRece
       id: messageId,
       content: partsFor(value),
       createdAt: Date.now(),
+      ...(value.mentionedBot !== undefined ? { activation: { mentionedBot: value.mentionedBot } } : {}),
     },
     raw,
   };
@@ -188,6 +211,6 @@ export function toTextPayload(target: { conversationId: string }, message: Outbo
 
 /** Dedup identity for raw payloads (webhook retries share one msgId/eventId). */
 export function dedupKey(raw: unknown): string {
-  const value = raw as DingTalkRaw;
+  const value = parseDingTalkRaw(raw);
   return value.msgId ?? value.eventId ?? `dt-${simpleHash(JSON.stringify(value))}`;
 }

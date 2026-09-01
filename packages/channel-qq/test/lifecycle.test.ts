@@ -114,6 +114,72 @@ describe('QQAdapter lifecycle', () => {
     await adapter.stop();
   });
 
+  it('interaction handler is registered on start and torn down on stop', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    const client = new FakeQQSdkClient();
+    const { adapter } = harness(ctx, client);
+
+    const events: ChannelEvent[] = [];
+    const off = service.on((e) => events.push(e));
+
+    const startPromise = adapter.start(ctx);
+    await Promise.resolve();
+    client.emitReady();
+    await startPromise;
+
+    // After start the interaction handler is live: emit a press → canonical event.
+    client.emitInteraction({
+      id: 'inter_lc',
+      user_openid: 'user_lc',
+      data: { resolved: { button_data: 'uq_lc' } },
+    });
+    await flush();
+    expect(events.some((e) => e.type === 'interaction.received')).toBe(true);
+    expect(client.acknowledgeCalls).toEqual([{ id: 'inter_lc', code: 0, data: undefined }]);
+
+    // Stop tears the client down: handlers cleared, no further events dispatch.
+    await adapter.stop();
+    const before = events.length;
+    client.emitInteraction({
+      id: 'inter_after_stop',
+      user_openid: 'user_lc',
+      data: { resolved: { button_data: 'uq_lc2' } },
+    });
+    await flush();
+    expect(events.length).toBe(before);
+
+    off();
+  });
+
+  it('auto-discovers the platform owner from the first delivered C2C sender', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    const client = new FakeQQSdkClient();
+    client.autoReady = true;
+    const discovered: string[] = [];
+    const adapter = new QQAdapter(makeConfig(), {
+      sdkClient: client,
+      onOwnerDiscovered: (ownerId) => discovered.push(ownerId),
+    });
+    await adapter.start(ctx);
+    client.emitMessage({
+      rawEventType: 'C2C_MESSAGE_CREATE',
+      kind: 'c2c',
+      senderId: 'owner-openid',
+      senderName: 'owner',
+      senderIsBot: false,
+      content: 'hello',
+      messageId: 'owner-msg',
+      timestamp: '2026-08-30T10:00:00+08:00',
+      replyTarget: { scope: 'c2c', targetId: 'owner-openid', msgId: 'owner-msg' },
+      raw: {},
+    });
+    await flush();
+    expect(discovered).toEqual(['owner-openid']);
+    await adapter.stop();
+  });
+
   it('startup timeout when the fake never readies', async () => {
     const service = new ChannelService(new Context());
     const ctx = createTestContext(service);
@@ -176,3 +242,7 @@ describe('QQAdapter lifecycle', () => {
     await adapter.stop();
   });
 });
+
+function flush(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}

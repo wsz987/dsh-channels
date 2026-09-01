@@ -102,6 +102,8 @@ describe('createDingTalkDefinition setup descriptor', () => {
     expect(def.autoStart).toBe(true);
     expect(def.setup.authMethods).toEqual(['device', 'credentials']);
     expect(def.setup.setupUrl).toBe('https://open-dev.dingtalk.com/#/app');
+    expect(def.access.mentions).toBe(true);
+    expect(def.access.defaults).toEqual({ requireMention: true });
     expect(def.beginAuth).toBeTypeOf('function');
     expect(def.pollAuth).toBeTypeOf('function');
     expect(def.submitAuthInput).toBeUndefined();

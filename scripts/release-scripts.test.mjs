@@ -115,6 +115,15 @@ test('release allowlist rejects an omitted workspace dependency', () => {
   assert.throws(() => releasePackages(entries), /depends on non-release workspace package/);
 });
 
+test('Changesets ignores development and governance packages', () => {
+  const config = JSON.parse(readFileSync(new URL('../.changeset/config.json', import.meta.url), 'utf8'));
+  assert.deepEqual(config.ignore, [
+    '@wsz987/channel-testkit',
+    '@wsz987/channel-compat',
+    '@wsz987/channel-verify',
+  ]);
+});
+
 test('npm dist-tag follows the bundle release channel', () => {
   assert.equal(npmDistTag('0.10.0-beta.1', undefined), 'beta');
   assert.equal(npmDistTag('0.10.0', undefined), 'latest');

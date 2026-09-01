@@ -13,7 +13,7 @@
  * the official `message.resource` API documents its scope as 音频、视频、图片和文件
  * ("resource files in the specified message, including audio, video, image
  * and file", see the SDK-embedded doc statement for im.v1.messageResource.get
- * in @larksuiteoapi/node-sdk@1.73.0), and the SDK `type` query param is typed
+ * in @larksuiteoapi/node-sdk@1.73.1), and the SDK `type` query param is typed
  * `string` - NOT restricted to image/file. The mapper therefore routes
  * audio/video file_keys through the same `type: 'audio'` / `type: 'video'`
  * download seam as image/file. Platform-level limits stay official facts:
@@ -31,7 +31,7 @@
  * a fake. Credentials are never referenced here - the Client is built
  * elsewhere from config.
  *
- * The SDK messageResource.get signature bound here (1.73.0 types):
+ * The SDK messageResource.get signature bound here (1.73.1 types):
  *   get(payload: { params: { type: string }; path: { message_id: string;
  *                             file_key: string } }, options?):
  *     Promise<{ writeFile(fp): Promise<unknown>;
@@ -96,7 +96,7 @@ export interface LarkFileCreateResult {
 
 /**
  * Structural subset of the official SDK Client required by the media port.
- * The real Client (1.73.0) satisfies this shape; tests inject a fake.
+ * The real Client (1.73.1) satisfies this shape; tests inject a fake.
  * Mirrors the LarkOpenApiClient pattern from openapi-outbound.ts.
  */
 export interface LarkMediaClient {

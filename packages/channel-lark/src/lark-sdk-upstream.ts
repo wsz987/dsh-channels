@@ -24,13 +24,15 @@
  * (AppId/AppSecret) is a manual step — the offline tests inject a fake WS
  * client and drive a real `EventDispatcher` with v1 event envelopes.
  */
-import { EventDispatcher, LoggerLevel } from '@larksuiteoapi/node-sdk';
+import { EventDispatcher, LoggerLevel, normalizeCardAction } from '@larksuiteoapi/node-sdk';
 import { ChannelError } from '@wsz987/channel-core';
 import { z } from 'zod';
 import type { CardCreateResult, LarkFileRef, LarkMediaRef, LarkOutbound, LarkUpstream } from './upstream.js';
 
 /** Event type key for inbound message delivery (v1 event). */
 export const MESSAGE_EVENT_KEY = 'im.message.receive_v1';
+/** Official event name for Feishu interactive-card button presses. */
+export const CARD_ACTION_EVENT_KEY = 'card.action.trigger';
 
 /**
  * Minimal structural dispatcher surface consumed by the driver. The real SDK
@@ -65,6 +67,8 @@ export interface LarkSdkUpstreamOptions {
    * legacy `HttpLarkUpstream`) to observe delegation.
    */
   outbound: LarkOutbound;
+  /** Official OpenAPI chat lookup; absence deliberately fails card actions closed. */
+  resolveChatType?: (conversationId: string) => Promise<'p2p' | 'group' | undefined>;
   /** Invoked after the WS connection is established (connection state). */
   onConnected?: () => void;
 }
@@ -104,6 +108,30 @@ const larkMessageEventDataSchema = z.object({
 }).passthrough();
 
 export type LarkMessageEventData = z.infer<typeof larkMessageEventDataSchema>;
+
+const actionValueSchema = z.object({ actionId: z.string().trim().min(1) });
+// Trust-boundary validation only. Protocol normalization stays in the
+// official SDK's normalizeCardAction() implementation below.
+const officialCardActionInputSchema = z.object({
+  event_id: z.string().optional(),
+  context: z.object({
+    open_message_id: z.string().optional(),
+    open_chat_id: z.string().optional(),
+  }).optional(),
+  open_message_id: z.string().optional(),
+  open_chat_id: z.string().optional(),
+  operator: z.object({
+    open_id: z.string().optional(),
+    user_id: z.string().optional(),
+    name: z.string().optional(),
+  }).optional(),
+  action: z.object({
+    value: z.unknown().optional(),
+    tag: z.string().optional(),
+    name: z.string().optional(),
+    option: z.string().optional(),
+  }).optional(),
+}).passthrough();
 
 /** Parsed message content JSON (best-effort; empty object when absent). */
 type MessageContent = Record<string, unknown>;
@@ -178,6 +206,38 @@ export function toGatewayRaw(input: unknown): Record<string, unknown> | undefine
   return raw;
 }
 
+/**
+ * Convert the official SDK-normalized card action into the project-neutral
+ * interaction envelope. The platform callback itself is never hand-parsed.
+ */
+export async function toGatewayInteraction(
+  input: unknown,
+  resolveChatType: ((conversationId: string) => Promise<'p2p' | 'group' | undefined>) | undefined,
+): Promise<Record<string, unknown> | undefined> {
+  const parsed = officialCardActionInputSchema.safeParse(input);
+  if (!parsed.success) return undefined;
+  const event = normalizeCardAction(parsed.data);
+  if (!event) return undefined;
+  const value = actionValueSchema.safeParse(event.action.value);
+  if (!value.success) return undefined;
+  const chatType = await resolveChatType?.(event.chatId);
+  if (!chatType) return undefined;
+  return {
+    type: 'interaction',
+    msgId: event.messageId,
+    // EventDispatcher preserves the official header event_id in its flat
+    // payload. Use it when available so a later deliberate press of the same
+    // button is not collapsed with a transport retry of an earlier press.
+    eventId: parsed.data.event_id ?? `${event.messageId}:${event.operator.openId}:${value.data.actionId}`,
+    senderId: event.operator.openId,
+    conversationId: event.chatId,
+    chatType,
+    interactionId: event.messageId,
+    action: value.data.actionId,
+    value: event.action.value,
+  };
+}
+
 /** SDK-mode implementation of `LarkUpstream` (inbound via the SDK). */
 export class LarkSdkUpstream implements LarkUpstream {
   /**
@@ -231,6 +291,12 @@ export class LarkSdkUpstream implements LarkUpstream {
         if (raw !== undefined) this.onMessage(raw);
         return undefined;
       },
+      [CARD_ACTION_EVENT_KEY]: async (data: unknown) => {
+        if (!this.onMessage) return undefined;
+        const raw = await toGatewayInteraction(data, this.options.resolveChatType);
+        if (raw !== undefined) this.onMessage(raw);
+        return undefined;
+      },
     });
     this.registered = true;
   }
@@ -245,6 +311,10 @@ export class LarkSdkUpstream implements LarkUpstream {
 
   sendFile(to: string, file: LarkFileRef): Promise<unknown> {
     return this.options.outbound.sendFile(to, file);
+  }
+
+  sendInteractive(to: string, text: string, actions: import('@wsz987/channel-core').OutboundActionRow[]): Promise<unknown> {
+    return this.options.outbound.sendInteractive(to, text, actions);
   }
 
   createCard(conversationId: string, text: string): Promise<CardCreateResult> {
@@ -269,6 +339,18 @@ export class LarkSdkUpstream implements LarkUpstream {
 
   stopTyping(messageId: string): Promise<void> {
     return this.options.outbound.stopTyping?.(messageId) ?? Promise.resolve();
+  }
+
+  updateInteractive(
+    cardId: string,
+    text: string,
+    actions: import('@wsz987/channel-core').OutboundActionRow[],
+  ): Promise<unknown> {
+    return this.options.outbound.updateInteractive(cardId, text, actions);
+  }
+
+  getChatType(conversationId: string): Promise<'p2p' | 'group' | undefined> {
+    return this.options.outbound.getChatType?.(conversationId) ?? Promise.resolve(undefined);
   }
 }
 

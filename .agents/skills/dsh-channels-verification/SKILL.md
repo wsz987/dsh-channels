@@ -123,7 +123,7 @@ DeepSeek Harness / Cordis
 | Weixin | `@wsz987/channel-weixin` | Tencent iLink `source-port` | upstream fixture `2.4.6`，manifest live pin 待完成 | `experimental` | 无 setup 字段；QR | text/image；buffered |
 | QQ | `@wsz987/channel-qq` | Tencent 官方 SDK | `@tencent-connect/qqbot-nodejs@1.0.4` | `tested`* | AppID + AppSecret | text/image/file/audio/video；C2C native stream |
 | DingTalk | `@wsz987/channel-dingtalk` | 官方 Stream SDK + OpenAPI | `dingtalk-stream@2.1.5` | `tested`* | ClientID + ClientSecret；device/credentials | text/image/file/audio/cards；edit stream |
-| Lark/Feishu | `@wsz987/channel-lark` | 官方 Node SDK | `@larksuiteoapi/node-sdk@1.73.0` | `tested`* | AppID + AppSecret；credentials/hybrid | text/image/file/audio/cards/reactions/threads；edit stream |
+| Lark/Feishu | `@wsz987/channel-lark` | 官方 Node SDK | `@larksuiteoapi/node-sdk@1.73.1` | `tested`* | AppID + AppSecret；credentials/hybrid | text/image/file/audio/cards/reactions/threads/interactive actions；edit stream |
 | Telegram | `@wsz987/channel-telegram` | Bot API HTTP 直连 + `@grammyjs/types` | manifest `Bot API >=10.2` | `experimental` | Bot token | text/image/file/audio/video/threads；Rich Markdown；DM draft/group edit stream；callback actions |
 
 \* `tested` 当前主要指 contract/fixture/offline SDK tests 已通过；**不等于真实平台权限与账号 live gate 已通过**。
@@ -263,7 +263,7 @@ GROUP_AND_C2C
 INTERACTION
 ```
 
-**当前 DSH 风险点**：
+**CODE-CONFIRMED**：当前 DSH 已显式传入最小 intent mask：
 
 ```ts
 new QQBot({
@@ -273,20 +273,13 @@ new QQBot({
   markdownSupport,
   transport: 'websocket',
   tokenPrefetch: 'sync',
-  // 没有显式传 intents
+  intents: QQ_MINIMAL_INTENTS,
 })
 ```
 
-腾讯 SDK 在未指定时默认 `FULL_INTENTS`。
-
-这会导致：
-
-- DSH 实际只监听主要 `message` 事件，却可能申请更多 intents
-- App 未被允许这些 intents 时，Gateway 可能返回：
-  - `4914 INSUFFICIENT_INTENTS`
-  - `4915 DISALLOWED_INTENTS`
-
-**建议 P1 修复**：让 QQ adapter 明确声明最小 intents，或做 DSH-side configurable intent mask，不再依赖 SDK `FULL_INTENTS` 默认值。
+`QQ_MINIMAL_INTENTS = GROUP_AND_C2C | INTERACTION`，不再依赖 SDK 的
+`FULL_INTENTS` 默认值。真实 QQ live gate 仍需确认目标 App 已获准这两项，否则 Gateway
+可能返回 `4914 INSUFFICIENT_INTENTS` / `4915 DISALLOWED_INTENTS`。
 
 另外：
 
@@ -375,9 +368,9 @@ getUpdates allowed_updates=['message', 'callback_query']
 **CODE-CONFIRMED**：manifest 与 fixtures 已迁移到 **Bot API 10.2**，状态仍为
 `experimental`。Rich Message、draft streaming、callback 与 429 recovery 仍需真实 Bot live gate。
 
-**CODE-CONFIRMED / RELEASE-BLOCKING**：`sendMedia()` 尚未检查 Bot API `ok` envelope；
-普通 update mapper 仍使用 TypeScript cast 而非完整 zod schema；缺少 `message.chat` 的
-callback query 会被回退成 sender-id DM。三项必须在 live gate 前修复。
+**CODE-CONFIRMED**：`sendMedia()` 已校验 Bot API `ok` envelope；普通 message/update 与
+callback payload 已经过 zod trust-boundary schema；缺少 `message.chat` 的 callback query
+会 fail closed。剩余工作是真实 Bot live gate，不再有这三项离线 release blocker。
 
 ### 6.5 Weixin iLink
 
@@ -430,18 +423,16 @@ Granted（真实检测）
 Missing（真实检测失败）
 ```
 
-### P1 — QQ intents 应最小化
+### CODE-CONFIRMED — QQ intents 已最小化
 
-当前 DSH 没传 `intents`，官方 SDK 默认 `FULL_INTENTS`。
-
-建议：
+当前 DSH 已按实际事件面显式传入：
 
 ```text
-DSH 当前使用什么事件
+GROUP_AND_C2C | INTERACTION
     ↓
-计算最小 intent mask
+QQ_MINIMAL_INTENTS
     ↓
-显式传入 QQBot
+显式传入 QQBot；live gate 核验 App 权限
 ```
 
 而不是请求所有 intents。
@@ -706,8 +697,8 @@ Stable Core
 优先顺序：
 
 1. 保持 `channel-web` 不展示静态 permission 状态；恢复前先实现真实 permission checker
-2. QQ 显式最小 intents
-3. Telegram 修复 10.2 release blockers 并完成真实 Bot live gate
+2. QQ 用真实 App 完成最小 intents live gate
+3. Telegram 完成 Bot API 10.2 真实 Bot live gate
 4. Weixin 完成真实 iLink live gate 并 pin version/commit
 5. Lark/DingTalk 把真实平台 permission/event/API 要求整理成机器可读 metadata，未来再接真实 permission checker
 

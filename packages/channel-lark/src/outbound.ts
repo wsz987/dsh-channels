@@ -12,6 +12,7 @@ import type {
   ChannelTarget,
   FilePart,
   MessagePart,
+  OutboundActionRow,
   OutboundMessage,
   SendResult,
 } from '@wsz987/channel-core';
@@ -20,6 +21,8 @@ import { toTextPayload } from './mapper.js';
 import type { LarkFileRef, LarkUpstream } from './upstream.js';
 
 export class OutboundSender {
+  private readonly interactiveCards = new Map<string, { text: string }>();
+
   constructor(
     private readonly upstream: LarkUpstream,
     private readonly logger: ChannelLogger,
@@ -27,6 +30,13 @@ export class OutboundSender {
 
   async send(target: ChannelTarget, message: OutboundMessage): Promise<SendResult> {
     try {
+      if (message.actions?.length) {
+        const payload = toTextPayload(target, message);
+        const response = await this.upstream.sendInteractive(payload.to, payload.content, message.actions);
+        const messageId = messageIdOf(response);
+        if (messageId) this.interactiveCards.set(messageId, { text: payload.content });
+        return { delivered: true, messageId, raw: response };
+      }
       const file = firstFileWithData(message.parts);
       if (file && !message.text) {
         const response = await this.upstream.sendFile(target.conversationId, toFileRef(file));
@@ -50,6 +60,37 @@ export class OutboundSender {
       );
     }
   }
+
+  async edit(target: ChannelTarget, messageId: string, message: OutboundMessage): Promise<SendResult> {
+    try {
+      if (message.actions === undefined && message.text === undefined) return { delivered: true };
+      const known = this.interactiveCards.get(messageId);
+      if (!known) {
+        throw new ChannelSendError('lark cannot edit an interactive card that was not sent by this adapter');
+      }
+      const text = message.text ?? known.text;
+      const actions: OutboundActionRow[] = message.actions ?? [];
+      const response = await this.upstream.updateInteractive(messageId, text, actions);
+      this.interactiveCards.set(messageId, { text });
+      return { delivered: true, messageId, raw: response };
+    } catch (error) {
+      this.logger.error(
+        '[channel-lark] interactive card edit failed for ' + target.conversationId,
+        error instanceof Error ? error.message : error,
+      );
+      throw new ChannelSendError(
+        'lark interactive card edit failed: ' + (error instanceof Error ? error.message : String(error)),
+      );
+    }
+  }
+}
+
+function messageIdOf(response: unknown): string | undefined {
+  if (!response || typeof response !== 'object') return undefined;
+  const data = (response as { data?: unknown }).data;
+  if (!data || typeof data !== 'object') return undefined;
+  const messageId = (data as { message_id?: unknown }).message_id;
+  return typeof messageId === 'string' && messageId.length > 0 ? messageId : undefined;
 }
 
 /**

@@ -39,6 +39,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent';
 import { parseCommand, type CommandResult, type ParsedCommand } from '@deepseek-ai/dsh-commands';
 import type {
   ChannelAdapter,
+  ChannelAccessPolicy,
   ChannelLogger,
   ChannelEvent,
   ChannelTarget,
@@ -340,12 +341,29 @@ export class ChannelHarnessBridge {
     // (incl. /stop fast path — an unauthorized user can never cancel a live
     // agent or bump the generation).
     // ------------------------------------------------------------------
-    if (await this.enforceAccessGate(normalizedEvent, text)) return;
+    const accessPolicy = await this.enforceAccessGate(normalizedEvent, text);
+    if (!accessPolicy) return;
 
     if (await this.options.questionPresenter?.handleChannelEvent(normalizedEvent)) return;
 
-    const key = this.conversationKey(normalizedEvent);
     const parsed = parseCommand(text);
+    if (
+      parsed &&
+      normalizedEvent.conversation.type === 'group' &&
+      normalizedEvent.sender.id !== accessPolicy.ownerId
+    ) {
+      const accessLogger = this.options.accessLogger ?? this.options.logger;
+      accessLogger.info('[channel-access] group command denied', {
+        channel: normalizedEvent.channel,
+        account: normalizedEvent.accountId,
+        conversationType: normalizedEvent.conversation.type,
+        reason: 'command_owner_required',
+      });
+      await this.sendCommandNotice(normalizedEvent, '群聊指令仅所有者可用。');
+      return;
+    }
+
+    const key = this.conversationKey(normalizedEvent);
 
     // P0: /stop is handled on a FAST PATH AND RUNS IMMEDIATELY — it must
     // NEVER be chained behind queued conversation work (spec §4/§5), because
@@ -554,9 +572,9 @@ export class ChannelHarnessBridge {
   }
 
   /**
-   * FAIL-CLOSED Access Gate. Returns true when the message
-   * must be DROPPED with NO side effect (agent / command / session / binding /
-   * workspace / generation / /stop fast path), false to let it proceed.
+   * FAIL-CLOSED Access Gate. Returns the validated policy only when the
+   * message is admitted. `undefined` means DROP with NO side effect (agent /
+   * command / session / binding / workspace / generation / /stop fast path).
    *
    * Order:
    *   1. Reserved claim suppression (/dsh-claim never reaches anything).
@@ -568,7 +586,10 @@ export class ChannelHarnessBridge {
    * (channel / account / conversationType / reason), never message body,
    * challenge code, raw payload or tokens.
    */
-  private async enforceAccessGate(event: MessageReceived, text: string): Promise<boolean> {
+  private async enforceAccessGate(
+    event: MessageReceived,
+    text: string,
+  ): Promise<ChannelAccessPolicy | undefined> {
     const accessLogger = this.options.accessLogger ?? this.options.logger;
 
     // 1. Reserved owner-claim suppression: /dsh-claim must
@@ -579,7 +600,7 @@ export class ChannelHarnessBridge {
         channel: event.channel,
         account: event.accountId,
       });
-      return true;
+      return undefined;
     }
 
     // 2. Identity validation: sender.id must be a non-empty string
@@ -592,11 +613,11 @@ export class ChannelHarnessBridge {
       senderId === 'unknown'
     ) {
       this.dropInbound(accessLogger, event, 'unidentified_sender');
-      return true;
+      return undefined;
     }
     if (typeof conversationId !== 'string' || conversationId.length === 0) {
       this.dropInbound(accessLogger, event, 'invalid_conversation');
-      return true;
+      return undefined;
     }
 
     // 3. Resolve the policy (fail closed).
@@ -605,15 +626,15 @@ export class ChannelHarnessBridge {
       resolved = await this.options.accessResolver.resolve(event.channel, event.accountId);
     } catch (error) {
       this.options.logger.warn('[channel-access] policy resolution failed', toLoggableError(error));
-      return true;
+      return undefined;
     }
     if (resolved.state === 'missing') {
       this.dropInbound(accessLogger, event, 'missing_policy');
-      return true;
+      return undefined;
     }
     if (resolved.state === 'invalid') {
       this.dropInbound(accessLogger, event, 'invalid_policy');
-      return true;
+      return undefined;
     }
 
     // 4. Authorize (Security Gate) then activate (Activation Gate).
@@ -626,14 +647,14 @@ export class ChannelHarnessBridge {
     });
     if (!decision.authorized) {
       this.dropInbound(accessLogger, event, decision.reason);
-      return true;
+      return undefined;
     }
     if (!decision.activated) {
       this.dropInbound(accessLogger, event, decision.reason);
-      return true;
+      return undefined;
     }
 
-    return false;
+    return resolved.policy;
   }
 
   /** Log a fail-closed inbound drop with minimal plan-§42 fields. */

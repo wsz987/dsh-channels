@@ -16,6 +16,20 @@ import {
 import { ChannelSendError, type ChannelLogger, type OutboundMessage } from '@wsz987/channel-core';
 import type { QQConfig } from './config.js';
 
+/**
+ * QQ Gateway intents the adapter actually consumes today (minimal-intent
+ * principle): `GROUP_AND_C2C` covers the C2C/group message events this adapter
+ * processes inbound, and `INTERACTION` covers the button `INTERACTION_CREATE`
+ * callbacks that drive `interaction.received`. The SDK defaults to
+ * `FULL_INTENTS` (guilids + members + guild messages + dm + group/c2c +
+ * interaction); requesting only what we use avoids `4914 INSUFFICIENT_INTENTS`
+ * / `4915 DISALLOWED_INTENTS` gateway rejections for privileges the bridge
+ * never exercises, and keeps the permission surface minimal. Bit values are
+ * verified from the pinned SDK (`dist/protocol/gateway/constants.js`):
+ * `GROUP_AND_C2C = 1 << 25`, `INTERACTION = 1 << 26`.
+ */
+export const QQ_MINIMAL_INTENTS = (1 << 25) | (1 << 26); // GROUP_AND_C2C | INTERACTION
+
 /** Reply target for outbound text/media send (port-local structural type). */
 export interface QQReplyTarget {
   scope: 'c2c' | 'group';
@@ -41,17 +55,82 @@ export interface QQStreamSession {
   cancel(): void;
 }
 
+/**
+ * Structural slice of the SDK `InteractionEvent` the adapter needs for an
+ * `interaction.received` round-trip. Kept port-local (no platform import in
+ * the adapter) so the real SDK type and the offline fake both satisfy it.
+ *
+ * All fields are optional here to mirror the untrusted wire shape; the
+ * adapter validates the actual payload with a zod schema at the trust
+ * boundary before emitting a canonical event.
+ */
+export interface QQInteractionLike {
+  id?: string;
+  chat_type?: number;
+  user_openid?: string;
+  group_openid?: string;
+  group_member_openid?: string;
+  data?: {
+    resolved?: {
+      button_id?: string;
+      button_data?: string;
+    };
+  };
+}
+
+/**
+ * Structural slice of the SDK `KeyboardButton` row shape the outbound mapper
+ * serializes into. Mirrors the QQ platform inline-keyboard contract:
+ * `action.data` is the opaque value echoed back verbatim in
+ * `InteractionEvent.data.resolved.button_data`, so the `uq_*` action id rides
+ * there (and in `id`, the platform-stable button handle).
+ */
+export interface QQKeyboardButton {
+  id: string;
+  render_data: {
+    label: string;
+    visited_label: string;
+    style: number;
+  };
+  action: {
+    type: number;
+    permission: { type: number };
+    data: string;
+    click_limit?: number;
+  };
+  group_id?: string;
+}
+
+/** Port-local structural slice of the SDK `InlineKeyboard`. */
+export interface QQInlineKeyboardLike {
+  content: {
+    rows: Array<{ buttons: QQKeyboardButton[] }>;
+  };
+}
+
+/** QQ inline-keyboard callback action (emits `INTERACTION_CREATE`). */
+export const QQ_BUTTON_ACTION_TYPE = 1;
+/** QQ inline-keyboard permission: any user may press. */
+export const QQ_BUTTON_PERMISSION_TYPE = 2;
+/** QQ button render style for the `primary` DSH action style. */
+export const QQ_BUTTON_STYLE_PRIMARY = 1;
+/** QQ button render style default. */
+export const QQ_BUTTON_STYLE_DEFAULT = 0;
+
 export interface QQSdkClient {
   onReady(handler: () => void): void;
   onResumed(handler: () => void): void;
   onError(handler: (error: Error) => void): void;
   onMessage(handler: (message: QQBotInboundMessage) => void): void;
+  onInteraction(handler: (event: QQInteractionLike) => void): void;
 
   start(signal: AbortSignal): Promise<void>;
   stop(): void;
 
   sendText(target: QQReplyTarget, text: string): Promise<unknown>;
+  sendMarkdownWithKeyboard(target: QQReplyTarget, text: string, keyboard: QQInlineKeyboardLike): Promise<unknown>;
   sendMedia(target: QQReplyTarget, message: OutboundMessage): Promise<unknown>;
+  acknowledgeInteraction(id: string, code?: number, data?: Record<string, unknown>): Promise<unknown>;
   openStream(target: QQStreamTarget, options: { throttleMs: number }): QQStreamSession;
 }
 
@@ -77,6 +156,9 @@ export class TencentQQSdkClient implements QQSdkClient {
       markdownSupport: config.markdownSupport,
       transport: 'websocket',
       tokenPrefetch: 'sync',
+      // Minimal intent mask (GROUP_AND_C2C | INTERACTION) — never rely on the
+      // SDK `FULL_INTENTS` default (skill §6.2, P1). See QQ_MINIMAL_INTENTS.
+      intents: QQ_MINIMAL_INTENTS,
       logger: adaptLogger(logger),
     });
   }
@@ -97,6 +179,12 @@ export class TencentQQSdkClient implements QQSdkClient {
     this.bot.on('message', (_ctx, message) => handler(message));
   }
 
+  onInteraction(handler: (event: QQInteractionLike) => void): void {
+    // The SDK dispatches the raw `InteractionEvent` as the second argument;
+    // the handler only sees the port slice the adapter needs.
+    this.bot.on('interaction', (_ctx, event) => handler(event));
+  }
+
   start(signal: AbortSignal): Promise<void> {
     return this.bot.start(signal);
   }
@@ -107,6 +195,18 @@ export class TencentQQSdkClient implements QQSdkClient {
 
   sendText(target: QQReplyTarget, text: string): Promise<unknown> {
     return this.bot.sendText(target, text);
+  }
+
+  sendMarkdownWithKeyboard(target: QQReplyTarget, text: string, keyboard: QQInlineKeyboardLike): Promise<unknown> {
+    // New QQ interactive messages are explicit Markdown messages. Do not use
+    // sendTextWithKeyboard(): that helper follows `markdownSupport` and emits
+    // msg_type=0 when the legacy config flag is false, in which case current
+    // QQ clients do not render the keyboard.
+    return this.bot.sendMarkdown(toSdkReplyTarget(target), text, { keyboard });
+  }
+
+  acknowledgeInteraction(id: string, code?: number, data?: Record<string, unknown>): Promise<unknown> {
+    return this.bot.acknowledgeInteraction(id, code, data);
   }
 
   async sendMedia(target: QQReplyTarget, message: OutboundMessage): Promise<unknown> {
@@ -225,6 +325,7 @@ export class FakeQQSdkClient implements QQSdkClient {
   private resumedHandlers: (() => void)[] = [];
   private errorHandlers: ((error: Error) => void)[] = [];
   private messageHandlers: ((message: QQBotInboundMessage) => void)[] = [];
+  private interactionHandlers: ((event: QQInteractionLike) => void)[] = [];
 
   started = false;
   stopped = false;
@@ -238,7 +339,9 @@ export class FakeQQSdkClient implements QQSdkClient {
   lastSignal?: AbortSignal;
 
   readonly textCalls: { target: QQReplyTarget; text: string }[] = [];
+  readonly keyboardCalls: { target: QQReplyTarget; text: string; keyboard: QQInlineKeyboardLike; format: 'markdown' }[] = [];
   readonly mediaCalls: { target: QQReplyTarget; message: OutboundMessage }[] = [];
+  readonly acknowledgeCalls: { id: string; code?: number; data?: Record<string, unknown> }[] = [];
   readonly streamCalls: { target: QQStreamTarget; options: { throttleMs: number } }[] = [];
   /** The live stream sessions opened so far (same order as `streamCalls`). */
   readonly streams: QQStreamSession[] = [];
@@ -261,6 +364,10 @@ export class FakeQQSdkClient implements QQSdkClient {
     this.messageHandlers.push(handler);
   }
 
+  onInteraction(handler: (event: QQInteractionLike) => void): void {
+    this.interactionHandlers.push(handler);
+  }
+
   async start(signal: AbortSignal): Promise<void> {
     this.started = true;
     this.lastSignal = signal;
@@ -276,6 +383,13 @@ export class FakeQQSdkClient implements QQSdkClient {
 
   stop(): void {
     this.stopped = true;
+    // Mirror the real SDK teardown: once stopped, no more events are
+    // dispatched to registered handlers.
+    this.readyHandlers = [];
+    this.resumedHandlers = [];
+    this.errorHandlers = [];
+    this.messageHandlers = [];
+    this.interactionHandlers = [];
   }
 
   async sendText(target: QQReplyTarget, text: string): Promise<unknown> {
@@ -284,10 +398,25 @@ export class FakeQQSdkClient implements QQSdkClient {
     return { id: `out-${this.textCalls.length}` };
   }
 
+  async sendMarkdownWithKeyboard(
+    target: QQReplyTarget,
+    text: string,
+    keyboard: QQInlineKeyboardLike,
+  ): Promise<unknown> {
+    if (this.sendError) throw this.sendError;
+    this.keyboardCalls.push({ target, text, keyboard, format: 'markdown' });
+    return { id: `out-kbd-${this.keyboardCalls.length}` };
+  }
+
   async sendMedia(target: QQReplyTarget, message: OutboundMessage): Promise<unknown> {
     if (this.sendError) throw this.sendError;
     this.mediaCalls.push({ target, message });
     return { upload: {}, message: { id: `out-media-${this.mediaCalls.length}` } };
+  }
+
+  async acknowledgeInteraction(id: string, code?: number, data?: Record<string, unknown>): Promise<unknown> {
+    this.acknowledgeCalls.push({ id, code, data });
+    return undefined;
   }
 
   openStream(target: QQStreamTarget, options: { throttleMs: number }): QQStreamSession {
@@ -313,6 +442,10 @@ export class FakeQQSdkClient implements QQSdkClient {
 
   emitMessage(message: QQBotInboundMessage): void {
     for (const h of this.messageHandlers) h(message);
+  }
+
+  emitInteraction(event: QQInteractionLike): void {
+    for (const h of this.interactionHandlers) h(event);
   }
 }
 

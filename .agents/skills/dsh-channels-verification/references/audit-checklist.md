@@ -89,13 +89,13 @@ For each target channel:
 
 ## I. Mandatory known checks (snapshot 2026-08-19)
 
-- [ ] QQ: verify DSH does not accidentally rely on SDK `FULL_INTENTS`.
+- [x] QQ: DSH explicitly uses `QQ_MINIMAL_INTENTS`; it does not rely on SDK `FULL_INTENTS`.
 - [ ] QQ: `markdownSupport=true` only when platform permission exists.
 - [x] Telegram: align manifest and fixtures to Bot API 10.2; live gate remains pending.
 - [x] Telegram: document that polling startup deletes an existing webhook.
-- [ ] Telegram: validate media Bot API envelopes before reporting delivery.
-- [ ] Telegram: replace raw message/update casts with zod trust-boundary parsing.
-- [ ] Telegram: fail closed for callback queries without `message.chat`.
+- [x] Telegram: validate media Bot API envelopes before reporting delivery.
+- [x] Telegram: replace raw message/update casts with zod trust-boundary parsing.
+- [x] Telegram: fail closed for callback queries without `message.chat`.
 - [ ] Weixin: keep file outbound unsupported until concrete upstream supports it.
 - [ ] Weixin: replace pending live version/commit after real gate.
 - [ ] Weixin: do not treat `channels.weixin.qq.com` as iLink protocol documentation.

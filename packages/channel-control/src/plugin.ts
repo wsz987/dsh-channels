@@ -16,6 +16,7 @@ import type { ChannelService } from '@wsz987/channel-core';
 import { ChannelControlService } from './service.js';
 import type { CredentialSeam } from './credentials/manager.js';
 import { ChannelStorageAccessPolicyStore } from './access/policy-store.js';
+import { ChannelStorageConversationDirectoryStore } from './access/conversation-directory-store.js';
 import { Config, type Config as ChannelControlConfig } from './config.js';
 
 export const name = 'channel-control';
@@ -34,6 +35,10 @@ export function apply(ctx: Context, config: ChannelControlConfig): void {
     credentials,
     // Durable policy store over the same ChannelStorage the harness resolver reads.
     accessStore: new ChannelStorageAccessPolicyStore(() => channels.resources.storage),
+    // Durable conversation-identity directory over the same shared storage.
+    conversationStore: new ChannelStorageConversationDirectoryStore(
+      () => channels.resources.storage,
+    ),
     // Owner identity resolution delegates to the registered definition's hook.
     resolveOwnerIdentity: async (
       channelId: string,
@@ -73,17 +78,19 @@ export function apply(ctx: Context, config: ChannelControlConfig): void {
     return () => service.runtime.stopAll().catch(() => {});
   });
 
-  // Owner-claim event listener. observe() NEVER throws (it catches
-  // and logs internally), but wrap it anyway so a failure can never propagate
+  // Event listeners for the owner-claim session manager and the conversation
+  // identity directory. Neither observe() ever throws intentionally (both catch
+  // and log internally), but wrap them anyway so a failure can never propagate
   // back to the adapter inbound loop (which would treat the whole platform
   // message as failed). The disposer is returned through ctx.effect teardown.
   ctx.effect(() => {
     const off = channels.on((event) => {
       try {
         service.ownerClaims.observe(event);
+        service.observeConversation(event);
       } catch (error) {
         ctx.logger('channel-control').warn(
-          '[channel-control] owner claim observe failed',
+          '[channel-control] channel event observe failed',
           error,
         );
       }

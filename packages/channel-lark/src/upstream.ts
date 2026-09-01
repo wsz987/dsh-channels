@@ -13,6 +13,8 @@
  * - POST /card/finish   — finalize the card (status 'finished')
  * - POST /card/fail     — mark the card failed (status 'failed')
  */
+import { ChannelError } from '@wsz987/channel-core';
+import type { OutboundActionRow } from '@wsz987/channel-core';
 import type { HttpTransport } from './transport.js';
 
 /** Card create response: the gateway-issued card id. */
@@ -63,6 +65,12 @@ export interface LarkOutbound {
   /** Send a generic file message (M7A). */
   sendFile(to: string, file: LarkFileRef): Promise<unknown>;
 
+  /**
+   * Send an official Feishu interactive-card button set. This is deliberately
+   * separate from text: only the official SDK/OpenAPI driver supports it.
+   */
+  sendInteractive(to: string, text: string, actions: OutboundActionRow[]): Promise<unknown>;
+
   /** Create an editable card in the given conversation with initial content. */
   createCard(conversationId: string, text: string): Promise<CardCreateResult>;
 
@@ -74,6 +82,10 @@ export interface LarkOutbound {
 
   /** Mark an editable card as failed, optionally with a reason. */
   failCard(cardId: string, reason?: string): Promise<unknown>;
+  /** Rewrite an interactive card, for example to remove completed actions. */
+  updateInteractive(cardId: string, text: string, actions: OutboundActionRow[]): Promise<unknown>;
+  /** Resolve the official chat mode for a card action before ACL admission. */
+  getChatType?(conversationId: string): Promise<'p2p' | 'group' | undefined>;
   startTyping?(messageId: string): Promise<void>;
   stopTyping?(messageId: string): Promise<void>;
 }
@@ -155,6 +167,13 @@ export class HttpLarkUpstream implements LarkUpstream {
     });
   }
 
+  sendInteractive(): Promise<unknown> {
+    return Promise.reject(new ChannelError(
+      'CHANNEL_ERROR',
+      'lark interactive actions require the official SDK upstream',
+    ));
+  }
+
   createCard(conversationId: string, text: string): Promise<CardCreateResult> {
     return this.options.transport
       .request('/card/create', {
@@ -186,5 +205,16 @@ export class HttpLarkUpstream implements LarkUpstream {
       method: 'POST',
       body: { cardId, reason },
     });
+  }
+
+  updateInteractive(): Promise<unknown> {
+    return Promise.reject(new ChannelError(
+      'CHANNEL_ERROR',
+      'lark interactive actions require the official SDK upstream',
+    ));
+  }
+
+  getChatType(): Promise<'p2p' | 'group' | undefined> {
+    return Promise.resolve(undefined);
   }
 }

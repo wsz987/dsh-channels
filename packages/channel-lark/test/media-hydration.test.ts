@@ -6,7 +6,7 @@
  * Platform verdict evidence (see the task report): the official
  * `im.v1.messageResource.get` API documents its resource scope as 音频、视频、
  * 图片和文件 (audio, video, image and file — SDK-embedded doc statement in
- * @larksuiteoapi/node-sdk@1.73.0), and the SDK `type` query param is typed
+ * @larksuiteoapi/node-sdk@1.73.1), and the SDK `type` query param is typed
  * `string`, so audio/video file_keys download through the same seam as
  * image/file. Failures keep the resourceRef, set a stable ingressFailure and
  * never block text delivery; an over-cap resource maps to 'too-large'.

@@ -56,8 +56,8 @@ export interface QuestionInteractionSink {
    *
    * @returns true when the channel took ownership (it will later resolve or
    * cancel through the backend); false when the channel declined (no bound
-   * conversation, non-interactive adapter, or a question already pending
-   * there) and the backend must settle the ask some other way.
+   * conversation, adapter absent / text unsupported, or a question already
+   * pending there) and the backend must settle the ask some other way.
    */
   questionRequested(request: QuestionInteractionRequest): Promise<boolean>;
   /**

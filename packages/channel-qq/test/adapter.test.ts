@@ -97,6 +97,11 @@ describe('QQAdapter streaming (target-aware)', () => {
     expect(adapter.capabilities.markdown).toBe(true);
     expect(adapter.capabilities.video).toBe(true);
   });
+
+  it('declares interactiveActions (native inline keyboard round-trip)', () => {
+    const adapter = new QQAdapter(makeConfig(), { sdkClient: new FakeQQSdkClient() });
+    expect(adapter.capabilities.interactiveActions).toBe(true);
+  });
 });
 
 describe('QQAdapter.createReply', () => {

@@ -161,8 +161,8 @@ export class DirectQuestionBackend implements QuestionInteractionBackend, UserQu
         .questionRequested({ key, sessionId, questions: request.questions })
         .then((accepted) => {
           // The channel declined ownership (no bound conversation, one
-          // already pending there, non-interactive adapter): fail the ask
-          // now — headless there is no other UI that could answer it.
+          // already pending there, adapter absent / text unsupported): fail
+          // the ask now — headless there is no other UI that could answer it.
           if (!accepted && this.pending.has(key)) {
             this.settle(pending, () => {
               reject(

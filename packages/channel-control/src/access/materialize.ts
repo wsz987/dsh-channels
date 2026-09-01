@@ -40,13 +40,19 @@ export function ownerOnlyPolicy(ownerId: string): ChannelAccessPolicy {
 /**
  * Private messages are platform-restricted to the bot creator. Group access
  * remains disabled until the local operator explicitly configures it.
+ *
+ * Used only when the channel declares ownerDiscovery='platform': the upstream
+ * platform itself restricts the private-chat audience (e.g. QQ C2C is limited
+ * to the bot creator). `dmPolicy: 'open'` therefore means "accept every DM
+ * the platform can deliver", NOT "every platform user can start a DM".
  */
-export function platformPrivatePolicy(): ChannelAccessPolicy {
+export function platformPrivatePolicy(ownerId?: string): ChannelAccessPolicy {
   return {
     version: 1,
     preset: 'custom',
     dmPolicy: 'open',
     allowFrom: [],
+    ...(ownerId ? { ownerId } : {}),
     groupPolicy: 'disabled',
     groups: {},
   };

@@ -22,6 +22,8 @@
 12. **Access policy 变更无需重启 adapter**（每次 inbound 直读）。
 13. **Owner Claim 永不进入 Agent / Session / Binding / Command plane**。
 14. **channel-harness 必须注入 Access Policy Resolver**；未接线不得进入放行路径。
+15. **群聊命令仅 Owner 可执行**：解析出斜杠命令后，只有 canonical
+    `sender.id === policy.ownerId` 才能进入命令面；缺少 owner 或不匹配一律拒绝。
 
 ## Policy Schema
 
@@ -64,10 +66,16 @@
 3. Load policy（missing/invalid → DROP）
 4. Security Authorization（DM/group/sender）
 5. Activation Gate（requireMention）
-6. 之后才进入 conversation key / parseCommand / /stop / Session / Binding / Agent
+6. `parseCommand`；群聊命令执行 Owner Gate
+7. 之后才进入 conversation key / `/stop` / Session / Binding / Agent
 
 > `/stop` 的 admission 点移到 Access Gate 之后：未授权用户绝对不能 cancel 本机 Agent，
 > 同时已授权 `/stop` 的 fast-path scheduling 语义保持不变。
+
+群聊命令 Owner Gate 不识别或查询各平台的“群管理员”角色，也不增加渠道特判。普通群消息
+仍按群规则授权；任何斜杠命令（包括未知命令和未来新增命令）默认只有已识别的
+`policy.ownerId` 可以执行。拒绝发生在 `/stop` generation bump、Session、Binding、Workspace
+和 Agent 之前。
 
 ## Owner
 
@@ -93,11 +101,30 @@
 
 - 私聊访问直接映射为 `disabled` / owner allowlist / explicit allowlist / `open`，不通过可见的“自定义”二次选择。
 - `ownerDiscovery=account`（当前为微信）的私聊访问固定显示 owner-only，不提供可编辑的 DM 选项；上述四选项仅用于 `claim/manual` 渠道。
+- `ownerDiscovery=platform`（当前为 QQ）的私聊区域为固定说明文案（平台已限制私聊受众），不显示 claim 或 DM allowlist。
 - 当 `ownerDiscovery=account` 且渠道不支持 groups 时，Access 区域是完全只读状态，不显示无群聊占位文案或保存按钮。
 - 私聊与 named-group 规则彼此独立；修改私聊规则不得清空群规则。
 - 群内“仅自己”必须写成 `senderPolicy=allowlist` + `allowFrom=[ownerId]`。
 - 空 `allowFrom` 在 DM 和 group 中都表示 DENY ALL，UI 不得把它标成 owner-only。
 - “所有人”只允许出现在明确维度：DM 的 `dmPolicy=open`，或群规则的 `senderPolicy=open`。`groupPolicy=open` 只表示所有群匹配 `defaultGroupRule`，不隐含群内所有成员开放。
+
+### Conversation discovery（display-only）
+
+- Adapter 可在 trust boundary 将平台的人类可读会话标识提取为
+  `conversation.externalId`。QQ 不使用 `raw.group_id` 配置群权限：真实群消息中它
+  不能稳定代表人类可读群号；QQ 只以 canonical `group_openid` 发现和选择群。
+  **`externalId` / `name` 永不进入 `authorize()`**：
+  Access Controller 只接收 `{ conversationId, senderId, mentionedBot, policy }`。
+- channel-control 的 Conversation Identity Directory 观察每条 canonical 群事件，维护
+  发现到的 canonical id 及可选 display metadata（存储 key
+  `conversation-directory:v1:<channelId>:<accountId>`），只存 identity metadata
+  （无消息内容 / raw / secret），并按 channel+account 隔离。
+- Web 通过 `GET /channels/:id/conversations` 渲染「最近发现」选择器；descriptor 声明
+  `identity.conversation.conversationDiscoverable` 的渠道（QQ）只能从已
+  发现的 `group_openid` 添加，不能手输 QQ 群号或猜测 canonical id；policy.groups 的
+  key 永远是 canonical id。
+- 同一 canonicalId 观察到不同 externalId 时标记 `identityConflict` 供人工复核，
+  不改变任何 ACL 授权。
 
 ## Owner Claim
 

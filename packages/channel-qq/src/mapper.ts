@@ -18,6 +18,11 @@ import type {
 import { textParts } from '@wsz987/channel-core';
 import type { QQBotInboundMessage } from '@tencent-connect/qqbot-nodejs';
 import type { InboundAttachment } from '@tencent-connect/qqbot-nodejs/protocol';
+import { z } from 'zod';
+
+const qqMentionsSchema = z.array(z.object({
+  is_you: z.boolean().optional(),
+}).passthrough());
 
 export interface QQInboundMeta {
   channel: ChannelId;
@@ -51,6 +56,9 @@ export function mapInbound(msg: QQBotInboundMessage, meta: QQInboundMeta): Messa
       id: msg.messageId as MessageId,
       content: mapMessageParts(msg),
       createdAt: Date.parse(msg.timestamp),
+      ...(group
+        ? { activation: { mentionedBot: qqMessageMentionedBot(msg) } }
+        : {}),
     },
     raw: msg.raw,
   };
@@ -66,8 +74,9 @@ export function mapInbound(msg: QQBotInboundMessage, meta: QQInboundMeta): Messa
 export function mapMessageParts(msg: QQBotInboundMessage): MessagePart[] {
   const parts: MessagePart[] = [];
 
-  if (msg.content) {
-    parts.push(...textParts(msg.content));
+  const content = normalizeInboundText(msg);
+  if (content) {
+    parts.push(...textParts(content));
   }
 
   for (const attachment of msg.attachments ?? []) {
@@ -82,6 +91,22 @@ export function mapMessageParts(msg: QQBotInboundMessage): MessagePart[] {
   }
 
   return parts;
+}
+
+/**
+ * New QQ group-at events are a reliable activation fact. Their textual body
+ * may still start with the platform `<@...>` marker; remove only that leading
+ * addressed-bot marker so Harness sees the user's actual answer (`2`, etc.).
+ */
+export function qqMessageMentionedBot(msg: QQBotInboundMessage): boolean {
+  if (msg.rawEventType === 'GROUP_AT_MESSAGE_CREATE') return true;
+  const parsed = qqMentionsSchema.safeParse(msg.mentions);
+  return parsed.success && parsed.data.some((mention) => mention.is_you === true);
+}
+
+function normalizeInboundText(msg: QQBotInboundMessage): string {
+  if (!qqMessageMentionedBot(msg)) return msg.content;
+  return msg.content.replace(/^\s*<@!?[^>]+>\s*/u, '').trimStart();
 }
 
 /** Map one SDK inbound attachment to a structured part (or undefined). */

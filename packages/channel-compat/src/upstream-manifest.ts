@@ -46,7 +46,7 @@ export interface UpstreamManifest {
  *               @tencent-weixin/openclaw-weixin@2.4.6, single vendor-compat
  *               boundary (plan section 14 / 39).
  * - qq       : official-sdk — @tencent-connect/qqbot-nodejs@1.0.4 (section 2/21).
- * - lark     : official-sdk — @larksuiteoapi/node-sdk@1.73.0 (section 2/25).
+ * - lark     : official-sdk — @larksuiteoapi/node-sdk@1.73.1 (section 2/25).
  * - dingtalk : minimal-official-api-port — dingtalk-stream@2.1.5 + oracle
  *               connector @dingtalk-real-ai/dingtalk-connector@0.8.24 (plan
  *               section 2/30/39; oracle recorded below AND as a fixing anchor
@@ -72,7 +72,7 @@ export const UPSTREAM_MANIFESTS: readonly UpstreamManifest[] = [
   {
     channel: 'lark',
     packageName: '@larksuiteoapi/node-sdk',
-    testedVersion: '1.73.0',
+    testedVersion: '1.73.1',
     strategy: 'official-sdk',
     sourceRepository: 'larksuite/openclaw-lark',
     contractFixtures: ['fixtures/upstream/lark/2026.7.9/'],
