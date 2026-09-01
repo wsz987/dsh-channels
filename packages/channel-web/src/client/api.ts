@@ -124,6 +124,13 @@ export interface ChannelAccessDescriptor {
   mentions: boolean;
   ownerDiscovery: OwnerDiscoveryMode;
   identityLabels: { user: string; group?: string };
+  /** Conversation-identity presentation metadata (see PublicConversationIdentity). */
+  identity?: {
+    conversation?: {
+      externalIdLabel?: string;
+      conversationDiscoverable?: boolean;
+    };
+  };
   defaults?: { requireMention?: boolean };
 }
 
@@ -158,6 +165,22 @@ export interface ChannelAccessState {
   readiness: ChannelAccessReadiness;
   policy?: ChannelAccessPolicy;
   owner: { configured: boolean; id?: string; source?: 'account' | 'claim' | 'manual' };
+}
+
+/**
+ * Observed conversation identity (GET /channels/:id/conversations). Display
+ * metadata only: `canonicalId` is what a policy stores; `externalId` /
+ * `displayName` are optional human-facing values.
+ */
+export interface PublicConversationIdentity {
+  type: 'group';
+  canonicalId: string;
+  externalId?: string;
+  displayName?: string;
+  alias?: string;
+  identityConflict?: boolean;
+  firstSeenAt: number;
+  lastSeenAt: number;
 }
 
 export type OwnerClaimPhase =
@@ -447,4 +470,40 @@ export async function cancelOwnerClaim(
     `/channels/${encodeURIComponent(id)}/access/owner-claims/${encodeURIComponent(claimId)}`,
     { method: 'DELETE', signal },
   );
+}
+
+// ---------------------------------------------------------------------------
+// Conversation identity directory (display/mapping only)
+// ---------------------------------------------------------------------------
+
+/** GET /channels/:id/conversations → { conversations } */
+export async function fetchConversations(
+  id: string,
+  signal?: AbortSignal,
+): Promise<PublicConversationIdentity[]> {
+  const body = await request<{ conversations: PublicConversationIdentity[] }>(
+    `/channels/${encodeURIComponent(id)}/conversations`,
+    { signal },
+  );
+  return body.conversations;
+}
+
+/**
+ * GET /channels/:id/conversations/by-external/:externalId → the observed
+ * identity for an optional human-facing id, or null when never seen.
+ */
+export async function findConversation(
+  id: string,
+  externalId: string,
+  signal?: AbortSignal,
+): Promise<PublicConversationIdentity | null> {
+  try {
+    return await request<PublicConversationIdentity>(
+      `/channels/${encodeURIComponent(id)}/conversations/by-external/${encodeURIComponent(externalId)}`,
+      { signal },
+    );
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null;
+    throw error;
+  }
 }

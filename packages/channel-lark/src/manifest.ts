@@ -45,13 +45,13 @@ export const manifest: LarkManifest = {
   adapterVersion: pkg.version,
   upstream: {
     reference: 'larksuite/node-sdk (https://github.com/larksuite/node-sdk)',
-    testedVersion: '1.73.0',
-    versionRange: '1.73.0',
+    testedVersion: '1.73.1',
+    versionRange: '1.73.1',
     strategy: 'sdk',
   },
   sdk: {
     package: '@larksuiteoapi/node-sdk',
-    testedVersion: '1.73.0',
+    testedVersion: '1.73.1',
   },
   status: 'tested',
 };

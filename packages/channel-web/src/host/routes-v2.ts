@@ -30,6 +30,7 @@ import type {
   ConfiguredState,
   PublicAuthSession,
   PublicAuthStatus,
+  PublicConversationIdentity,
   PublicOwnerClaimSession,
 } from '@wsz987/channel-control';
 import type { ChannelAccessPolicy } from '@wsz987/channel-core';
@@ -70,6 +71,13 @@ export interface ChannelControlLike {
   getOwnerClaim(channelId: string, claimId: string): Promise<PublicOwnerClaimSession>;
   confirmOwnerClaim(channelId: string, claimId: string): Promise<ChannelAccessState>;
   cancelOwnerClaim(channelId: string, claimId: string): Promise<void>;
+  // ---- conversation identity directory (display/mapping only) --------------
+  listConversations(channelId: string, accountId?: string): Promise<PublicConversationIdentity[]>;
+  findConversation(
+    channelId: string,
+    externalId: string,
+    accountId?: string,
+  ): Promise<PublicConversationIdentity | undefined>;
   // ---- bundle update check (prompt-only, read-only DTO) --------------------
   getUpdateStatus(): Promise<BundleUpdateStatus>;
 }
@@ -395,6 +403,36 @@ export class ChannelApiV2 {
   }
 
   /**
+   * GET /channels/:channelId/conversations → { conversations } — observed
+   * conversation identities (plan §35). Display/mapping metadata only.
+   */
+  async listConversations(channelId: string): Promise<ApiResultV2> {
+    const found = await this.channelOr404(channelId);
+    if (!found.ok) return found.result;
+    return run(() => this.control.listConversations(channelId), (conversations) => ({
+      status: 200,
+      body: { conversations },
+    }));
+  }
+
+  /**
+   * GET /channels/:channelId/conversations/by-external/:externalId → the one
+   * observed identity matching an optional human-facing id, or 404 when
+   * the bot has never seen it. Callers must not guess a canonical id.
+   */
+  async findConversation(channelId: string, externalId: unknown): Promise<ApiResultV2> {
+    const found = await this.channelOr404(channelId);
+    if (!found.ok) return found.result;
+    const eid = requireString(externalId, 'externalId');
+    if (!eid.ok) return eid.result;
+    return run(() => this.control.findConversation(channelId, eid.value), (identity) =>
+      identity
+        ? { status: 200, body: identity }
+        : { status: 404, body: errorBody('CONVERSATION_NOT_FOUND', 'no observed conversation for that external id') },
+    );
+  }
+
+  /**
    * Match a path under `/dsh-channels/api/v2` (the prefix is stripped by the
    * caller) and dispatch. Returns 404 for unknown routes.
    */
@@ -454,6 +492,17 @@ export class ChannelApiV2 {
       const claimId = safeDecode(claim[2]!);
       if (method === 'GET') return this.getOwnerClaim(id, claimId);
       if (method === 'DELETE') return this.cancelOwnerClaim(id, claimId);
+    }
+
+    // ---- conversation identity directory ----------------------
+    const conversations = /^\/channels\/([^/]+)\/conversations$/.exec(clean);
+    if (method === 'GET' && conversations) {
+      return this.listConversations(safeDecode(conversations[1]!));
+    }
+
+    const byExternal = /^\/channels\/([^/]+)\/conversations\/by-external\/(.+)$/.exec(clean);
+    if (method === 'GET' && byExternal) {
+      return this.findConversation(safeDecode(byExternal[1]!), safeDecode(byExternal[2]!));
     }
 
     return { status: 404, body: errorBody('NOT_FOUND', 'no such endpoint') };

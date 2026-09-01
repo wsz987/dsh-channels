@@ -101,11 +101,30 @@
 
 - 私聊访问直接映射为 `disabled` / owner allowlist / explicit allowlist / `open`，不通过可见的“自定义”二次选择。
 - `ownerDiscovery=account`（当前为微信）的私聊访问固定显示 owner-only，不提供可编辑的 DM 选项；上述四选项仅用于 `claim/manual` 渠道。
+- `ownerDiscovery=platform`（当前为 QQ）的私聊区域为固定说明文案（平台已限制私聊受众），不显示 claim 或 DM allowlist。
 - 当 `ownerDiscovery=account` 且渠道不支持 groups 时，Access 区域是完全只读状态，不显示无群聊占位文案或保存按钮。
 - 私聊与 named-group 规则彼此独立；修改私聊规则不得清空群规则。
 - 群内“仅自己”必须写成 `senderPolicy=allowlist` + `allowFrom=[ownerId]`。
 - 空 `allowFrom` 在 DM 和 group 中都表示 DENY ALL，UI 不得把它标成 owner-only。
 - “所有人”只允许出现在明确维度：DM 的 `dmPolicy=open`，或群规则的 `senderPolicy=open`。`groupPolicy=open` 只表示所有群匹配 `defaultGroupRule`，不隐含群内所有成员开放。
+
+### Conversation discovery（display-only）
+
+- Adapter 可在 trust boundary 将平台的人类可读会话标识提取为
+  `conversation.externalId`。QQ 不使用 `raw.group_id` 配置群权限：真实群消息中它
+  不能稳定代表人类可读群号；QQ 只以 canonical `group_openid` 发现和选择群。
+  **`externalId` / `name` 永不进入 `authorize()`**：
+  Access Controller 只接收 `{ conversationId, senderId, mentionedBot, policy }`。
+- channel-control 的 Conversation Identity Directory 观察每条 canonical 群事件，维护
+  发现到的 canonical id 及可选 display metadata（存储 key
+  `conversation-directory:v1:<channelId>:<accountId>`），只存 identity metadata
+  （无消息内容 / raw / secret），并按 channel+account 隔离。
+- Web 通过 `GET /channels/:id/conversations` 渲染「最近发现」选择器；descriptor 声明
+  `identity.conversation.conversationDiscoverable` 的渠道（QQ）只能从已
+  发现的 `group_openid` 添加，不能手输 QQ 群号或猜测 canonical id；policy.groups 的
+  key 永远是 canonical id。
+- 同一 canonicalId 观察到不同 externalId 时标记 `identityConflict` 供人工复核，
+  不改变任何 ACL 授权。
 
 ## Owner Claim
 

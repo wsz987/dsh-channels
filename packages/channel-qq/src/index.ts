@@ -29,7 +29,7 @@ import { mountChannelAdapter } from '@wsz987/channel-core';
 import type { QQConfig } from './config.js';
 import { Config, QQ_APP_SECRET_REF } from './config.js';
 import { QQAdapter, type QQAdapterDeps } from './adapter.js';
-import { createQQDefinition } from './definition.js';
+import { createQQDefinition, qqConversationScopeFingerprint } from './definition.js';
 import type { QQDefinitionOptions } from './definition.js';
 import type { CredentialSeam } from './definition.js';
 
@@ -93,6 +93,18 @@ export function apply(ctx: Context, config: QQConfig, deps: QQAdapterDeps = {}):
         credentials,
         persistSetup: (patch) => scope?.update(patch) ?? Promise.resolve(),
         persistEnabled: (enabled) => scope?.update({ enabled }) ?? Promise.resolve(),
+        resolveOwnerIdentity: async (accountId, appId) => {
+          const key = `qq:owner-openid:${accountId}:${qqConversationScopeFingerprint(appId) ?? 'unscoped'}`;
+          return ctx.channels.resources.storage.get(key);
+        },
+        persistOwnerIdentity: async (ownerId, accountId, appId) => {
+          const fingerprint = qqConversationScopeFingerprint(appId);
+          if (!fingerprint) return;
+          const key = `qq:owner-openid:${accountId}:${fingerprint}`;
+          if ((await ctx.channels.resources.storage.get(key)) === undefined) {
+            await ctx.channels.resources.storage.set(key, ownerId);
+          }
+        },
       }),
     );
     return;

@@ -161,6 +161,17 @@ describe('createQQDefinition', () => {
     expect(definition.setup.setupUrl).toBe('https://q.qq.com/qqbot/openclaw/?appid=patched-app-id');
   });
 
+  it('partitions conversation-directory mappings by a non-secret AppID fingerprint', async () => {
+    const { definition } = makeDefinition({ config: { appId: 'first-app' } });
+    const first = definition.conversationScopeFingerprint?.('main');
+    expect(first).toMatch(/^[a-f0-9]{64}$/);
+    expect(first).not.toContain('first-app');
+
+    await definition.saveConfig({ appId: 'second-app' });
+    expect(definition.conversationScopeFingerprint?.('main')).toMatch(/^[a-f0-9]{64}$/);
+    expect(definition.conversationScopeFingerprint?.('main')).not.toBe(first);
+  });
+
   it('uses the default writable credential ref when appSecretRef is blank', () => {
     const { definition } = makeDefinition({ config: { appSecretRef: '' } });
     const appSecret = definition.setup.fields.find((field) => field.name === 'appSecret');

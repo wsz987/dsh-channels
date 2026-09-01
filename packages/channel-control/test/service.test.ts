@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Context } from '@deepseek-ai/cordis';
 import {
   ChannelService,
+  type ChannelEvent,
   type ChannelAdapter,
   type ChannelCapabilities,
 } from '@wsz987/channel-core';
@@ -107,6 +108,30 @@ describe('ChannelControlService', () => {
   it('saveConfig rejects a missing channel with a stable error', async () => {
     const { service } = harness([]);
     await expect(service.saveConfig('nope', { appId: '1' })).rejects.toThrow();
+  });
+
+  it('hides prior Bot conversation mappings after the active scope changes', async () => {
+    let scope: string | undefined = 'bot-a';
+    const { service } = harness([makeDef('qq', {
+      conversationScopeFingerprint: () => scope,
+    })]);
+    service.observeConversation({
+      type: 'message.received',
+      channel: 'qq',
+      accountId: 'main',
+      conversation: { id: 'OPEN_A', type: 'group', externalId: '123456789' },
+      sender: { id: 'member_a' },
+      message: { id: 'm1', content: [{ type: 'text', text: 'hello' }] },
+    } as ChannelEvent);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(await service.findConversation('qq', '123456789')).toMatchObject({ canonicalId: 'OPEN_A' });
+    scope = 'bot-b';
+    expect(await service.findConversation('qq', '123456789')).toBeUndefined();
+
+    scope = undefined;
+    expect(await service.listConversations('qq')).toEqual([]);
+    expect(await service.findConversation('qq', '123456789')).toBeUndefined();
   });
 
   it('getSetup merges dynamic state and does not expose credential refs', async () => {

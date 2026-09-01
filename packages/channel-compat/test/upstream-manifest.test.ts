@@ -54,11 +54,11 @@ describe('UPSTREAM_MANIFESTS (boundary lock)', () => {
     expect(m!.sourceRepository).toBe('tencent-connect/openclaw-qqbot');
   });
 
-  it('lark: @larksuiteoapi/node-sdk@1.73.0 / official-sdk', () => {
+  it('lark: @larksuiteoapi/node-sdk@1.73.1 / official-sdk', () => {
     const m = getUpstreamManifest('lark');
     expect(m).toBeDefined();
     expect(m!.packageName).toBe('@larksuiteoapi/node-sdk');
-    expect(m!.testedVersion).toBe('1.73.0');
+    expect(m!.testedVersion).toBe('1.73.1');
     expect(m!.strategy).toBe('official-sdk');
     expect(m!.sourceRepository).toBe('larksuite/openclaw-lark');
   });

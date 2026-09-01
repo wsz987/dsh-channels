@@ -13,18 +13,20 @@
  * (`ownerDiscovery === 'account'`) needs no claim: the owner is auto-identified
  * and group controls are hidden (`descriptor.groups === false`).
  */
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives';
 import {
   beginOwnerClaim,
   cancelOwnerClaim,
   confirmOwnerClaim,
   fetchAccess,
+  fetchConversations,
   fetchOwnerClaim,
   saveAccess,
   type ChannelAccessPolicy,
   type ChannelAccessState,
   type ChannelSummary,
+  type PublicConversationIdentity,
   type PublicOwnerClaimSession,
 } from './api.js';
 import {
@@ -41,6 +43,11 @@ import {
 } from './accessPolicyUi.js';
 import { type ChannelWebDefinition } from './channelRegistry.js';
 import { AccessWarning } from './components/AccessWarning.js';
+import {
+  ConversationPicker,
+  conversationTitle,
+  shortId,
+} from './components/ConversationPicker.js';
 import { GroupAccessCard } from './components/GroupAccessCard.js';
 import { IdentityListEditor } from './components/IdentityListEditor.js';
 import { SectionHeading } from './components/SectionHeading.js';
@@ -50,6 +57,8 @@ export interface ChannelAccessProps {
   web: ChannelWebDefinition;
   t: (key: string) => string;
   onChanged: () => void;
+  /** Changes whenever setup/auth may alter provider-scoped identities. */
+  refreshKey?: number;
 }
 
 /** A pristine, blank custom policy used the first time there is no saved one. */
@@ -65,7 +74,7 @@ function blankPolicy(ownerId?: string): ChannelAccessPolicy {
   };
 }
 
-export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps) {
+export function ChannelAccess({ channel, web, t, onChanged, refreshKey }: ChannelAccessProps) {
   const [state, setState] = useState<ChannelAccessState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -83,7 +92,25 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
   // Add-group input (local to this section).
   const [groupDraft, setGroupDraft] = useState('');
 
+  // Conversation identity directory (only fetched for channels declaring a
+  // discoverable conversation identity, e.g. QQ group_openid).
+  const [conversations, setConversations] = useState<PublicConversationIdentity[] | null>(null);
+
   const controller = useRef<AbortController | null>(null);
+  const conversationController = useRef<AbortController | null>(null);
+
+  const loadConversations = useCallback((id: string) => {
+    conversationController.current?.abort();
+    const c = new AbortController();
+    conversationController.current = c;
+    fetchConversations(id, c.signal)
+      .then((next) => {
+        if (!c.signal.aborted) setConversations(next);
+      })
+      .catch(() => {
+        if (!c.signal.aborted) setConversations(null);
+      });
+  }, []);
 
   const load = () => {
     controller.current?.abort();
@@ -97,6 +124,10 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
         // (Re)seed the draft only when it was never initialized or the saved
         // policy is entirely absent — preserve any in-progress edits otherwise.
         setDraft((current) => current ?? next.policy ?? blankPolicy(next.owner.id));
+        // Channel conversation identities (e.g. QQ group_openid) come from the directory.
+        if (next.descriptor.identity?.conversation?.conversationDiscoverable) {
+          loadConversations(channel.id);
+        }
       })
       .catch((cause) => {
         if (c.signal.aborted) return;
@@ -106,9 +137,12 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
 
   useEffect(() => {
     load();
-    return () => controller.current?.abort();
+    return () => {
+      controller.current?.abort();
+      conversationController.current?.abort();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channel.id]);
+  }, [channel.id, refreshKey]);
 
   // Poll the claim ~2s while it is waiting for a candidate message. This is a
   // LOCAL loop gated to an active claim in this already-expanded row — no
@@ -221,12 +255,18 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
     setDraft((current) => (current ? withDirectMessageAccessMode(current, mode, ownerId) : current));
   };
 
-  const addGroup = () => {
-    const id = groupDraft.trim();
+  // ---- conversation identity directory helpers (plan §7/§37) ---------------
+  const identityConversation = descriptor.identity?.conversation;
+  const conversationDiscoverable = identityConversation?.conversationDiscoverable === true;
+  const groupLabel = descriptor.identityLabels.group ?? 'Group';
+  const conversationById = new Map(
+    (conversations ?? []).map((identity) => [identity.canonicalId, identity] as const),
+  );
+
+  const addGroupId = (id: string) => {
     if (!id) return;
     setDraft((current) => {
-      if (!current) return current;
-      if (current.groups[id]) return current;
+      if (!current || current.groups[id]) return current;
       return {
         ...current,
         groupPolicy: 'allowlist',
@@ -239,7 +279,18 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
         },
       };
     });
+  };
+
+  const addGroup = () => {
+    addGroupId(groupDraft.trim());
     setGroupDraft('');
+  };
+
+  /** Card title: alias → displayName → discovered canonical OpenID. */
+  const groupCardTitle = (groupId: string): string | undefined => {
+    const identity = conversationById.get(groupId);
+    if (!identity) return undefined;
+    return conversationTitle(identity, groupLabel) ?? `${groupLabel} OpenID · ${shortId(groupId)}`;
   };
 
   return (
@@ -362,7 +413,21 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
       )}
 
       {/* ---- DM controls (plan §39) ---- */}
-      {!isPlatformDiscovery && (!isAccountDiscovery || descriptor.directMessages) ? (
+      {isPlatformDiscovery && descriptor.directMessages ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 16 }} data-testid="access-dm-platform">
+          <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('dmSection')}</span>
+          <div
+            style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--dsw-alias-label-primary)' }}
+            data-testid="dm-platform-fixed"
+          >
+            <span style={{ color: 'var(--dsw-alias-state-success-primary)' }}>✓</span>
+            {t('dmPlatformFixed')}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }}>
+            {t('dmPlatformFixedHint')}
+          </div>
+        </div>
+      ) : !isPlatformDiscovery && (!isAccountDiscovery || descriptor.directMessages) ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }} data-testid="access-dm">
           <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('dmSection')}</span>
           {!dmAccessEditable ? (
@@ -474,56 +539,74 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
 
           {draft.groupPolicy === 'allowlist' && (
             <>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                <input
-                  value={groupDraft}
-                  placeholder={t('groupIdPlaceholder')}
-                  onChange={(e) => setGroupDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') addGroup();
-                  }}
-                  data-testid="group-add-input"
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    fontSize: 13,
-                    padding: '4px 8px',
-                    borderRadius: 6,
-                    border: '1px solid var(--dsw-alias-border-l2)',
-                    background: 'transparent',
-                    color: 'var(--dsw-alias-label-primary)',
-                    outline: 'none',
-                  }}
+              {conversationDiscoverable ? (
+                <ConversationPicker
+                  key={`${channel.id}:${refreshKey ?? 0}`}
+                  channelId={channel.id}
+                  groupLabel={groupLabel}
+                  addedIds={Object.keys(draft.groups)}
+                  onAdd={addGroupId}
+                  t={t}
                 />
-                <Button variant="outline" size="sm" onClick={addGroup} disabled={!groupDraft.trim()} data-testid="group-add">
-                  {t('addGroup')}
-                </Button>
-              </div>
+              ) : (
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <input
+                    value={groupDraft}
+                    placeholder={t('groupIdPlaceholder')}
+                    onChange={(e) => setGroupDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') addGroup();
+                    }}
+                    data-testid="group-add-input"
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      fontSize: 13,
+                      padding: '4px 8px',
+                      borderRadius: 6,
+                      border: '1px solid var(--dsw-alias-border-l2)',
+                      background: 'transparent',
+                      color: 'var(--dsw-alias-label-primary)',
+                      outline: 'none',
+                    }}
+                  />
+                  <Button variant="outline" size="sm" onClick={addGroup} disabled={!groupDraft.trim()} data-testid="group-add">
+                    {t('addGroup')}
+                  </Button>
+                </div>
+              )}
 
               {Object.entries(draft.groups).length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {Object.entries(draft.groups).map(([groupId, rule]) => (
-                    <GroupAccessCard
-                      key={groupId}
-                      groupId={groupId}
-                      rule={rule}
-                      ownerId={ownerId}
-                      mentions={descriptor.mentions === true}
-                      userLabel={descriptor.identityLabels.user}
-                      onChange={(next) =>
-                        setDraft((c) => (c ? { ...c, groups: { ...c.groups, [groupId]: next } } : c))
-                      }
-                      onRemove={() =>
-                        setDraft((c) => {
-                          if (!c) return c;
-                          const groups = { ...c.groups };
-                          delete groups[groupId];
-                          return { ...c, groups, groupPolicy: Object.keys(groups).length ? 'allowlist' : 'disabled' };
-                        })
-                      }
-                      t={t}
-                    />
-                  ))}
+                  {Object.entries(draft.groups).map(([groupId, rule]) => {
+                    const cardTitle = groupCardTitle(groupId);
+                    return (
+                      <GroupAccessCard
+                        key={groupId}
+                        groupId={groupId}
+                        title={cardTitle}
+                        meta={`OpenID: ${shortId(groupId)}`}
+                        conflict={conversationById.get(groupId)?.identityConflict === true}
+                        rule={rule}
+                        ownerId={ownerId}
+                        mentions={descriptor.mentions === true}
+                        memberPicker={web.memberPicker}
+                        userLabel={descriptor.identityLabels.user}
+                        onChange={(next) =>
+                          setDraft((c) => (c ? { ...c, groups: { ...c.groups, [groupId]: next } } : c))
+                        }
+                        onRemove={() =>
+                          setDraft((c) => {
+                            if (!c) return c;
+                            const groups = { ...c.groups };
+                            delete groups[groupId];
+                            return { ...c, groups, groupPolicy: Object.keys(groups).length ? 'allowlist' : 'disabled' };
+                          })
+                        }
+                        t={t}
+                      />
+                    );
+                  })}
                 </div>
               )}
             </>
@@ -536,6 +619,7 @@ export function ChannelAccess({ channel, web, t, onChanged }: ChannelAccessProps
                 rule={draft.defaultGroupRule}
                 ownerId={ownerId}
                 mentions={descriptor.mentions === true}
+                memberPicker={web.memberPicker}
                 userLabel={descriptor.identityLabels.user}
                 onChange={(next) => setDraft((c) => c ? { ...c, defaultGroupRule: next } : c)}
                 fixedEnabled

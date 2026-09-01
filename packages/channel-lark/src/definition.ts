@@ -260,8 +260,8 @@ export function createLarkDefinition(
     },
     createAdapter,
     autoStart: true,
-    // Declared access capability. Lark supports DM + groups; no
-    // mention activation in V1; owner is identified via the /dsh-claim flow.
+    // Lark exposes message.mentions[] but this adapter does not yet inject a
+    // trusted bot open_id, so mention activation remains deliberately disabled.
     access: {
       directMessages: true,
       groups: true,

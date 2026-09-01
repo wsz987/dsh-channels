@@ -152,6 +152,34 @@ describe('QQAdapter lifecycle', () => {
     off();
   });
 
+  it('auto-discovers the platform owner from the first delivered C2C sender', async () => {
+    const service = new ChannelService(new Context());
+    const ctx = createTestContext(service);
+    const client = new FakeQQSdkClient();
+    client.autoReady = true;
+    const discovered: string[] = [];
+    const adapter = new QQAdapter(makeConfig(), {
+      sdkClient: client,
+      onOwnerDiscovered: (ownerId) => discovered.push(ownerId),
+    });
+    await adapter.start(ctx);
+    client.emitMessage({
+      rawEventType: 'C2C_MESSAGE_CREATE',
+      kind: 'c2c',
+      senderId: 'owner-openid',
+      senderName: 'owner',
+      senderIsBot: false,
+      content: 'hello',
+      messageId: 'owner-msg',
+      timestamp: '2026-08-30T10:00:00+08:00',
+      replyTarget: { scope: 'c2c', targetId: 'owner-openid', msgId: 'owner-msg' },
+      raw: {},
+    });
+    await flush();
+    expect(discovered).toEqual(['owner-openid']);
+    await adapter.stop();
+  });
+
   it('startup timeout when the fake never readies', async () => {
     const service = new ChannelService(new Context());
     const ctx = createTestContext(service);

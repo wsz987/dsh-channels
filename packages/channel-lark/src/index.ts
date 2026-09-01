@@ -53,6 +53,7 @@ export {
   LarkOpenApiOutbound,
   receiveIdType,
   cardContent,
+  interactiveCardContent,
   type LarkOpenApiClient,
   type LarkOpenApiOutboundOptions,
   type LarkCreateMessagePayload,
@@ -70,7 +71,9 @@ export {
 export {
   LarkSdkUpstream,
   toGatewayRaw,
+  toGatewayInteraction,
   MESSAGE_EVENT_KEY,
+  CARD_ACTION_EVENT_KEY,
   type LarkSdkClient,
   type LarkSdkDispatcher,
   type LarkSdkUpstreamOptions,

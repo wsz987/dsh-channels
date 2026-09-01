@@ -15,7 +15,7 @@
  * package carries no dependency on any concrete credentials implementation.
  */
 import { Service, type Context } from '@deepseek-ai/cordis';
-import type { ChannelAccessPolicy, ChannelAdapter, ChannelStorage } from '@wsz987/channel-core';
+import type { ChannelAccessPolicy, ChannelAdapter, ChannelEvent, ChannelStorage } from '@wsz987/channel-core';
 import { ChannelDefinitionRegistry } from './definitions/registry.js';
 import { CredentialManager, type CredentialSeam } from './credentials/manager.js';
 import { AuthSessionManager } from './auth/session-manager.js';
@@ -23,6 +23,11 @@ import { ControlError } from './errors.js';
 import { ChannelRuntimeManager } from './runtime/manager.js';
 import { ChannelAccessManager } from './access/manager.js';
 import { OwnerClaimSessionManager } from './access/owner-claim.js';
+import { ConversationDirectory, toPublicConversationIdentity } from './access/conversation-directory.js';
+import {
+  type ConversationDirectoryStore,
+  MemoryConversationDirectoryStore,
+} from './access/conversation-directory-store.js';
 import { BundleUpdateChecker, type BundleUpdateStatus } from './update-check.js';
 import {
   type ChannelAccessPolicyStore,
@@ -41,6 +46,7 @@ import type {
   ChannelSummary,
   ConfiguredState,
   InternalAuthSession,
+  PublicConversationIdentity,
   PublicOwnerClaimSession,
 } from './types.js';
 
@@ -62,6 +68,12 @@ export interface ChannelControlServiceOptions {
    * wires the durable ChannelStorage-backed store over ctx.channels.resources.
    */
   accessStore?: ChannelAccessPolicyStore;
+  /**
+   * Optional conversation-identity directory store. Defaults to an in-memory
+   * store; the plugin wires the durable ChannelStorage-backed store over
+   * ctx.channels.resources.
+   */
+  conversationStore?: ConversationDirectoryStore;
   /**
    * Optional owner-identity resolver. Defaults to delegating to the registered
    * definition's `resolveOwnerIdentity(accountId)` when present.
@@ -95,6 +107,8 @@ export class ChannelControlService extends Service {
   readonly runtime: ChannelRuntimeManager;
   readonly access: ChannelAccessManager;
   readonly ownerClaims: OwnerClaimSessionManager;
+  /** Human identifier ↔ canonical conversation id mapping (display only). */
+  readonly conversations: ConversationDirectory;
   /** Prompt-only bundle update check (never installs anything). */
   readonly updates: BundleUpdateChecker;
 
@@ -125,6 +139,11 @@ export class ChannelControlService extends Service {
       store: accessStore,
       logger: this.ctx.logger('channel-control'),
       now: options.now,
+    });
+    this.conversations = new ConversationDirectory({
+      store: options.conversationStore ?? new MemoryConversationDirectoryStore(),
+      now: options.now,
+      logger: this.ctx.logger('channel-control'),
     });
     this.updates = new BundleUpdateChecker({
       currentVersion: options.updateCheck?.currentVersion,
@@ -483,6 +502,63 @@ export class ChannelControlService extends Service {
   /** Cancel an owner-claim session. */
   cancelOwnerClaim(channelId: string, claimId: string): void {
     this.ownerClaims.cancel(channelId, claimId);
+  }
+
+  // ---- conversation identity directory (display/mapping only) --------------
+
+  /**
+   * Observed conversation identities for a channel+account, most recently seen
+   * first. Display/mapping metadata only — never authorization state.
+   */
+  async listConversations(
+    channelId: string,
+    accountId = 'main',
+  ): Promise<PublicConversationIdentity[]> {
+    const definition = this.definitions.require(channelId);
+    const scopeRequired = definition.conversationScopeFingerprint !== undefined;
+    const scopeFingerprint = definition.conversationScopeFingerprint?.(accountId);
+    const entries = await this.conversations.list(
+      channelId,
+      accountId,
+      scopeFingerprint,
+      scopeRequired,
+    );
+    return entries.map(toPublicConversationIdentity);
+  }
+
+  /**
+   * Resolve an optional human-facing identifier to its observed canonical
+   * identity. QQ's group selector uses the discovered canonical OpenID list
+   * directly and does not call this compatibility path.
+   */
+  async findConversation(
+    channelId: string,
+    externalId: string,
+    accountId = 'main',
+  ): Promise<PublicConversationIdentity | undefined> {
+    const definition = this.definitions.require(channelId);
+    const scopeRequired = definition.conversationScopeFingerprint !== undefined;
+    const scopeFingerprint = definition.conversationScopeFingerprint?.(accountId);
+    const entry = await this.conversations.resolveByExternalId(
+      channelId,
+      externalId,
+      accountId,
+      scopeFingerprint,
+      scopeRequired,
+    );
+    return entry ? toPublicConversationIdentity(entry) : undefined;
+  }
+
+  /**
+   * Observe a canonical event in the conversation directory under the active
+   * provider/application scope declared by its definition. The scope is opaque
+   * metadata only; it never reaches authorization or the Web DTO.
+   */
+  observeConversation(event: ChannelEvent): void {
+    const definition = this.definitions.get(event.channel);
+    const scopeRequired = definition?.conversationScopeFingerprint !== undefined;
+    const scopeFingerprint = definition?.conversationScopeFingerprint?.(event.accountId);
+    this.conversations.observe(event, scopeFingerprint, scopeRequired);
   }
 
   // ---- bundle update check (prompt-only) ------------------------------------

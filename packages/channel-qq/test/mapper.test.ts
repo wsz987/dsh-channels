@@ -64,6 +64,92 @@ describe('mapInbound', () => {
     expect(event.message.content).toEqual([{ type: 'text', text: '2' }]);
   });
 
+  it('accepts the SDK structured is_you fact on a generic group event', () => {
+    const event = mapInbound(
+      inbound({
+        rawEventType: 'GROUP_MESSAGE_CREATE',
+        kind: 'group',
+        senderId: 'user_321',
+        groupOpenid: 'group_789',
+        mentions: [{ id: 'bot_app_id', is_you: true }],
+        content: '<@!bot_app_id> structured mention',
+        replyTarget: { scope: 'group', targetId: 'group_789', msgId: 'msg_grp_structured' },
+      }),
+      meta,
+    );
+    expect(event.message.activation?.mentionedBot).toBe(true);
+    expect(event.message.content).toEqual([{ type: 'text', text: 'structured mention' }]);
+  });
+
+  it('uses group_openid as the only QQ group identity even when raw payload includes group_id', () => {
+    const event = mapInbound(
+      inbound({
+        kind: 'group',
+        senderId: 'user_321',
+        groupOpenid: 'OPEN_A',
+        content: 'hello group',
+        replyTarget: { scope: 'group', targetId: 'OPEN_A', msgId: 'msg_grp_1' },
+        raw: { group_id: '123456789', group_openid: 'OPEN_A' },
+      }),
+      meta,
+    );
+    expect(event.conversation).toEqual({
+      id: 'OPEN_A',
+      type: 'group',
+    });
+  });
+
+  it('does not let a disagreeing raw group_openid replace the normalized canonical identity', () => {
+    const event = mapInbound(
+      inbound({
+        kind: 'group',
+        senderId: 'user_321',
+        groupOpenid: 'OPEN_A',
+        content: 'hello group',
+        replyTarget: { scope: 'group', targetId: 'OPEN_A', msgId: 'msg_grp_1' },
+        raw: { group_id: '123456789', group_openid: 'OPEN_B' },
+      }),
+      meta,
+    );
+    expect(event.conversation).toEqual({ id: 'OPEN_A', type: 'group' });
+  });
+
+  it('still emits group messages when raw payload has no group number', () => {
+    const event = mapInbound(
+      inbound({
+        kind: 'group',
+        senderId: 'user_321',
+        groupOpenid: 'group_789',
+        content: 'hello group',
+        replyTarget: { scope: 'group', targetId: 'group_789', msgId: 'msg_grp_1' },
+        raw: { group_openid: 'group_789' },
+      }),
+      meta,
+    );
+    expect(event.conversation).toEqual({ id: 'group_789', type: 'group' });
+  });
+
+  it('does not use an OpenID-looking raw group_id as a separate identity', () => {
+    const event = mapInbound(
+      inbound({
+        kind: 'group',
+        senderId: 'user_321',
+        groupOpenid: '6AA0C1708977CA97B35AECB8E1EF2C0F',
+        content: 'hello group',
+        replyTarget: { scope: 'group', targetId: '6AA0C1708977CA97B35AECB8E1EF2C0F', msgId: 'msg_grp_2' },
+        raw: {
+          group_id: '6AA0C1708977CA97B35AECB8E1EF2C0F',
+          group_openid: '6AA0C1708977CA97B35AECB8E1EF2C0F',
+        },
+      }),
+      meta,
+    );
+    expect(event.conversation).toEqual({
+      id: '6AA0C1708977CA97B35AECB8E1EF2C0F',
+      type: 'group',
+    });
+  });
+
   it('parses createdAt from the ISO timestamp and preserves raw', () => {
     const raw = { id: 'msg_1' };
     const event = mapInbound(inbound({ raw }), meta);

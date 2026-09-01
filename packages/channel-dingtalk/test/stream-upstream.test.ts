@@ -140,6 +140,17 @@ function streamUpstream(client: DingTalkStreamClient, outbound: DingTalkUpstream
 }
 
 describe('toGatewayRaw (SDK message → gateway raw shape)', () => {
+  it('preserves the official isInAtList activation fact', () => {
+    const mentioned = toGatewayRaw(robotDownstream({ isInAtList: true }));
+    expect(mentioned).toMatchObject({ mentionedBot: true });
+
+    const unmentioned = toGatewayRaw(robotDownstream({ isInAtList: false }));
+    expect(unmentioned).toMatchObject({ mentionedBot: false });
+
+    const absent = toGatewayRaw(robotDownstream({ isInAtList: 'true' }));
+    expect(absent).toBeUndefined();
+  });
+
   it('maps a text robot message to the gateway raw shape', () => {
     const raw = toGatewayRaw(robotDownstream({
       conversationType: '2',

@@ -21,6 +21,8 @@ export * from './auth/session-manager.js';
 export * from './runtime/manager.js';
 export * from './runtime/mount-handle.js';
 export * from './access/policy-store.js';
+export * from './access/conversation-directory.js';
+export * from './access/conversation-directory-store.js';
 export * from './access/validation.js';
 export * from './access/materialize.js';
 export * from './access/manager.js';

@@ -235,6 +235,23 @@ export interface ChannelAccessDescriptor {
   ownerDiscovery: OwnerDiscoveryMode;
   identityLabels: { user: string; group?: string };
   defaults?: { requireMention?: boolean };
+  /**
+   * Conversation identity presentation metadata (generic — the Web renders
+   * from this, never from per-channel conditionals). Declared by channels
+   * whose adapters expose a discovered conversation identity list (e.g. QQ
+   * group_openid).
+   */
+  identity?: {
+    conversation?: {
+      /** Label for an optional human-facing id when the platform provides one. */
+      externalIdLabel?: string;
+      /**
+       * True when the Web must select groups from the conversation directory
+       * rather than accept a typed identity.
+       */
+      conversationDiscoverable?: boolean;
+    };
+  };
 }
 
 /**
@@ -256,7 +273,7 @@ export interface ChannelAccessState {
   descriptor: ChannelAccessDescriptor;
   readiness: ChannelAccessReadiness;
   policy?: ChannelAccessPolicy;
-  owner: { configured: boolean; id?: string; source?: 'account' | 'claim' | 'manual' };
+  owner: { configured: boolean; id?: string; source?: 'account' | 'claim' | 'manual' | 'platform' };
 }
 
 /**
@@ -289,6 +306,24 @@ export interface PublicOwnerClaimSession {
   challengeCode?: string;
   expiresAt: number;
   candidate?: { senderId: string };
+}
+
+/**
+ * Sanitized conversation identity row surfaced to the Web (plan §35). This is
+ * display/mapping metadata ONLY: `canonicalId` is the authorization key the
+ * policy stores; `externalId`/`displayName` are optional human-facing metadata
+ * and must never be written into a policy or consumed by the Access Gate.
+ */
+export interface PublicConversationIdentity {
+  type: 'group';
+  canonicalId: string;
+  externalId?: string;
+  displayName?: string;
+  alias?: string;
+  /** The platform identity for this conversation changed at some point (plan §23). */
+  identityConflict?: boolean;
+  firstSeenAt: number;
+  lastSeenAt: number;
 }
 
 /** Row returned by [ChannelControlService.listChannels] (doc §29). */
@@ -339,6 +374,14 @@ export interface ChannelDefinition {
    * control plane before reaching the definition (see saveConfig rules).
    */
   saveConfig(patch: Record<string, unknown>): Promise<void>;
+  /**
+   * Optional opaque, non-secret fingerprint for the active provider/application
+   * scope. Conversation-directory entries are partitioned by this value so a
+   * human-facing identifier observed under one Bot/App cannot be resolved
+   * after that provider scope changes. It is control-plane bookkeeping only:
+   * never returned to the Web and never used for authorization.
+   */
+  conversationScopeFingerprint?(accountId: string): string | undefined;
   /**
    * Optional host-only snapshot/restore hooks for transactional setup updates.
    * Definitions with mutable config implement both methods so a failed adapter

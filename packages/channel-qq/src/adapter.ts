@@ -51,6 +51,8 @@ export interface QQAdapterDeps {
   secureFetch?: SecureRemoteMediaFetcher;
   /** Injectable clock (tests). */
   now?: () => number;
+  /** Called after the platform-delivered C2C sender is accepted as owner. */
+  onOwnerDiscovered?: (ownerId: string) => Promise<void> | void;
 }
 
 export class QQAdapter implements ChannelAdapter {
@@ -264,8 +266,11 @@ export class QQAdapter implements ChannelAdapter {
     void this.emitConnection('disconnected');
   }
 
-  private handleInbound(message: QQBotInboundMessage): Promise<void> {
-    return this.inbound.handle(message);
+  private async handleInbound(message: QQBotInboundMessage): Promise<void> {
+    if (message.kind === 'c2c' && message.senderId) {
+      await this.deps.onOwnerDiscovered?.(message.senderId);
+    }
+    await this.inbound.handle(message);
   }
 
   private async handleInteraction(event: QQInteractionLike): Promise<void> {

@@ -14,6 +14,7 @@ import {
   receiveIdType,
   fileTypeFromName,
   cardContent,
+  interactiveCardContent,
   type LarkApiResponse,
   type LarkCreateImagePayload,
   type LarkCreateImageResult,
@@ -233,6 +234,64 @@ describe('LarkOpenApiOutbound card operations', () => {
     expect(call?.payload).toEqual({
       path: { message_id: 'om_card_1' },
       data: { content: cardContent('❌ boom') },
+    });
+  });
+});
+
+describe('LarkOpenApiOutbound interactive actions', () => {
+  it('uses direct Card 2.0 buttons with callback behaviors', async () => {
+    const client = new FakeOpenApiClient();
+    const outbound = new LarkOpenApiOutbound({ client });
+    await outbound.sendInteractive('oc_456', 'Choose one', [
+      { actions: [{ id: 'question:option:1', label: 'Option A', style: 'primary' }] },
+    ]);
+    const call = createCall(client, 'message.create');
+    expect(call?.payload).toMatchObject({
+      params: { receive_id_type: 'chat_id' },
+      data: { receive_id: 'oc_456', msg_type: 'interactive' },
+    });
+    expect(JSON.parse((call?.payload as LarkCreateMessagePayload).data.content)).toEqual({
+      schema: '2.0',
+      config: { wide_screen_mode: true },
+      body: {
+        elements: [
+          { tag: 'markdown', content: 'Choose one' },
+          {
+            tag: 'button',
+            text: { tag: 'plain_text', content: 'Option A' },
+            type: 'primary',
+            behaviors: [{
+              type: 'callback',
+              value: { actionId: 'question:option:1' },
+            }],
+          },
+        ],
+      },
+    });
+  });
+
+  it('never emits the legacy action container in a Card 2.0 payload', () => {
+    const card = interactiveCardContent('Choose one', [
+      {
+        actions: [
+          { id: 'question:option:1', label: 'Option A' },
+          { id: 'question:option:2', label: 'Option B' },
+        ],
+      },
+    ]);
+    expect(card).not.toContain('"tag":"action"');
+    expect(JSON.parse(card).body.elements.filter((element: { tag?: string }) => element.tag === 'button'))
+      .toHaveLength(2);
+  });
+
+  it('rewrites the card with no action elements when actions are cleared', async () => {
+    const client = new FakeOpenApiClient();
+    const outbound = new LarkOpenApiOutbound({ client });
+    await outbound.updateInteractive('om_card_1', 'Answered', []);
+    const call = createCall(client, 'message.patch');
+    expect(call?.payload).toEqual({
+      path: { message_id: 'om_card_1' },
+      data: { content: interactiveCardContent('Answered', []) },
     });
   });
 });

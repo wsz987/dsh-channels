@@ -103,6 +103,7 @@ export class LarkAdapter implements ChannelAdapter {
     video: false,
     markdown: true,
     cards: true,
+    interactiveActions: true,
     reactions: true,
     threads: true,
     streaming: 'edit',
@@ -110,7 +111,7 @@ export class LarkAdapter implements ChannelAdapter {
     // image/file/audio/video are all hydrated to real bytes before emit — the
     // official `message.resource` API documents audio/video downloads (see the
     // SDK-embedded doc statement for im.v1.messageResource.get in
-    // @larksuiteoapi/node-sdk@1.73.0: 音频、视频、图片和文件), so
+    // @larksuiteoapi/node-sdk@1.73.1: 音频、视频、图片和文件), so
     // every binary kind the mapper produces routes its file_key through
     // `messageResource.get` into localData. Outbound: image (`sendMedia` →
     // im.image.create) and file (`sendFile` → im.file.create) upload real
@@ -208,6 +209,13 @@ export class LarkAdapter implements ChannelAdapter {
     return this.outbound.send(target, message);
   }
 
+  async edit(target: ChannelTarget, messageId: string, message: OutboundMessage): Promise<SendResult> {
+    if (!this.started || !this.outbound) {
+      throw new ChannelError('CHANNEL_NOT_STARTED', 'lark adapter is not started');
+    }
+    return this.outbound.edit(target, messageId, message);
+  }
+
   async startTypingForTarget(target: ChannelTarget): Promise<void> {
     if (this.config.card.typingIndicator === false || !target.replyToMessageId) return;
     await this.upstream.startTyping?.(String(target.replyToMessageId));
@@ -261,9 +269,11 @@ export class LarkAdapter implements ChannelAdapter {
       });
       return;
     }
+    const outbound = this.resolveOpenApiOutbound();
     const options: LarkSdkUpstreamOptions = {
       client: this.resolveSdkClient(),
-      outbound: this.resolveOpenApiOutbound(),
+      outbound,
+      resolveChatType: (conversationId) => outbound.getChatType?.(conversationId) ?? Promise.resolve(undefined),
       onConnected: () => this.markConnected(),
     };
     this.upstream = new LarkSdkUpstream(options);

@@ -21,9 +21,19 @@ import { Switch } from './Switch.js';
 export interface GroupAccessCardProps {
   /** Canonical conversation/group id this card edits. */
   groupId: string;
+  /**
+   * Optional display title (alias → displayName → canonical OpenID);
+   * defaults to the canonical groupId when the directory has no mapping.
+   */
+  title?: string;
+  /** Optional secondary line (e.g. the short canonical id for debugging). */
+  meta?: string;
+  /** The platform identity behind this conversation changed (plan §23). */
+  conflict?: boolean;
   rule: GroupAccessRule;
   ownerId?: string;
   mentions: boolean;
+  memberPicker?: boolean;
   /** Display label for the member identity (e.g. descriptor.identityLabels.user). */
   userLabel: string;
   onChange: (next: GroupAccessRule) => void;
@@ -32,8 +42,9 @@ export interface GroupAccessCardProps {
   t: (key: string) => string;
 }
 
-export function GroupAccessCard({ groupId, rule, ownerId, mentions, userLabel, onChange, onRemove, fixedEnabled = false, t }: GroupAccessCardProps) {
+export function GroupAccessCard({ groupId, title, meta, conflict, rule, ownerId, mentions, memberPicker = true, userLabel, onChange, onRemove, fixedEnabled = false, t }: GroupAccessCardProps) {
   const sender = groupSenderAccessMode(rule, ownerId);
+  const canSpecifyMembers = memberPicker;
 
   const setSender = (next: GroupSenderAccessMode) => {
     onChange(withGroupSenderAccessMode(rule, next, ownerId));
@@ -82,21 +93,50 @@ export function GroupAccessCard({ groupId, rule, ownerId, mentions, userLabel, o
       data-testid="group-card"
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span
-          data-testid="group-id"
-          style={{
-            flex: 1,
-            minWidth: 0,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            fontSize: 13,
-            fontWeight: 600,
-            color: 'var(--dsw-alias-label-primary)',
-          }}
-        >
-          {groupId}
-        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <span
+            data-testid="group-id"
+            style={{
+              display: 'block',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--dsw-alias-label-primary)',
+            }}
+          >
+            {title ?? groupId}
+          </span>
+          {meta && (
+            <span
+              data-testid="group-id-meta"
+              style={{
+                display: 'block',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                fontSize: 12,
+                fontWeight: 400,
+                color: 'var(--dsw-alias-label-tertiary)',
+              }}
+            >
+              {meta}
+            </span>
+          )}
+          {conflict && (
+            <span
+              data-testid="group-identity-conflict"
+              style={{
+                display: 'block',
+                fontSize: 12,
+                color: 'var(--dsw-alias-state-warn-primary)',
+              }}
+            >
+              {t('conversationIdentityConflict')}
+            </span>
+          )}
+        </div>
         {onRemove && <button
           type="button"
           onClick={onRemove}
@@ -129,12 +169,12 @@ export function GroupAccessCard({ groupId, rule, ownerId, mentions, userLabel, o
             <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('memberAccess')}</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
               {radio('owner-only', t('memberOnly'))}
-              {radio('allowlist', t('memberSpecified'))}
+              {canSpecifyMembers && radio('allowlist', t('memberSpecified'))}
               {radio('open', t('memberAllDanger'), true)}
             </div>
           </div>
 
-          {sender === 'allowlist' && (
+          {canSpecifyMembers && sender === 'allowlist' && (
             <IdentityListEditor
               ids={rule.allowFrom}
               onChange={(ids) => onChange({ ...rule, allowFrom: ids })}
@@ -147,27 +187,32 @@ export function GroupAccessCard({ groupId, rule, ownerId, mentions, userLabel, o
             <AccessWarning testId="group-open-danger">{t('memberAllDangerHint')}</AccessWarning>
           )}
 
-          {mentions && (
-            <label
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                fontSize: 13,
-                cursor: 'pointer',
-                color: 'var(--dsw-alias-label-primary)',
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={rule.requireMention}
-                onChange={(e) => onChange({ ...rule, requireMention: e.target.checked })}
-                data-testid="group-require-mention"
-              />
-              {t('requireMention')}
-            </label>
-          )}
         </>
+      )}
+
+      {/* Mention gating belongs to this conversation's group rule. Keep the
+          control visible even when the rule is temporarily disabled so a
+          named group does not lose the setting (the all-groups card is just
+          another GroupAccessCard instance). */}
+      {mentions && (
+        <label
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: 13,
+            cursor: 'pointer',
+            color: 'var(--dsw-alias-label-primary)',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={rule.requireMention}
+            onChange={(e) => onChange({ ...rule, requireMention: e.target.checked })}
+            data-testid="group-require-mention"
+          />
+          {t('requireMention')}
+        </label>
       )}
     </div>
   );

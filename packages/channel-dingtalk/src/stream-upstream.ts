@@ -28,6 +28,7 @@
 import { TOPIC_ROBOT } from 'dingtalk-stream';
 import type { ChannelTarget } from '@wsz987/channel-core';
 import type { CardCreateResult, DingTalkUpstream } from './upstream.js';
+import { z } from 'zod';
 
 /** Downstream headers of a stream message (subset of the SDK shape). */
 export interface DingTalkStreamHeaders {
@@ -93,6 +94,8 @@ interface DingTalkStreamRobotMessage {
   conversationType?: string;
   sessionWebhook?: string;
   robotCode?: string;
+  /** Official robot callback fact: the bot is included in the @ list. */
+  isInAtList?: boolean;
   msgtype?: string;
   text?: { content?: string };
   /** Media content container (object or JSON string), official schema. */
@@ -105,6 +108,29 @@ interface DingTalkStreamRobotMessage {
   link?: { title?: string; text?: string; picUrl?: string };
   [key: string]: unknown;
 }
+
+// Validate the untrusted JSON frame before any field access. The schema only
+// covers fields consumed by this adapter; `.passthrough()` preserves the
+// platform's additional media fields for the existing mapper logic.
+const dingtalkStreamRobotMessageSchema = z.object({
+  msgId: z.string().optional(),
+  senderStaffId: z.string().optional(),
+  senderId: z.string().optional(),
+  conversationId: z.string().optional(),
+  conversationType: z.string().optional(),
+  sessionWebhook: z.string().optional(),
+  robotCode: z.string().optional(),
+  isInAtList: z.boolean().optional(),
+  msgtype: z.string().optional(),
+  text: z.object({ content: z.string().optional() }).optional(),
+  content: z.unknown().optional(),
+  richText: z.object({ richTextList: z.array(z.unknown()).optional() }).optional(),
+  picture: z.object({ url: z.string().optional(), picMediaId: z.string().optional(), downloadCode: z.string().optional() }).optional(),
+  audio: z.object({ duration: z.number().optional(), url: z.string().optional(), downloadCode: z.string().optional() }).optional(),
+  video: z.object({ duration: z.number().optional(), url: z.string().optional(), downloadCode: z.string().optional() }).optional(),
+  file: z.object({ fileName: z.string().optional(), url: z.string().optional(), downloadCode: z.string().optional() }).optional(),
+  link: z.object({ title: z.string().optional(), text: z.string().optional(), picUrl: z.string().optional() }).optional(),
+}).passthrough();
 
 /** Resolve the media content container (mirrors the official connector's
  * `resolveContent`): `data.content` as an object, or a parsed JSON string. */
@@ -140,13 +166,15 @@ function richTextList(
  */
 export function toGatewayRaw(message: DingTalkStreamMessage): Record<string, unknown> | undefined {
   if (typeof message.data !== 'string') return undefined;
-  let data: DingTalkStreamRobotMessage;
+  let parsed: unknown;
   try {
-    data = JSON.parse(message.data) as DingTalkStreamRobotMessage;
+    parsed = JSON.parse(message.data) as unknown;
   } catch {
     return undefined;
   }
-  if (!data || typeof data !== 'object') return undefined;
+  const result = dingtalkStreamRobotMessageSchema.safeParse(parsed);
+  if (!result.success) return undefined;
+  const data: DingTalkStreamRobotMessage = result.data;
   const raw: Record<string, unknown> = {
     type: data.msgtype,
     msgId: data.msgId,
@@ -156,6 +184,9 @@ export function toGatewayRaw(message: DingTalkStreamMessage): Record<string, unk
     conversationType: data.conversationType,
     sessionWebhook: data.sessionWebhook,
     robotCode: data.robotCode,
+    // Preserve the official activation fact under the channel-neutral name
+    // consumed by the mapper. Do not infer it from message text.
+    ...(typeof data.isInAtList === 'boolean' ? { mentionedBot: data.isInAtList } : {}),
   };
   // Media fields follow the documented robot-message schema (oracle:
   // @dingtalk-real-ai/dingtalk-connector@0.8.24). Media messages carry their

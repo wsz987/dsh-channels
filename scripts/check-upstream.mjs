@@ -296,7 +296,7 @@ function offlineExit(mode) {
 // plan baseline; the plan doc remains the authority if they ever disagree.
 const UPSTREAM_DISCIPLINE = [
   { dir: 'channel-qq', pkg: '@tencent-connect/qqbot-nodejs', tested: '1.0.4', exactPin: true },
-  { dir: 'channel-lark', pkg: '@larksuiteoapi/node-sdk', tested: '1.73.0', exactPin: true },
+  { dir: 'channel-lark', pkg: '@larksuiteoapi/node-sdk', tested: '1.73.1', exactPin: true },
   { dir: 'channel-dingtalk', pkg: 'dingtalk-stream', tested: '2.1.5', exactPin: true },
 ];
 

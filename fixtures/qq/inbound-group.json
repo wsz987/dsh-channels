@@ -19,6 +19,7 @@
       "content": "hello group",
       "timestamp": "2026-08-14T10:01:00+08:00",
       "author": { "member_openid": "user_321", "username": "bob" },
+      "group_id": "123456789",
       "group_openid": "group_789"
     }
   },
@@ -39,6 +40,7 @@
       "content": "hello group",
       "timestamp": "2026-08-14T10:01:00+08:00",
       "author": { "member_openid": "user_321", "username": "bob" },
+      "group_id": "123456789",
       "group_openid": "group_789"
     }
   }

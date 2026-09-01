@@ -24,6 +24,7 @@ import type {
   ChannelSetupField,
 } from '@wsz987/channel-control';
 import { ControlError } from '@wsz987/channel-control';
+import { createHash } from 'node:crypto';
 import type { QQConfig } from './config.js';
 import { QQ_APP_SECRET_REF } from './config.js';
 import { QQAdapter, type QQAdapterDeps } from './adapter.js';
@@ -51,6 +52,9 @@ export interface QQDefinitionOptions {
   persistSetup?: (patch: Pick<QQConfig, 'appId'>) => Promise<void>;
   /** Durable store for the enabled intent (doc §21) when the host provides one. */
   persistEnabled?: (enabled: boolean) => Promise<void>;
+  /** Durable canonical owner identity learned from a platform-delivered C2C. */
+  resolveOwnerIdentity?: (accountId: string, appId: string) => Promise<string | undefined>;
+  persistOwnerIdentity?: (ownerId: string, accountId: string, appId: string) => Promise<void>;
 }
 
 /**
@@ -90,6 +94,18 @@ export const QQ_OPEN_PLATFORM_URL = 'https://q.qq.com/qqbot/openclaw/';
 export function qqConsoleUrl(appId: string | undefined): string {
   const id = appId?.trim();
   return id ? `${QQ_OPEN_PLATFORM_URL}?appid=${encodeURIComponent(id)}` : QQ_OPEN_PLATFORM_URL;
+}
+
+/**
+ * Opaque, non-secret directory scope for one QQ AppID. It partitions observed
+ * group_openid identities when an operator replaces the Bot AppID while
+ * keeping the same local channel account. The value is never sent to the Web
+ * and never participates in ACL authorization.
+ */
+export function qqConversationScopeFingerprint(appId: string): string | undefined {
+  const normalized = appId.trim();
+  if (!normalized) return undefined;
+  return createHash('sha256').update(`qq-app:${normalized}`).digest('hex');
 }
 
 /** Validate + clamp one non-secret patch value onto the snapshot. */
@@ -194,8 +210,18 @@ export function createQQDefinition(options: QQDefinitionOptions): ChannelDefinit
       // GROUP_MESSAGE_CREATE; the mapper publishes this as a strict boolean
       // activation fact.
       mentions: true,
+      // QQ platform restricts C2C to the bot creator, so the owner never
+      // claims locally; the control plane materializes that private grant.
       ownerDiscovery: 'platform',
-      identityLabels: { user: 'QQ User OpenID', group: 'QQ Group OpenID' },
+      // QQ only exposes the canonical group_openid reliably. The Web lists
+      // group OpenIDs discovered from inbound events; it never asks operators
+      // to type a QQ group number or guesses an identity from one.
+      identityLabels: { user: 'QQ', group: 'QQ群' },
+      identity: {
+        conversation: {
+          conversationDiscoverable: true,
+        },
+      },
       defaults: { requireMention: true },
     },
 
@@ -238,6 +264,8 @@ export function createQQDefinition(options: QQDefinitionOptions): ChannelDefinit
       if (patch.appId !== undefined) await options.persistSetup?.({ appId: snapshot.appId });
     },
 
+    conversationScopeFingerprint: () => qqConversationScopeFingerprint(snapshot.appId),
+
     snapshotConfig: () => cloneSnapshot(snapshot),
     async restoreConfig(saved: unknown) {
       const restored = cloneSnapshot(saved as QQConfig);
@@ -258,7 +286,14 @@ export function createQQDefinition(options: QQDefinitionOptions): ChannelDefinit
           `QQ credential "${appSecretRef}" is not configured`,
         );
       }
-      return new QQAdapter(snapshot, { ...options.deps, appSecret: credential.value });
+      return new QQAdapter(snapshot, {
+        ...options.deps,
+        appSecret: credential.value,
+        onOwnerDiscovered: (ownerId) =>
+          options.persistOwnerIdentity?.(ownerId, snapshot.accountId, snapshot.appId),
+      });
     },
+    resolveOwnerIdentity: async (accountId) =>
+      options.resolveOwnerIdentity?.(accountId, snapshot.appId),
   };
 }

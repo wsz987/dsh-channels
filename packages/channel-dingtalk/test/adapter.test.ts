@@ -131,6 +131,21 @@ function robotDownstream(overrides: Record<string, unknown> = {}): DingTalkStrea
 }
 
 describe('mapper (fixture-driven)', () => {
+  it('maps the upstream mention activation fact as a strict boolean', () => {
+    const mentioned = mapInbound(
+      { type: 'text', msgId: 'mention-1', senderId: 'u1', conversationId: 'g1', conversationType: '2', content: 'hi', mentionedBot: true },
+      { channel: 'dingtalk' as never, accountId: 'main' as never },
+    );
+    expect(mentioned.conversation.type).toBe('group');
+    expect(mentioned.message.activation?.mentionedBot).toBe(true);
+
+    const unmentioned = mapInbound(
+      { type: 'text', msgId: 'mention-2', senderId: 'u1', conversationId: 'g1', conversationType: '2', content: 'hi', mentionedBot: false },
+      { channel: 'dingtalk' as never, accountId: 'main' as never },
+    );
+    expect(unmentioned.message.activation?.mentionedBot).toBe(false);
+  });
+
   it('maps inbound text fixture', async () => {
     const fixture = await loadFixture('dingtalk', 'inbound-text');
     const event = mapInbound(fixture.payload, { channel: 'dingtalk' as never, accountId: 'main' as never });

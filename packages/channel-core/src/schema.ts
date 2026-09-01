@@ -124,6 +124,31 @@ export const defineChannelAdapterInputSchema = z.object({
 }).loose();
 
 /**
+ * `ConversationRef` shape for events crossing a trust boundary. `externalId`
+ * and `name` are optional display/mapping metadata discovered by adapters;
+ * they must never be consumed by the Access Gate (authorization keys off
+ * `id` only). Unknown keys pass through (loose), and both new fields are
+ * optional so pre-existing events without them keep validating unchanged.
+ */
+export const conversationRefSchema = z.object({
+  id: z.string({ error: 'conversation.id must be a non-empty string' }).min(1, {
+    error: 'conversation.id must be a non-empty string',
+  }),
+  type: z.enum(['dm', 'group'], {
+    error: "conversation.type must be 'dm' | 'group'",
+  }),
+  threadId: z.string().optional(),
+  externalId: z.string().min(1, {
+    error: 'conversation.externalId must be a non-empty string when present',
+  }).optional(),
+  name: z.string().min(1, {
+    error: 'conversation.name must be a non-empty string when present',
+  }).optional(),
+}, {
+  error: 'conversation must be a ConversationRef object',
+}).loose();
+
+/**
  * Minimal event envelope shared by every `ChannelEvent` variant — the same
  * surface `isChannelEvent` has always checked (type/channel/accountId).
  */

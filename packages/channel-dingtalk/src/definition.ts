@@ -194,14 +194,15 @@ export function createDingTalkDefinition(options: DingTalkDefinitionOptions): Ch
     },
 
     autoStart: true,
-    // Declared access capability. DingTalk supports DM + groups; no
-    // mention activation in V1; owner is identified via the /dsh-claim flow.
+    // The official robot callback supplies `isInAtList`; the stream upstream
+    // validates and forwards it as `message.activation.mentionedBot`.
     access: {
       directMessages: true,
       groups: true,
-      mentions: false,
+      mentions: true,
       ownerDiscovery: 'claim',
       identityLabels: { user: 'DingTalk Sender ID', group: 'DingTalk Conversation ID' },
+      defaults: { requireMention: true },
     },
   };
 }

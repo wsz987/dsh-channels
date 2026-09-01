@@ -63,6 +63,28 @@ export class ChannelAccessManager {
 
     const stored = await this.store.get(channelId, accountId);
     if (stored) {
+      if (descriptor.ownerDiscovery === 'platform' && !stored.ownerId) {
+        const ownerId = await this.resolveOwnerIdentity(channelId, accountId);
+        if (ownerId) {
+          const next = { ...stored, ownerId };
+          await this.store.set(channelId, accountId, next);
+          return this.buildState(descriptor, 'ready', next, {
+            configured: true,
+            id: ownerId,
+            source: 'platform',
+          });
+        }
+      }
+      if (descriptor.ownerDiscovery === 'platform' && stored.ownerId) {
+        const ownerId = await this.resolveOwnerIdentity(channelId, accountId);
+        if (ownerId === undefined) {
+          // A platform-scoped owner can disappear when the provider AppID is
+          // rotated. Do not let the previous bot's owner grant remain usable.
+          const { ownerId: _staleOwner, ...withoutOwner } = stored;
+          await this.store.set(channelId, accountId, withoutOwner);
+          return this.buildState(descriptor, 'ready', withoutOwner);
+        }
+      }
       // A valid policy present -> ready.
       return this.buildState(descriptor, 'ready', stored);
     }
@@ -96,10 +118,13 @@ export class ChannelAccessManager {
     // Platform-private channels guarantee that C2C messages can only originate
     // from the bot creator. Materialize that narrow grant, never opening groups.
     if (descriptor.ownerDiscovery === 'platform') {
-      const policy = platformPrivatePolicy();
+      const ownerId = await this.resolveOwnerIdentity(channelId, accountId);
+      const policy = platformPrivatePolicy(ownerId);
       await this.store.set(channelId, accountId, policy);
       this.logger.info(`[channel-control] access policy bootstrapped (channel=${channelId}, account=${accountId}, operation=platform-bootstrap, preset=custom, readiness=ready)`);
-      return this.buildState(descriptor, 'ready', policy);
+      return this.buildState(descriptor, 'ready', policy, ownerId
+        ? { configured: true, id: ownerId, source: 'platform' }
+        : undefined);
     }
 
     // Non-account owner discovery with no policy.
@@ -152,7 +177,9 @@ export class ChannelAccessManager {
           ? 'account'
           : descriptor.ownerDiscovery === 'claim'
             ? 'claim'
-            : 'manual';
+            : descriptor.ownerDiscovery === 'platform'
+              ? 'platform'
+              : 'manual';
       return { configured: true, id: policy.ownerId, source };
     }
     return { configured: false };

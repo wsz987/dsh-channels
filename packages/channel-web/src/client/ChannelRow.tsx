@@ -82,6 +82,7 @@ export function ChannelRow(props: ChannelRowProps) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [edited, setEdited] = useState<Set<string>>(new Set());
   const [showCredentialSetup, setShowCredentialSetup] = useState(false);
+  const [accessRevision, setAccessRevision] = useState(0);
 
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -168,6 +169,7 @@ export function ChannelRow(props: ChannelRowProps) {
     const { config, credentials } = buildPatch(descriptor);
     await applySetup(channel.id, { config, credentials, reconcile: false });
     await loadSetup();
+    setAccessRevision((revision) => revision + 1);
   };
 
   const hasUnsavedSetup = descriptor
@@ -175,11 +177,13 @@ export function ChannelRow(props: ChannelRowProps) {
     : false;
 
   const handleSetupSaved = () => {
+    setAccessRevision((revision) => revision + 1);
     loadSetup();
     onChanged();
   };
 
   const handleAuthorized = () => {
+    setAccessRevision((revision) => revision + 1);
     loadSetup();
     onChanged();
   };
@@ -376,7 +380,13 @@ export function ChannelRow(props: ChannelRowProps) {
             />
           )}
 
-          <ChannelAccess channel={channel} web={web} t={t} onChanged={onChanged} />
+          <ChannelAccess
+            channel={channel}
+            web={web}
+            t={t}
+            onChanged={onChanged}
+            refreshKey={accessRevision}
+          />
         </div>
       )}
 

@@ -21,6 +21,7 @@
  * never referenced here — the `Client` is built elsewhere from config.
  */
 import { ChannelError } from '@wsz987/channel-core';
+import type { OutboundActionRow } from '@wsz987/channel-core';
 import { z } from 'zod';
 import type { CardCreateResult, LarkFileRef, LarkMediaRef, LarkOutbound } from './upstream.js';
 
@@ -94,6 +95,9 @@ export interface LarkOpenApiClient {
       file: {
         create(payload: LarkCreateFilePayload): Promise<LarkCreateFileResult | null>;
       };
+      chat?: {
+        get(payload: { path: { chat_id: string } }): Promise<unknown>;
+      };
     };
     messageReaction?: unknown;
   };
@@ -107,6 +111,12 @@ interface ReactionClient {
 }
 
 const reactionIdSchema = z.string().trim().min(1);
+const chatModeResponseSchema = z.object({
+  code: z.number().optional(),
+  data: z.object({
+    chat_mode: z.enum(['p2p', 'group', 'topic']).optional(),
+  }).optional(),
+});
 
 export interface LarkOpenApiOutboundOptions {
   /** Official OpenAPI client (real `Client` or injected fake). */
@@ -133,6 +143,17 @@ export class LarkOpenApiOutbound implements LarkOutbound {
     return this.options.client.im.v1.message.create({
       params: { receive_id_type: receiveIdType(to) },
       data: { receive_id: to, msg_type: 'text', content: JSON.stringify({ text }) },
+    });
+  }
+
+  sendInteractive(to: string, text: string, actions: OutboundActionRow[]): Promise<unknown> {
+    return this.options.client.im.v1.message.create({
+      params: { receive_id_type: receiveIdType(to) },
+      data: {
+        receive_id: to,
+        msg_type: 'interactive',
+        content: interactiveCardContent(text, actions),
+      },
     });
   }
 
@@ -210,6 +231,22 @@ export class LarkOpenApiOutbound implements LarkOutbound {
       path: { message_id: cardId },
       data: { content: cardContent(reason ? `❌ ${reason}` : '❌ 出错了') },
     });
+  }
+
+  updateInteractive(cardId: string, text: string, actions: OutboundActionRow[]): Promise<unknown> {
+    return this.options.client.im.v1.message.patch({
+      path: { message_id: cardId },
+      data: { content: interactiveCardContent(text, actions) },
+    });
+  }
+
+  async getChatType(conversationId: string): Promise<'p2p' | 'group' | undefined> {
+    const chat = this.options.client.im.v1.chat;
+    if (!chat) return undefined;
+    const parsed = chatModeResponseSchema.safeParse(await chat.get({ path: { chat_id: conversationId } }));
+    if (!parsed.success || parsed.data.code !== undefined && parsed.data.code !== 0) return undefined;
+    const mode = parsed.data.data?.chat_mode;
+    return mode === 'p2p' ? 'p2p' : mode === 'group' || mode === 'topic' ? 'group' : undefined;
   }
 
   async startTyping(messageId: string): Promise<void> {
@@ -339,6 +376,35 @@ export function cardContent(text: string): string {
       elements: [{ tag: 'markdown', content: text }],
     },
   });
+}
+
+/**
+ * Official Card JSON 2.0 button layout. V2 removed the legacy `action`
+ * container: buttons are direct body elements and callback values belong to
+ * `behaviors[].value`.
+ */
+export function interactiveCardContent(text: string, rows: OutboundActionRow[]): string {
+  const elements: object[] = [{ tag: 'markdown', content: text }];
+  for (const row of rows) {
+    for (const action of row.actions) {
+      elements.push({
+        tag: 'button',
+        text: { tag: 'plain_text', content: action.label },
+        ...(buttonType(action.style) ? { type: buttonType(action.style) } : {}),
+        behaviors: [{ type: 'callback', value: { actionId: action.id } }],
+      });
+    }
+  }
+  return JSON.stringify({
+    schema: '2.0',
+    config: { wide_screen_mode: true },
+    body: { elements },
+  });
+}
+
+function buttonType(style: 'default' | 'primary' | 'success' | 'danger' | undefined): 'primary' | 'danger' | undefined {
+  if (style === 'primary' || style === 'success') return 'primary';
+  return style === 'danger' ? 'danger' : undefined;
 }
 
 function dataUriToBuffer(dataUri: string): Buffer {

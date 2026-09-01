@@ -266,5 +266,12 @@ export function toTextPayload(target: { conversationId: string }, message: Outbo
 /** Dedup identity for raw payloads (webhook retries share one msgId/eventId). */
 export function dedupKey(raw: unknown): string {
   const value = parseLarkRaw(raw);
+  // A card has one message id but may expose multiple actions (for example a
+  // multi-select question). The SDK-normalized action event therefore carries
+  // a per-button eventId; preferring it preserves distinct presses while a
+  // replay of the same press remains idempotent.
+  if (value.type === 'interaction') {
+    return value.eventId ?? value.interactionId ?? `lk-${simpleHash(JSON.stringify(value))}`;
+  }
   return value.msgId ?? value.eventId ?? `lk-${simpleHash(JSON.stringify(value))}`;
 }
