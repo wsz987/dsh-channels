@@ -1,5 +1,16 @@
 # @wsz987/channel-control
 
+## 0.5.1
+
+### Patch Changes
+
+- d0df3dc: Add canonical conversation discovery for access-policy configuration, including
+  QQ group OpenID discovery and an explicit Web refresh control. Normalize QQ and
+  DingTalk activation facts used by the shared access layer, and update Lark
+  interactive question actions to the official Card 2.0 callback-button schema.
+- Updated dependencies [d0df3dc]
+  - @wsz987/channel-core@0.5.1
+
 ## 0.5.0
 
 ### Minor Changes

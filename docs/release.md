@@ -29,17 +29,17 @@ published by this workflow.
 
 | Package                    | Target stable version |
 | -------------------------- | --------------------- |
-| @wsz987/channel-core       | 0.5.0                 |
-| @wsz987/channel-harness    | 0.5.0                 |
-| @wsz987/channel-control    | 0.5.0                 |
-| @wsz987/channel-files      | 0.5.0                 |
-| @wsz987/channel-web        | 0.5.0                 |
-| @wsz987/channel-weixin     | 0.5.0                 |
-| @wsz987/channel-qq         | 0.5.0                 |
-| @wsz987/channel-dingtalk   | 0.5.0                 |
-| @wsz987/channel-lark       | 0.5.0                 |
-| @wsz987/channel-telegram   | 0.5.0                 |
-| @wsz987/dsh-channels       | 0.5.0                 |
+| @wsz987/channel-core       | 0.5.1                 |
+| @wsz987/channel-harness    | 0.5.1                 |
+| @wsz987/channel-control    | 0.5.1                 |
+| @wsz987/channel-files      | 0.5.1                 |
+| @wsz987/channel-web        | 0.5.1                 |
+| @wsz987/channel-weixin     | 0.5.1                 |
+| @wsz987/channel-qq         | 0.5.1                 |
+| @wsz987/channel-dingtalk   | 0.5.1                 |
+| @wsz987/channel-lark       | 0.5.1                 |
+| @wsz987/channel-telegram   | 0.5.1                 |
+| @wsz987/dsh-channels       | 0.5.1                 |
 `apps/*` are private (`"private": true`) and never published.
 
 Internal workspace dependencies are declared as `workspace:*` and rewritten to

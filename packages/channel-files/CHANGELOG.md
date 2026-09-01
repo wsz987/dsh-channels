@@ -1,5 +1,15 @@
 # @wsz987/channel-files
 
+## 0.5.1
+
+### Patch Changes
+
+- Updated dependencies [d0df3dc]
+- Updated dependencies [bb03191]
+- Updated dependencies [9d7f651]
+  - @wsz987/channel-core@0.5.1
+  - @wsz987/channel-harness@0.5.1
+
 ## 0.5.0
 
 ### Minor Changes

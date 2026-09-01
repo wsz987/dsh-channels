@@ -1,5 +1,13 @@
 # @wsz987/channel-weixin
 
+## 0.5.1
+
+### Patch Changes
+
+- Updated dependencies [d0df3dc]
+  - @wsz987/channel-core@0.5.1
+  - @wsz987/channel-control@0.5.1
+
 ## 0.5.0
 
 ### Minor Changes
