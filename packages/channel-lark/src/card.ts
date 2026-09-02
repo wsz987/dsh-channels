@@ -32,6 +32,7 @@ import type {
   OutboundMessage,
   ReplyHandle,
 } from '@wsz987/channel-core';
+import { ChannelError } from '@wsz987/channel-core';
 import {
   STREAM_MARKDOWN_ELEMENT_ID,
   streamingCardJson,
@@ -95,6 +96,9 @@ export class LarkCardReply implements ReplyHandle {
 
   private readonly now: () => number;
   private queue: Promise<void> = Promise.resolve();
+  /** Text currently owned by the active card; finalized card heads are excluded. */
+  private content = '';
+  private hasRolledOver = false;
   /** A previous failure was already written to the card — do not overwrite it. */
   private failedShown = false;
 
@@ -106,7 +110,11 @@ export class LarkCardReply implements ReplyHandle {
     return this.enqueue(async () => {
       if (this.finalized) return;
       if (!delta) return;
-      this.text += delta;
+      const merged = mergeStreamingText(this.text, delta);
+      const appended = merged.slice(this.text.length);
+      if (!appended) return;
+      this.text = merged;
+      this.content += appended;
       await this.push();
     });
   }
@@ -117,7 +125,7 @@ export class LarkCardReply implements ReplyHandle {
       if (message.text === undefined) return;
       // No-op guard: skip the network round-trip when nothing changed.
       if (message.text === this.text) return;
-      this.text = message.text;
+      this.replaceText(message.text);
       await this.push();
     });
   }
@@ -128,7 +136,7 @@ export class LarkCardReply implements ReplyHandle {
       const finalText = message?.text;
       let needsSync = false;
       if (finalText !== undefined && finalText !== this.text) {
-        this.text = finalText;
+        this.replaceText(finalText);
         needsSync = true;
       }
       if (!this.cardId) {
@@ -137,18 +145,18 @@ export class LarkCardReply implements ReplyHandle {
         // when there is no content to show).
         if (this.text) {
           await this.createCardAndSend();
-          await this.pushContent(this.text);
+          await this.pushContent(this.content);
         }
       } else if (needsSync) {
-        await this.pushContent(this.text);
+        await this.pushContent(this.content);
       }
-      this.status = 'finished';
       if (this.cardId) {
-        await this.closeStreaming(this.text);
+        await this.closeStreaming(this.content);
         this.record('finished', this.text);
       } else {
         this.record('finished', undefined);
       }
+      this.status = 'finished';
     });
   }
 
@@ -156,23 +164,31 @@ export class LarkCardReply implements ReplyHandle {
     return this.enqueue(async () => {
       if (this.finalized) return;
       this.error = error;
-      this.status = 'failed';
       if (this.cardId && !this.failedShown) {
+        const failureContent = this.content ? `${this.content}\n\n— _(Generation interrupted)_` : '— _(Generation interrupted)_';
+        let updateError: unknown;
         try {
           // Write the failure into the card content first, then close the
           // stream. A secondary failure must NOT overwrite the original error.
           this.failedShown = true;
-          await this.pushContent(this.text ? `${this.text}\n\n— _(Generation interrupted)_` : '— _(Generation interrupted)_');
-          await this.closeStreaming(this.text || 'Generation failed');
-          this.record('failed', this.text);
+          await this.pushContent(failureContent);
         } catch (secondary) {
-          // Marking the card failed must not mask the original error.
-          this.options.logger.error('[channel-lark] failed to mark card failed', secondary);
-          this.record('failed', this.text, secondary);
+          updateError = secondary;
         }
+        try {
+          await this.closeStreaming(failureContent);
+        } catch (secondary) {
+          updateError ??= secondary;
+        }
+        if (updateError) {
+          // Marking the card failed must not mask the original error.
+          this.options.logger.error('[channel-lark] failed to mark card failed', updateError);
+          this.record('failed', this.text, updateError);
+        } else this.record('failed', this.text);
       } else {
         this.record('failed', this.text);
       }
+      this.status = 'failed';
     });
   }
 
@@ -182,12 +198,12 @@ export class LarkCardReply implements ReplyHandle {
 
   private async push(): Promise<void> {
     if (this.cardId) {
-      await this.pushContent(this.text);
+      await this.pushContent(this.content);
       return;
     }
     if (!this.options.createOnFirstDelta) return; // buffer until finish
     await this.createCardAndSend();
-    await this.pushContent(this.text);
+    await this.pushContent(this.content);
   }
 
   /** Create a CardKit entity and send its card reference (one-shot per card). */
@@ -236,9 +252,15 @@ export class LarkCardReply implements ReplyHandle {
     if (!this.cardId) return;
     // A rollover cannot produce a single splittable piece below the cap.
     const chunks = splitForRollover(content, LARK_STREAM_ELEMENT_MAX_CHARS);
+    if (chunks.length < 2) throw new Error('rollover: content not splittable below limit');
     const head = chunks[0]!;
-    const tail = chunks.slice(1).join('\n');
-    if (!tail) return; // nothing to continue with — keep on the current card
+    const joinedWithNewlines = chunks.slice(1).join('\n');
+    const joinedWithoutSeparators = chunks.slice(1).join('');
+    // Keep the splitter's original character sequence intact. Line-oriented
+    // chunks need their delimiters; hard-wrapped tokens must not gain '\n'.
+    const tail = joinedWithNewlines.length + head.length === content.length
+      ? joinedWithNewlines
+      : joinedWithoutSeparators;
 
     // 1. Pin the current element to the head.
     this.sequence += 1;
@@ -255,6 +277,7 @@ export class LarkCardReply implements ReplyHandle {
     } catch {
       // Feishu auto-closes an idle stream; a transient failure is recoverable.
     }
+    this.hasRolledOver = true;
     // 3. Create + send the fresh streaming card seeded with the tail.
     const previousCardId = this.cardId;
     const cardJson = streamingCardJson(tail || '...', GENERATING_SUMMARY);
@@ -263,18 +286,11 @@ export class LarkCardReply implements ReplyHandle {
     this.cardId = entity.cardId;
     this.messageId = sent.messageId;
     this.sequence = 0;
+    this.content = tail;
     this.chunkIds.push(sent.messageId);
     this.record('rollover', tail, undefined, 0, previousCardId);
     // Continue streaming the tail immediately.
-    this.sequence += 1;
-    await this.options.upstream.updateCardElementContent(
-      this.cardId,
-      STREAM_MARKDOWN_ELEMENT_ID,
-      tail || ' ',
-      this.sequence,
-      uuidFor(this.cardId, this.sequence),
-    );
-    this.record('streamed', tail, undefined, this.sequence);
+    await this.pushContent(tail);
   }
 
   /** Close the stream: `streaming_mode: false` + final summary. */
@@ -313,6 +329,22 @@ export class LarkCardReply implements ReplyHandle {
       () => undefined,
     );
     return next;
+  }
+
+  private replaceText(next: string): void {
+    if (!this.hasRolledOver) {
+      this.text = next;
+      this.content = next;
+      return;
+    }
+    if (!next.startsWith(this.text)) {
+      throw new ChannelError(
+        'CHANNEL_ERROR',
+        'lark streaming replacement cannot rewrite content already finalized by card rollover',
+      );
+    }
+    this.content += next.slice(this.text.length);
+    this.text = next;
   }
 }
 
@@ -382,4 +414,16 @@ export function splitForRollover(text: string, limit: number): string[] {
     }
   }
   return final.length > 0 ? final : [text];
+}
+
+function mergeStreamingText(previous: string, next: string): string {
+  if (!previous) return next;
+  if (!next) return previous;
+  if (next.startsWith(previous)) return next;
+  if (previous.startsWith(next)) return previous;
+  const maxOverlap = Math.min(previous.length, next.length);
+  for (let length = maxOverlap; length > 0; length -= 1) {
+    if (previous.endsWith(next.slice(0, length))) return previous + next.slice(length);
+  }
+  return previous + next;
 }

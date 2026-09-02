@@ -138,6 +138,13 @@ describe('LarkOpenApiOutbound.sendText', () => {
     const call = createCall(client, 'message.create');
     expect(call?.payload).toMatchObject({ params: { receive_id_type: 'open_id' } });
   });
+
+  it('rejects a nonzero platform code instead of treating it as success', async () => {
+    const client = new FakeOpenApiClient();
+    client.messageCreateResult = { code: 999, msg: 'permission denied' };
+    const outbound = new LarkOpenApiOutbound({ client });
+    await expect(outbound.sendText('ou_user1', 'hi')).rejects.toThrow(/999.*permission denied/);
+  });
 });
 
 describe('LarkOpenApiOutbound typing reaction', () => {
@@ -270,6 +277,17 @@ describe('LarkOpenApiOutbound CardKit 2.0 entity + streaming', () => {
       path: { card_id: 'cc_out_1', element_id: 'stream_md' },
       data: { uuid: 'c_cc_out_1_3', content: 'hello', sequence: 3 },
     });
+  });
+
+  it('rejects nonzero CardKit update responses', async () => {
+    const client = new FakeOpenApiClient();
+    client.cardkit.v1.cardElement.content = async (payload: unknown) => {
+      client.calls.push({ method: 'cardkit.cardElement.content', payload });
+      return { code: 230099, msg: 'element too large' };
+    };
+    const outbound = new LarkOpenApiOutbound({ client });
+    await expect(outbound.updateCardElementContent('cc_out_1', 'stream_md', 'x', 1, 'u'))
+      .rejects.toThrow(/230099.*element too large/);
   });
 
   it('closes streaming via cardkit.card.settings with streaming_mode false and a summary', async () => {

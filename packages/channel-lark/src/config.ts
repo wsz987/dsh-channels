@@ -13,10 +13,6 @@
  * - `upstream.mode` is a fixed literal `'sdk'`. A legacy config carrying
  *   `mode: 'gateway'` fails config validation (the plugin never enters the
  *   runtime), so no gateway fallback can silently come back.
- * - `upstream.appSecret` is a validation-only hidden field that REJECTS any
- *   non-empty plaintext value at parse time. Legacy plaintext configs must be
- *   migrated to ctx.credentials (`appSecretRef`) before loading; there is no
- *   runtime migration anymore.
  * - `baseUrl` / `longPollTimeoutMs` (old self-hosted gateway settings) are
  *   removed from the schema and defaults.
  */
@@ -115,17 +111,6 @@ export const Config: Schema<LarkConfig> = Schema.object({
     appId: Schema.string(),
     // Credential reference name only — never the secret value itself.
     appSecretRef: Schema.string().default(LARK_APP_SECRET_REF),
-    // Fail-closed legacy-plaintext guard: any non-empty value is rejected at
-    // parse time with a migration hint. Never written, never read at runtime.
-    appSecret: Schema.transform(Schema.string().hidden(), (value: string | undefined) => {
-      if (typeof value === 'string' && value.length > 0) {
-        throw new TypeError(
-          'upstream.appSecret (legacy plaintext) is no longer supported: move the value into ctx.credentials under '
-            + 'upstream.appSecretRef and remove the field from config',
-        );
-      }
-      return value;
-    }),
     // 'feishu' | 'lark' | custom base domain (resolved to the SDK Domain).
     domain: Schema.string().default('feishu'),
   }),

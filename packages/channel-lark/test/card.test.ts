@@ -26,14 +26,17 @@ class FakeOpenApiClient implements LarkOpenApiClient {
     data: { message_id: 'om_card_1' },
   };
   failElementContent = false;
+  failSettings = false;
+  private cardCounter = 0;
+  private messageCounter = 0;
 
   im = {
     v1: {
       message: {
         create: async (payload: unknown) => {
           this.calls.push({ method: 'message.create', payload });
-          if (this.failElementContent) throw new Error('element content boom');
-          return this.createResult;
+          this.messageCounter += 1;
+          return { ...this.createResult, data: { message_id: `om_card_${this.messageCounter}` } };
         },
         patch: async (payload: unknown) => {
           this.calls.push({ method: 'message.patch', payload });
@@ -54,16 +57,19 @@ class FakeOpenApiClient implements LarkOpenApiClient {
       card: {
         create: async (payload: unknown) => {
           this.calls.push({ method: 'cardkit.card.create', payload });
-          return this.cardCreateResult;
+          this.cardCounter += 1;
+          return { ...this.cardCreateResult, data: { card_id: `cc_card_${this.cardCounter}` } };
         },
         settings: async (payload: unknown) => {
           this.calls.push({ method: 'cardkit.card.settings', payload });
+          if (this.failSettings) throw new Error('settings boom');
           return { code: 0 };
         },
       },
       cardElement: {
         content: async (payload: unknown) => {
           this.calls.push({ method: 'cardkit.cardElement.content', payload });
+          if (this.failElementContent) throw new Error('element content boom');
           return { code: 0 };
         },
       },
@@ -99,6 +105,15 @@ function contentCalls(client: FakeOpenApiClient): Array<{ sequence: number; uuid
   return client.calls
     .filter((c) => c.method === 'cardkit.cardElement.content')
     .map((c) => (c.payload as { data: { sequence: number; uuid?: string } }).data);
+}
+
+function finalContentByCard(client: FakeOpenApiClient): Map<string, string> {
+  const result = new Map<string, string>();
+  for (const call of client.calls.filter((item) => item.method === 'cardkit.cardElement.content')) {
+    const payload = call.payload as { path: { card_id: string }; data: { content: string } };
+    result.set(payload.path.card_id, payload.data.content);
+  }
+  return result;
 }
 
 describe('LarkCardReply CardKit 2.0 native streaming', () => {
@@ -223,6 +238,28 @@ describe('LarkCardReply CardKit 2.0 native streaming', () => {
     expect(handle.status).toBe('failed');
     expect(handle.updates.at(-1)).toMatchObject({ kind: 'failed', text: '' });
   });
+
+  it('does not report finished when closing streaming fails and permits retry', async () => {
+    const client = new FakeOpenApiClient();
+    const handle = makeHandle(client);
+    await handle.append('answer');
+    client.failSettings = true;
+    await expect(handle.finish()).rejects.toThrow('settings boom');
+    expect(handle.status).toBe('active');
+    client.failSettings = false;
+    await handle.finish();
+    expect(handle.status).toBe('finished');
+  });
+
+  it('still attempts to close streaming when writing the failure footer fails', async () => {
+    const client = new FakeOpenApiClient();
+    const handle = makeHandle(client);
+    await handle.append('partial');
+    client.failElementContent = true;
+    await handle.fail(new Error('generation boom'));
+    expect(handle.status).toBe('failed');
+    expect(methods(client).at(-1)).toBe('cardkit.card.settings');
+  });
 });
 
 describe('LarkCardReply rollover (30k element cap)', () => {
@@ -263,5 +300,41 @@ describe('LarkCardReply rollover (30k element cap)', () => {
     for (const call of calls) {
       expect(call.sequence).toBeGreaterThanOrEqual(1);
     }
+  });
+
+  it('appends after rollover without replaying finalized content', async () => {
+    const client = new FakeOpenApiClient();
+    const handle = makeHandle(client);
+    const first = 'a'.repeat(31_000);
+    await handle.append(first);
+    await handle.append('TAIL');
+    const contents = [...finalContentByCard(client).values()];
+    expect(contents.join('')).toBe(first + 'TAIL');
+    expect(contents).toHaveLength(2);
+  });
+
+  it('accepts accumulated replacements after rollover without duplicating heads', async () => {
+    const client = new FakeOpenApiClient();
+    const handle = makeHandle(client);
+    const first = 'b'.repeat(31_000);
+    await handle.append(first);
+    await handle.replace({ text: `${first} replaced` });
+    expect([...finalContentByCard(client).values()].join('')).toBe(`${first} replaced`);
+  });
+
+  it('rejects replacements that would rewrite an already finalized card', async () => {
+    const client = new FakeOpenApiClient();
+    const handle = makeHandle(client);
+    await handle.append('b'.repeat(31_000));
+    await expect(handle.replace({ text: 'different history' })).rejects.toThrow(/already finalized/);
+  });
+
+  it('preserves exact content across multiple rollovers', async () => {
+    const client = new FakeOpenApiClient();
+    const handle = makeHandle(client);
+    const full = 'c'.repeat(65_000);
+    await handle.append(full);
+    expect([...finalContentByCard(client).values()].join('')).toBe(full);
+    expect(handle.chunkIds).toHaveLength(3);
   });
 });

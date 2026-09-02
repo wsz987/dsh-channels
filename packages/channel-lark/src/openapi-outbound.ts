@@ -237,21 +237,21 @@ export class LarkOpenApiOutbound implements LarkOutbound {
   }
 
   sendText(to: string, text: string): Promise<unknown> {
-    return this.options.client.im.v1.message.create({
+    return this.callEnvelope(() => this.options.client.im.v1.message.create({
       params: { receive_id_type: receiveIdType(to) },
       data: { receive_id: to, msg_type: 'text', content: JSON.stringify({ text }) },
-    });
+    }));
   }
 
   sendInteractive(to: string, text: string, actions: OutboundActionRow[]): Promise<unknown> {
-    return this.options.client.im.v1.message.create({
+    return this.callEnvelope(() => this.options.client.im.v1.message.create({
       params: { receive_id_type: receiveIdType(to) },
       data: {
         receive_id: to,
         msg_type: 'interactive',
         content: interactiveCardContent(text, actions),
       },
-    });
+    }));
   }
 
   async sendMedia(to: string, media: LarkMediaRef): Promise<unknown> {
@@ -263,14 +263,14 @@ export class LarkOpenApiOutbound implements LarkOutbound {
     if (!imageKey) {
       throw new ChannelError('CHANNEL_ERROR', 'lark image upload returned no image_key');
     }
-    return this.options.client.im.v1.message.create({
+    return this.callEnvelope(() => this.options.client.im.v1.message.create({
       params: { receive_id_type: receiveIdType(to) },
       data: {
         receive_id: to,
         msg_type: 'image',
         content: JSON.stringify({ image_key: imageKey }),
       },
-    });
+    }));
   }
 
   async sendFile(to: string, file: LarkFileRef): Promise<unknown> {
@@ -287,14 +287,14 @@ export class LarkOpenApiOutbound implements LarkOutbound {
     if (!fileKey) {
       throw new ChannelError('CHANNEL_ERROR', 'lark file upload returned no file_key');
     }
-    return this.options.client.im.v1.message.create({
+    return this.callEnvelope(() => this.options.client.im.v1.message.create({
       params: { receive_id_type: receiveIdType(to) },
       data: {
         receive_id: to,
         msg_type: 'file',
         content: JSON.stringify({ file_key: fileKey }),
       },
-    });
+    }));
   }
 
   async createCardEntity(cardJson: string): Promise<{ cardId: string }> {
@@ -333,28 +333,28 @@ export class LarkOpenApiOutbound implements LarkOutbound {
     sequence: number,
     uuid: string,
   ): Promise<unknown> {
-    return this.options.client.cardkit.v1.cardElement.content({
+    return this.callEnvelope(() => this.options.client.cardkit.v1.cardElement.content({
       path: { card_id: cardId, element_id: elementId },
       data: { uuid, content, sequence },
-    });
+    }));
   }
 
   async finishStreamingCard(cardId: string, sequence: number, summary: string): Promise<unknown> {
-    return this.options.client.cardkit.v1.card.settings({
+    return this.callEnvelope(() => this.options.client.cardkit.v1.card.settings({
       path: { card_id: cardId },
       data: {
         settings: JSON.stringify({ config: { streaming_mode: false, summary: { content: summary } } }),
         sequence,
         uuid: `s_${cardId}_${sequence}`,
       },
-    });
+    }));
   }
 
   updateInteractive(cardId: string, text: string, actions: OutboundActionRow[]): Promise<unknown> {
-    return this.options.client.im.v1.message.patch({
+    return this.callEnvelope(() => this.options.client.im.v1.message.patch({
       path: { message_id: cardId },
       data: { content: interactiveCardContent(text, actions) },
-    });
+    }));
   }
 
   async getChatType(conversationId: string): Promise<'p2p' | 'group' | undefined> {
@@ -401,6 +401,10 @@ export class LarkOpenApiOutbound implements LarkOutbound {
     }
   }
 
+  private async callEnvelope<T>(request: () => Promise<LarkApiResponse<T>>): Promise<unknown> {
+    return parseEnvelope(await request());
+  }
+
   private reactionClient(): ReactionClient | undefined {
     if (this.options.client.addReaction && this.options.client.removeReaction) {
       return {
@@ -435,6 +439,9 @@ function parseEnvelope(response: unknown): { code?: number; msg?: string; data?:
   const parsed = envelopeSchema.safeParse(response);
   if (!parsed.success) {
     throw new ChannelError('CHANNEL_ERROR', 'lark openapi returned an invalid envelope');
+  }
+  if (parsed.data.code !== undefined && parsed.data.code !== 0) {
+    throw new ChannelError('CHANNEL_ERROR', `lark openapi request failed (${parsed.data.code}): ${parsed.data.msg ?? 'unknown error'}`);
   }
   return parsed.data;
 }

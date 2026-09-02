@@ -10,10 +10,8 @@
  * The AppId is a plain config string (`upstream.appId`); the AppSecret is
  * resolved via `ctx.credentials` (`DSH_CHANNEL_LARK_MAIN_APP_SECRET`) — only
  * the reference name ever lives in config. The secret value is never logged.
- * There is no self-hosted gateway mode, no transport injection, and no legacy
- * plaintext-appSecret runtime migration (a legacy config carrying
- * `mode: 'gateway'` or a non-empty `upstream.appSecret` fails config
- * validation — fail closed).
+ * There is no self-hosted gateway mode, transport injection, plaintext secret
+ * field, or runtime migration path.
  *
  * Lifecycle: when the Channel Control Plane (`ctx.channelControl`) is present,
  * apply() registers a `ChannelDefinition` ('lark'); the control plane decides

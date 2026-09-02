@@ -50,11 +50,9 @@ npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@latest
 The AppSecret is resolved through `ctx.credentials` at startup and injected as
 `deps.appSecret`; it is never written to profile config.
 
-> **Fail-closed config governance**: a legacy config carrying
-> `upstream.mode: gateway` or a non-empty plaintext `upstream.appSecret`
-> **fails config validation** (the plugin never enters the runtime). Move the
-> secret into `ctx.credentials` under `upstream.appSecretRef` and remove the
-> field from config before loading. There is no runtime migration.
+> **Config governance**: only `upstream.mode: sdk` and the credential reference
+> `upstream.appSecretRef` are supported. Plaintext `upstream.appSecret` and the
+> former gateway settings are not part of the configuration contract.
 
 ## Streaming
 

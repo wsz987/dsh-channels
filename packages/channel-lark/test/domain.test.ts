@@ -85,30 +85,4 @@ describe('lark config defaults', () => {
     ).toThrow(/expected "sdk"/);
   });
 
-  it('rejects a legacy non-empty plaintext upstream.appSecret (fail closed)', () => {
-    expect(() =>
-      Config({
-        enabled: true,
-        accountId: 'main',
-        timeoutMs: 1000,
-        reconnect: { enabled: false, baseDelayMs: 1, maxDelayMs: 10, maxRetries: 2 },
-        dedup: { enabled: true, windowMs: 5000 },
-        card: { createOnFirstDelta: true },
-        upstream: { appId: 'cli_abc', appSecret: 'legacy-secret' as never },
-      }),
-    ).toThrow(/upstream\.appSecret/);
-  });
-
-  it('tolerates an empty upstream.appSecret value (no plaintext to guard)', () => {
-    const config = Config({
-      enabled: true,
-      accountId: 'main',
-      timeoutMs: 1000,
-      reconnect: { enabled: false, baseDelayMs: 1, maxDelayMs: 10, maxRetries: 2 },
-      dedup: { enabled: true, windowMs: 5000 },
-      card: { createOnFirstDelta: true },
-      upstream: { appId: 'cli_abc', appSecret: '' as never },
-    });
-    expect(config.upstream.appId).toBe('cli_abc');
-  });
 });
