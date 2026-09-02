@@ -221,21 +221,31 @@ Tenant / 应用身份权限：
 
 事件：
 - im.message.receive_v1
+- card.action.trigger
 ```
 
-当前实现还使用：
+当前实现还使用（官方 OpenAPI / CardKit 2.0）：
 
 ```text
 im.v1.image.create
 im.v1.file.create
-im.v1.message.patch
+im.v1.message.patch       # 重写已发送的交互卡片（非流式）
+im.v1.messageResource.get # 入站资源下载（media port）
+cardkit.v1.card.create        # Card JSON 2.0 卡片实体
+cardkit.v1.card.settings      # 关闭 streaming_mode + summary
+cardkit.v1.cardElement.content# 原生流式打字机更新
 message reaction add/remove（Typing）
 ```
+
+> 卡片/流式已收敛为官方 CardKit 2.0 生命周期：创建卡片实体 → 发送卡片引用 →
+> `cardElement.content`（单调 sequence + 稳定 uuid）→ `card.settings` 关闭流式。
+> 不得用 `im.v1.message.patch` 高频全量替换冒充原生打字机流式，也不用
+> `cardkit.v1.card.idConvert` 作为主路径（官方已不推荐）。
 
 因此继续核验：
 
 - 图片/文件资源上传权限
-- 卡片/消息 patch 所需权限
+- CardKit 对应权限（应用身份与创建卡片实体者一致）
 - `card.typingIndicator=true` 时 reaction 相关权限
 - 如果产品需要群聊中“非 @ 消息”，需申请对应的敏感“群组全部消息”权限，而不是只依赖 `group_at_msg`
 

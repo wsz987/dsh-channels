@@ -876,9 +876,7 @@ authMethods: [credentials, hybrid]
 ```text
 enabled = true
 accountId = main
-baseUrl = http://127.0.0.1:9300
 timeoutMs = 30000
-longPollTimeoutMs = 25000
 reconnect.enabled = true
 reconnect.baseDelayMs = 1000
 reconnect.maxDelayMs = 30000
@@ -887,16 +885,17 @@ dedup.enabled = true
 dedup.windowMs = 5000
 card.createOnFirstDelta = true
 card.typingIndicator = true
-upstream.mode = sdk
+upstream.mode = sdk          # fixed literal — the official SDK is the only upstream driver
 upstream.appId?
 upstream.appSecretRef = DSH_CHANNEL_LARK_MAIN_APP_SECRET
 upstream.domain = feishu
 ```
 
-Deprecated migration-only:
+Fail-closed legacy guard (validation-time only):
 
 ```text
-upstream.appSecret
+upstream.mode: 'gateway'    → rejected (fails config validation)
+upstream.appSecret (plaintext, non-empty) → rejected with a migration hint
 ```
 
 ### Telegram
@@ -1015,14 +1014,22 @@ PUT  /v1.0/card/streaming
 ### Lark
 
 ```text
-WS long connection:
+WS long connection (official SDK WSClient + EventDispatcher):
   im.message.receive_v1
+  card.action.trigger
 
-OpenAPI:
+OpenAPI (official SDK Client):
   im.v1.message.create
-  im.v1.message.patch
+  im.v1.message.patch            # rewrite an already-sent interactive card
+  im.v1.chat.get                 # card-action chat mode confirmation
   im.v1.image.create
   im.v1.file.create
+  im.v1.messageResource.get      # inbound resource download (media port)
+
+CardKit 2.0 (native streaming + card entities):
+  cardkit.v1.card.create         # Card JSON 2.0 entity
+  cardkit.v1.card.settings       # close streaming_mode + summary
+  cardkit.v1.cardElement.content # native "typewriter" stream update
 
 Optional typing:
   addReaction
