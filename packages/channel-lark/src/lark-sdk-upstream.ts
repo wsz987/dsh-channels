@@ -1,23 +1,22 @@
 /**
- * Lark SDK-mode upstream driver (official `@larksuiteoapi/node-sdk`).
+ * Lark SDK upstream driver (official `@larksuiteoapi/node-sdk`).
  *
- * This driver replaces only the INBOUND leg of the legacy self-hosted gateway
- * integration: robot messages arrive over the official SDK's WebSocket
- * long-connection (`WSClient` + `EventDispatcher`, event
- * `im.message.receive_v1`) and are mapped into the SAME raw shape the gateway
- * long-poll driver produces (`{ type, msgId, eventId, senderId,
- * conversationId, threadId, content, ... }`), so the existing mapper + dedup
- * pipeline is untouched. Thread replies are preserved: the SDK's
- * `message.thread_id` / `root_id` / `parent_id` map into the raw
- * `threadId` the mapper uses to build the thread-scoped SessionBinding.
+ * This driver is the ONLY inbound implementation: robot messages arrive over
+ * the official SDK's WebSocket long-connection (`WSClient` +
+ * `EventDispatcher`, event `im.message.receive_v1`) and interactive-card
+ * button presses arrive over `card.action.trigger`. Both are mapped into the
+ * canonical raw envelope the adapter's mapper consumes (`{ type, msgId,
+ * eventId, senderId, conversationId, chatType, threadId, ... }`) — the mapper
+ * is SDK-event-driven, there is no gateway raw shape anywhere.
  *
- * OUTBOUND is deliberately delegated: message send / media / editable card
- * create-update are HTTP calls, not part of the WS long-connection event
- * path. `LarkSdkUpstream` forwards every outbound method to an injected
- * `LarkOutbound` — the official OpenAPI driver (`LarkOpenApiOutbound`) in SDK
- * mode (release plan R7B), or any injected driver in tests. This bounded
- * split keeps the inbound and outbound legs independently swappable and
- * fully offline-testable.
+ * Thread replies are preserved: the SDK's `message.thread_id` / `root_id` /
+ * `parent_id` map into the canonical `threadId` the mapper uses to build the
+ * thread-scoped SessionBinding.
+ *
+ * OUTBOUND is delegated to the injected `LarkOutbound` — the official OpenAPI
+ * driver (`LarkOpenApiOutbound`) in production, or an injected fake in tests.
+ * This bounded split keeps the inbound and outbound legs independently
+ * swappable and fully offline-testable.
  *
  * Credentials never appear in this module (the client is built elsewhere from
  * config) and are never logged. Live verification against a real Lark app
@@ -27,7 +26,12 @@
 import { EventDispatcher, LoggerLevel, normalizeCardAction } from '@larksuiteoapi/node-sdk';
 import { ChannelError } from '@wsz987/channel-core';
 import { z } from 'zod';
-import type { CardCreateResult, LarkFileRef, LarkMediaRef, LarkOutbound, LarkUpstream } from './upstream.js';
+import type {
+  LarkFileRef,
+  LarkMediaRef,
+  LarkOutbound,
+  LarkUpstream,
+} from './upstream.js';
 
 /** Event type key for inbound message delivery (v1 event). */
 export const MESSAGE_EVENT_KEY = 'im.message.receive_v1';
@@ -62,9 +66,8 @@ export interface LarkSdkUpstreamOptions {
   /** The WS long-connection client (real WSClient or injected fake). */
   client: LarkSdkClient;
   /**
-   * Outbound delegate. In SDK mode this is the official OpenAPI driver
-   * (`LarkOpenApiOutbound`); tests may inject any `LarkOutbound` (e.g. the
-   * legacy `HttpLarkUpstream`) to observe delegation.
+   * Official OpenAPI outbound delegate (`LarkOpenApiOutbound` in production;
+   * any `LarkOutbound` fake in tests).
    */
   outbound: LarkOutbound;
   /** Official OpenAPI chat lookup; absence deliberately fails card actions closed. */
@@ -137,12 +140,12 @@ const officialCardActionInputSchema = z.object({
 type MessageContent = Record<string, unknown>;
 
 /**
- * Map one parsed v1 message event into the gateway raw shape consumed by the
- * inbound mapper (`{ type, msgId, eventId, senderId, conversationId,
- * threadId, content, ... }`). Returns `undefined` when the event carries no
- * message body.
+ * Map one parsed v1 message event into the canonical raw envelope consumed by
+ * the inbound mapper (`{ type, msgId, eventId, senderId, conversationId,
+ * chatType, threadId, content, ... }`). Returns `undefined` when the event
+ * carries no message body.
  */
-export function toGatewayRaw(input: unknown): Record<string, unknown> | undefined {
+export function mapSdkMessageEvent(input: unknown): Record<string, unknown> | undefined {
   const parsed = larkMessageEventDataSchema.safeParse(input);
   if (!parsed.success) {
     throw new ChannelError(
@@ -177,8 +180,8 @@ export function toGatewayRaw(input: unknown): Record<string, unknown> | undefine
       raw.content = content.text;
       break;
     case 'image':
-      // SDK image bodies carry an image_key (not a URL); resolving it to a
-      // media URL is a future OpenAPI call — the mapper surfaces it best-effort.
+      // SDK image bodies carry an image_key (not a URL); the mapper surfaces
+      // it as an opaque resourceRef resolved later by the media port.
       raw.picUrl = content.image_key;
       break;
     case 'audio':
@@ -207,10 +210,12 @@ export function toGatewayRaw(input: unknown): Record<string, unknown> | undefine
 }
 
 /**
- * Convert the official SDK-normalized card action into the project-neutral
- * interaction envelope. The platform callback itself is never hand-parsed.
+ * Convert the official SDK-normalized card action into the canonical
+ * interaction envelope. The platform callback itself is never hand-parsed —
+ * it is first trust-boundary validated with zod and then normalized by the
+ * official SDK's `normalizeCardAction()`.
  */
-export async function toGatewayInteraction(
+export async function mapSdkCardAction(
   input: unknown,
   resolveChatType: ((conversationId: string) => Promise<'p2p' | 'group' | undefined>) | undefined,
 ): Promise<Record<string, unknown> | undefined> {
@@ -257,7 +262,7 @@ export class LarkSdkUpstream implements LarkUpstream {
 
   /**
    * Connect the WS long-connection, route inbound message events into the
-   * gateway raw shape, and keep the connection open until `signal` aborts.
+   * canonical raw shape, and keep the connection open until `signal` aborts.
    */
   async receive(
     signal: AbortSignal,
@@ -287,13 +292,13 @@ export class LarkSdkUpstream implements LarkUpstream {
     this.dispatcher.register({
       [MESSAGE_EVENT_KEY]: (data: unknown) => {
         if (!this.onMessage) return undefined;
-        const raw = toGatewayRaw(data);
+        const raw = mapSdkMessageEvent(data);
         if (raw !== undefined) this.onMessage(raw);
         return undefined;
       },
       [CARD_ACTION_EVENT_KEY]: async (data: unknown) => {
         if (!this.onMessage) return undefined;
-        const raw = await toGatewayInteraction(data, this.options.resolveChatType);
+        const raw = await mapSdkCardAction(data, this.options.resolveChatType);
         if (raw !== undefined) this.onMessage(raw);
         return undefined;
       },
@@ -317,20 +322,34 @@ export class LarkSdkUpstream implements LarkUpstream {
     return this.options.outbound.sendInteractive(to, text, actions);
   }
 
-  createCard(conversationId: string, text: string): Promise<CardCreateResult> {
-    return this.options.outbound.createCard(conversationId, text);
+  updateInteractive(
+    cardId: string,
+    text: string,
+    actions: import('@wsz987/channel-core').OutboundActionRow[],
+  ): Promise<unknown> {
+    return this.options.outbound.updateInteractive(cardId, text, actions);
   }
 
-  updateCard(cardId: string, text: string): Promise<unknown> {
-    return this.options.outbound.updateCard(cardId, text);
+  createCardEntity(cardJson: string): Promise<{ cardId: string }> {
+    return this.options.outbound.createCardEntity(cardJson);
   }
 
-  finishCard(cardId: string): Promise<unknown> {
-    return this.options.outbound.finishCard(cardId);
+  sendCardEntity(conversationId: string, cardId: string): Promise<{ messageId: string }> {
+    return this.options.outbound.sendCardEntity(conversationId, cardId);
   }
 
-  failCard(cardId: string, reason?: string): Promise<unknown> {
-    return this.options.outbound.failCard(cardId, reason);
+  updateCardElementContent(
+    cardId: string,
+    elementId: string,
+    content: string,
+    sequence: number,
+    uuid: string,
+  ): Promise<unknown> {
+    return this.options.outbound.updateCardElementContent(cardId, elementId, content, sequence, uuid);
+  }
+
+  finishStreamingCard(cardId: string, sequence: number, summary: string): Promise<unknown> {
+    return this.options.outbound.finishStreamingCard(cardId, sequence, summary);
   }
 
   startTyping(messageId: string): Promise<void> {
@@ -339,14 +358,6 @@ export class LarkSdkUpstream implements LarkUpstream {
 
   stopTyping(messageId: string): Promise<void> {
     return this.options.outbound.stopTyping?.(messageId) ?? Promise.resolve();
-  }
-
-  updateInteractive(
-    cardId: string,
-    text: string,
-    actions: import('@wsz987/channel-core').OutboundActionRow[],
-  ): Promise<unknown> {
-    return this.options.outbound.updateInteractive(cardId, text, actions);
   }
 
   getChatType(conversationId: string): Promise<'p2p' | 'group' | undefined> {

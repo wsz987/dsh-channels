@@ -1,26 +1,27 @@
 /**
  * Lark channel adapter.
  *
- * Maps the Lark/Feishu platform (through the upstream driver) to the Channel
- * Contract. All network/lifecycle resources live behind the upstream driver
- * and are aborted via the adapter context signal. The adapter never touches
- * Harness Agent APIs.
+ * Maps the Lark/Feishu platform (through the OFFICIAL `@larksuiteoapi/node-sdk`
+ * driver stack) to the Channel Contract. All network/lifecycle resources live
+ * behind the upstream driver and are aborted via the adapter context signal.
+ * The adapter never touches Harness Agent APIs.
  *
- * The upstream driver is selected by `config.upstream.mode`:
- * - 'sdk'     → `LarkSdkUpstream`: inbound via the official
- *   `@larksuiteoapi/node-sdk` WS long-connection, outbound via the official
- *   OpenAPI client (`LarkOpenApiOutbound`) — no localhost gateway. The WS
- *   client comes from `deps.sdkClient` / `deps.sdkClientFactory`, the OpenAPI
- *   client from `deps.openApiClient` / `deps.openApiClientFactory`, each
- *   defaulting to a real client built from the RESOLVED `deps.appId` / `deps.appSecret`,
+ * The upstream is ALWAYS the official SDK:
+ * - inbound → `LarkSdkUpstream`: WSClient + EventDispatcher
+ *   (`im.message.receive_v1` + `card.action.trigger`), outbound delegated to
+ *   the official OpenAPI client (`LarkOpenApiOutbound`). The WS client comes
+ *   from `deps.sdkClient` / `deps.sdkClientFactory`, the OpenAPI client from
+ *   `deps.openApiClient` / `deps.openApiClientFactory`, each defaulting to a
+ *   real client built from the RESOLVED `deps.appId` / `deps.appSecret`,
  *   resolved via ctx.credentials (the adapter never reads secrets from config).
  *   Missing credentials fail start loudly, not construction.
- * - 'gateway' → `HttpLarkUpstream` over the transport (legacy).
+ *
+ * There is no transport injection and no gateway: offline tests inject fake
+ * WS + OpenAPI clients instead.
  *
  * Auth is connection-state driven: the upstream driver owns the platform
  * credentials, so the adapter derives its auth state from the connection
- * (connected → authenticated). `beginAuth`/`pollAuth` are intentionally not
- * implemented in M3 — a real OAuth/code flow can slot in later.
+ * (connected → authenticated).
  */
 import type {
   ChannelAdapter,
@@ -36,8 +37,7 @@ import type {
 import { ChannelError } from '@wsz987/channel-core';
 import { Client, Domain, WSClient } from '@larksuiteoapi/node-sdk';
 import type { LarkConfig } from './config.js';
-import { FetchTransport, type HttpTransport } from './transport.js';
-import { HttpLarkUpstream, type LarkOutbound, type LarkUpstream } from './upstream.js';
+import type { LarkOutbound, LarkUpstream } from './upstream.js';
 import {
   LarkSdkUpstream,
   type LarkSdkClient,
@@ -51,38 +51,36 @@ import { LarkCardReply } from './card.js';
 import { manifest as larkManifest, type LarkManifest } from './manifest.js';
 
 export interface LarkAdapterDeps {
-  transport?: HttpTransport;
   /**
-   * Resolved Lark AppId for SDK mode (the plugin resolves it via
-   * `ctx.credentials` and hands it in; direct config never carries it).
+   * Resolved Lark AppId (a plain config string resolved by the plugin and
+   * handed in for the default client builders; never a secret).
    */
   appId?: string;
   /**
-   * Resolved Lark AppSecret for SDK mode (resolved via `ctx.credentials` by
-   * the plugin; never present in profile config / logs).
+   * Resolved Lark AppSecret (resolved via `ctx.credentials` by the plugin;
+   * never present in profile config / logs).
    */
   appSecret?: string;
   /**
-   * Pre-built WS long-connection client for SDK mode (offline tests).
-   * Overrides `sdkClientFactory`; when neither is given a real `WSClient`
-   * is built from `appId`/`appSecret` at start time.
+   * Pre-built WS long-connection client (offline tests). Overrides
+   * `sdkClientFactory`; when neither is given a real `WSClient` is built from
+   * `appId`/`appSecret` at start time.
    */
   sdkClient?: LarkSdkClient;
-  /** Lazy WS client factory for SDK mode; overrides the default WSClient. */
+  /** Lazy WS client factory; overrides the default WSClient. */
   sdkClientFactory?: (config: LarkConfig) => LarkSdkClient;
   /**
-   * Pre-built official OpenAPI client for SDK-mode outbound (offline tests).
-   * Overrides `openApiClientFactory`; when neither is given a real `Client`
-   * is built from `appId`/`appSecret` at start time.
+   * Pre-built official OpenAPI client (offline tests). Overrides
+   * `openApiClientFactory`; when neither is given a real `Client` is built
+   * from `appId`/`appSecret` at start time.
    */
   openApiClient?: LarkOpenApiClient;
-  /** Lazy OpenAPI client factory for SDK-mode outbound. */
+  /** Lazy OpenAPI client factory. */
   openApiClientFactory?: (config: LarkConfig) => LarkOpenApiClient;
   /**
-   * Injectable media port for inbound image hydration (Milestone M2A). When
-   * absent, the adapter builds a default LarkOpenApiMediaPort from the same
-   * resolved OpenAPI client used for outbound (SDK mode), or disables image
-   * hydration outside SDK mode.
+   * Injectable media port for inbound media hydration. When absent, the
+   * adapter builds a default LarkOpenApiMediaPort from the same resolved
+   * OpenAPI client used for outbound.
    */
   mediaPort?: LarkMediaPort;
   /** Injectable clock (tests). */
@@ -107,18 +105,14 @@ export class LarkAdapter implements ChannelAdapter {
     reactions: true,
     threads: true,
     streaming: 'edit',
-    // Directional media precision. Inbound:
-    // image/file/audio/video are all hydrated to real bytes before emit — the
-    // official `message.resource` API documents audio/video downloads (see the
-    // SDK-embedded doc statement for im.v1.messageResource.get in
-    // @larksuiteoapi/node-sdk@1.73.1: 音频、视频、图片和文件), so
-    // every binary kind the mapper produces routes its file_key through
-    // `messageResource.get` into localData. Outbound: image (`sendMedia` →
-    // im.image.create) and file (`sendFile` → im.file.create) upload real
-    // bytes; there is no audio/video send path — audio/video outbound parts
-    // fall back to `[audio]`/`[video]` text placeholders, so outbound
-    // audio/video are 'unsupported' (the legacy coarse `audio: true` /
-    // `video: false` flags remain unchanged).
+    // Directional media precision. Inbound: image/file/audio/video are all
+    // hydrated to real bytes before emit — the official `message.resource`
+    // API documents audio/video downloads, so every binary kind the mapper
+    // produces routes its file_key through `messageResource.get` into
+    // localData. Outbound: image (`sendMedia` → im.image.create) and file
+    // (`sendFile` → im.file.create) upload real bytes; there is no audio/video
+    // send path — audio/video outbound parts fall back to `[audio]`/`[video]`
+    // text placeholders, so outbound audio/video are 'unsupported'.
     media: {
       inbound: {
         image: 'bytes',
@@ -138,11 +132,10 @@ export class LarkAdapter implements ChannelAdapter {
   private ctx?: ChannelAdapterContext;
   /** Built in `start()` (driver selection needs the resolved deps/credentials). */
   private upstream!: LarkUpstream;
-  private readonly transport: HttpTransport;
   private readonly deps: LarkAdapterDeps;
   private inbound!: InboundProcessor;
   private outbound!: OutboundSender;
-  /** Media port used for inbound image hydration (built in start). */
+  /** Media port used for inbound media hydration (built in start). */
   private mediaPort?: LarkMediaPort;
   private started = false;
   private stopped = false;
@@ -158,7 +151,6 @@ export class LarkAdapter implements ChannelAdapter {
   constructor(private readonly config: LarkConfig, deps: LarkAdapterDeps = {}) {
     this.now = deps.now ?? Date.now;
     this.deps = deps;
-    this.transport = deps.transport ?? new FetchTransport(config.baseUrl, { timeoutMs: config.timeoutMs });
   }
 
   async start(ctx: ChannelAdapterContext): Promise<void> {
@@ -254,21 +246,14 @@ export class LarkAdapter implements ChannelAdapter {
     };
   }
 
-  /** Long-poll receive loop with exponential backoff on failure. */
+  /** WS long-connection receive loop with exponential backoff on failure. */
   startReceiveLoop(): void {
     if (this.receiveLoop) return;
     this.receiveLoop = this.runReceiveLoop();
   }
 
-  /** Select and build the upstream driver for the configured mode. */
+  /** Build the official-SDK upstream driver. */
   private buildUpstream(): void {
-    if (this.config.upstream.mode !== 'sdk') {
-      this.upstream = new HttpLarkUpstream({
-        transport: this.transport,
-        longPollTimeoutMs: this.config.longPollTimeoutMs,
-      });
-      return;
-    }
     const outbound = this.resolveOpenApiOutbound();
     const options: LarkSdkUpstreamOptions = {
       client: this.resolveSdkClient(),
@@ -279,7 +264,7 @@ export class LarkAdapter implements ChannelAdapter {
     this.upstream = new LarkSdkUpstream(options);
   }
 
-  /** Select the official OpenAPI outbound driver for SDK mode. */
+  /** Select the official OpenAPI outbound driver. */
   private resolveOpenApiOutbound(): LarkOutbound {
     if (this.deps.openApiClient) {
       return new LarkOpenApiOutbound({ client: this.deps.openApiClient });
@@ -293,20 +278,17 @@ export class LarkAdapter implements ChannelAdapter {
   }
 
   /**
-   * Select the media port for inbound image hydration. An explicit dep wins;
-   * otherwise SDK mode builds a default `LarkOpenApiMediaPort` from the
-   * same resolved OpenAPI client used for outbound. Outside SDK mode (legacy
-   * gateway) there is no official client to resolve resources with, so image
-   * hydration stays disabled (parts keep their resourceRef).
+   * Select the media port for inbound media hydration. An explicit dep wins;
+   * otherwise the adapter builds a default `LarkOpenApiMediaPort` from the
+   * same resolved OpenAPI client used for outbound.
    */
   private resolveMediaPort(): LarkMediaPort | undefined {
     if (this.deps.mediaPort) return this.deps.mediaPort;
-    if (this.config.upstream.mode !== 'sdk') return undefined;
-    // In SDK mode the resolved client is the real SDK `Client`, which
-    // structurally satisfies the wider `LarkMediaClient` surface (message
-    // resource + image + file). When a caller injects a fake typed only as
-    // `LarkOpenApiClient`, hydration still safely degrades: a missing
-    // messageResource surfaces as a runtime failure that the hydrator marks.
+    // The resolved client is the real SDK `Client`, which structurally
+    // satisfies the wider `LarkMediaClient` surface (message resource + image
+    // + file). When a caller injects a fake typed only as `LarkOpenApiClient`,
+    // hydration still safely degrades: a missing messageResource surfaces as
+    // a runtime failure that the hydrator marks.
     const client = this.deps.openApiClient
       ?? (this.deps.openApiClientFactory && this.deps.openApiClientFactory(this.config))
       ?? createDefaultOpenApiClient(this.deps.appId, this.deps.appSecret, this.config);
@@ -330,8 +312,8 @@ export class LarkAdapter implements ChannelAdapter {
         });
         attempt = 0;
         // A completed receive cycle proves the upstream is reachable; auth
-        // follows the connection state (the driver owns credentials). In sdk
-        // mode the WS driver also reports connectivity via onConnected.
+        // follows the connection state (the driver owns credentials). The WS
+        // driver reports connectivity via onConnected.
         this.markConnected();
       } catch (error) {
         if (this.stopped || this.aborted()) break;
@@ -360,9 +342,6 @@ export class LarkAdapter implements ChannelAdapter {
 
   /** Flip connection/auth state once the upstream proves reachable. */
   private markConnected(): void {
-    // Never report connected while stopping; an external abort is not
-    // sufficient (a long-poll cycle may legitimately end on the abort while
-    // having already proven reachability — see the gateway lifecycle tests).
     if (this.stopped) return;
     if (this.connected) return;
     this.connected = true;
@@ -414,7 +393,7 @@ function createDefaultWSClient(
   if (!appId || !appSecret) {
     throw new ChannelError(
       'CHANNEL_ERROR',
-      'lark upstream mode "sdk" requires resolved appId and appSecret credentials',
+      'lark upstream requires resolved appId and appSecret credentials',
     );
   }
   return new WSClient({
@@ -433,7 +412,7 @@ function createDefaultOpenApiClient(
   if (!appId || !appSecret) {
     throw new ChannelError(
       'CHANNEL_ERROR',
-      'lark upstream mode "sdk" requires resolved appId and appSecret credentials',
+      'lark upstream requires resolved appId and appSecret credentials',
     );
   }
   return new Client({

@@ -1,11 +1,12 @@
 /**
  * Outbound sending: channel message → lark text/media/file payload → upstream.
  *
- * Streaming replies go through `LarkCardReply`; this sender is the buffered
- * fallback path (`adapter.send`) used when no card was created. Text messages
- * use `sendText`; a pure image message (no text) uses `sendMedia`; a pure file
- * message carrying `localData` uses `sendFile` (official im.file.create →
- * im.message.create, M7A) so media/file capability is real rather than a placeholder.
+ * Streaming replies go through `LarkCardReply` (CardKit native streaming);
+ * this sender is the plain send path (`adapter.send`) used for one-shot
+ * messages. Text messages use `sendText`; a pure image message (no text) uses
+ * `sendMedia`; a pure file message carrying `localData` uses `sendFile`
+ * (official im.file.create → im.message.create) so media/file capability is
+ * real rather than a placeholder.
  */
 import type {
   ChannelLogger,
