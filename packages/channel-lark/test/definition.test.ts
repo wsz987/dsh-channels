@@ -1,16 +1,15 @@
 /**
- * channel-lark ChannelDefinition tests (doc §14, §26, §29, §49, §52 Task 5).
+ * channel-lark ChannelDefinition tests.
  *
  * Exercises the control-plane binding of the lark channel — setup descriptor,
  * configured-state reporting, non-secret saveConfig merging, adapter
  * instantiation (credential resolution), and the apply() behaviors (definition
- * registration into ctx.channelControl, one-time legacy AppSecret migration,
- * and the no-control-plane fallback). Fully offline: fake credentials seam +
- * fake sdk/openapi clients via deps.
+ * registration into ctx.channelControl and the no-control-plane fallback).
+ * Fully offline: fake credentials seam + fake sdk/openapi clients via deps.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { Context } from '@deepseek-ai/cordis';
-import { ChannelService, type ChannelAdapter, type ChannelAdapterContext } from '@wsz987/channel-core';
+import { ChannelService, type ChannelAdapterContext } from '@wsz987/channel-core';
 import { CredentialProvider } from '@deepseek-ai/dsh-credentials';
 import type { CredentialRef } from '@deepseek-ai/dsh-credentials';
 import type { ChannelDefinition } from '@wsz987/channel-control';
@@ -29,13 +28,11 @@ function makeConfig(overrides: Partial<LarkConfig> = {}): LarkConfig {
   return Config({
     enabled: true,
     accountId: 'main',
-    baseUrl: 'http://fake',
     timeoutMs: 1000,
-    longPollTimeoutMs: 1000,
     reconnect: { enabled: false, baseDelayMs: 1, maxDelayMs: 10, maxRetries: 2 },
     dedup: { enabled: true, windowMs: 5000 },
     card: { createOnFirstDelta: true },
-    upstream: { mode: 'gateway' },
+    upstream: { appId: 'cli_default' },
     ...overrides,
   });
 }
@@ -88,6 +85,17 @@ const fakeOpenApi: LarkOpenApiClient = {
       },
     },
   },
+  cardkit: {
+    v1: {
+      card: {
+        create: async () => ({ code: 0, data: { card_id: 'cc_x' } }),
+        settings: async () => ({ code: 0 }),
+      },
+      cardElement: {
+        content: async () => ({ code: 0 }),
+      },
+    },
+  },
 };
 
 function stubStart(): void {
@@ -101,7 +109,7 @@ function stubStart(): void {
 describe('lark ChannelDefinition', () => {
   it('exposes the setup descriptor with appId (text) and appSecret (secret + ref)', () => {
     const definition = createLarkDefinition({
-      config: makeConfig({ upstream: { mode: 'sdk', appId: 'cli_abc' } }),
+      config: makeConfig({ upstream: { appId: 'cli_abc' } }),
       credentials: {
         resolve: async () => undefined,
         describe: async () => ({ configured: true, writable: true }),
@@ -131,7 +139,7 @@ describe('lark ChannelDefinition', () => {
 
   it('uses the Lark console URL for the overseas domain', () => {
     const definition = createLarkDefinition({
-      config: makeConfig({ upstream: { mode: 'sdk', appId: 'cli_abc', domain: 'lark' } }),
+      config: makeConfig({ upstream: { appId: 'cli_abc', domain: 'lark' } }),
       credentials: { resolve: async () => undefined, describe: async () => ({ configured: true, writable: true }), set: async () => {} },
     });
     expect(definition.setup.setupUrl).toBe('https://open.larksuite.com/app/cli_abc');
@@ -139,15 +147,15 @@ describe('lark ChannelDefinition', () => {
 
   it('falls back to the app list URL when appId is not configured', () => {
     const definition = createLarkDefinition({
-      config: makeConfig({ upstream: { mode: 'sdk' } }),
+      config: makeConfig({ upstream: { appId: undefined } }),
       credentials: { resolve: async () => undefined, describe: async () => ({ configured: true, writable: true }), set: async () => {} },
     });
     expect(definition.setup.setupUrl).toBe('https://open.feishu.cn/app');
   });
 
-  it('reports sdk configured state from appId (config) AND appSecret (credential)', async () => {
+  it('reports configured state from appId (config) AND appSecret (credential)', async () => {
     const definition = createLarkDefinition({
-      config: makeConfig({ upstream: { mode: 'sdk', appId: 'cli_abc' } }),
+      config: makeConfig({ upstream: { appId: 'cli_abc' } }),
       credentials: {
         resolve: async () => ({ value: 'secret', source: 'test' }),
         describe: async () => ({ configured: true, writable: true, source: 'test' }),
@@ -161,9 +169,9 @@ describe('lark ChannelDefinition', () => {
     expect(JSON.stringify(state)).not.toContain('secret');
   });
 
-  it('reports sdk unconfigured when the appSecret credential is missing', async () => {
+  it('reports unconfigured when the appSecret credential is missing', async () => {
     const definition = createLarkDefinition({
-      config: makeConfig({ upstream: { mode: 'sdk', appId: 'cli_abc' } }),
+      config: makeConfig({ upstream: { appId: 'cli_abc' } }),
       credentials: {
         resolve: async () => undefined,
         describe: async () => ({ configured: false, writable: true, source: 'test' }),
@@ -175,9 +183,9 @@ describe('lark ChannelDefinition', () => {
     expect(state.fields.appSecret.configured).toBe(false);
   });
 
-  it('reports sdk unconfigured when appId is missing from config', async () => {
+  it('reports unconfigured when appId is missing from config', async () => {
     const definition = createLarkDefinition({
-      config: makeConfig({ upstream: { mode: 'sdk' } }),
+      config: makeConfig({ upstream: { appId: undefined } }),
       credentials: { resolve: async () => undefined, describe: async () => ({ configured: true, writable: true }), set: async () => {} },
     });
     const state = await definition.getConfiguredState();
@@ -185,20 +193,11 @@ describe('lark ChannelDefinition', () => {
     expect(state.fields.appId.configured).toBe(false);
   });
 
-  it('reports gateway mode as configured (gateway owns credentials)', async () => {
-    const definition = createLarkDefinition({
-      config: makeConfig({ upstream: { mode: 'gateway' } }),
-      credentials: { resolve: async () => undefined, describe: async () => ({ configured: false, writable: true }), set: async () => {} },
-    });
-    const state = await definition.getConfiguredState();
-    expect(state.configured).toBe(true);
-  });
-
   it('createAdapter resolves the AppSecret and injects appId/appSecret into deps', async () => {
     stubStart();
     try {
       const definition = createLarkDefinition({
-        config: makeConfig({ upstream: { mode: 'sdk', appId: 'cli_abc' } }),
+        config: makeConfig({ upstream: { appId: 'cli_abc' } }),
         deps: { sdkClient: fakeClient, openApiClient: fakeOpenApi },
         credentials: {
           resolve: async (ref) => ({ value: ref === LARK_APP_SECRET_REF ? 'the-secret' : undefined, source: 'test' }),
@@ -215,17 +214,17 @@ describe('lark ChannelDefinition', () => {
     }
   });
 
-  it('createAdapter throws a stable error when the sdk AppSecret is missing', async () => {
+  it('createAdapter throws a stable error when the AppSecret is missing', async () => {
     const definition = createLarkDefinition({
-      config: makeConfig({ upstream: { mode: 'sdk', appId: 'cli_abc' } }),
+      config: makeConfig({ upstream: { appId: 'cli_abc' } }),
       credentials: { resolve: async () => undefined, describe: async () => ({ configured: false, writable: true }), set: async () => {} },
     });
     await expect(definition.createAdapter()).rejects.toThrow(/appSecret.*credentials ref/);
   });
 
-  it('createAdapter throws when the sdk AppId is missing from config', async () => {
+  it('createAdapter throws when the AppId is missing from config', async () => {
     const definition = createLarkDefinition({
-      config: makeConfig({ upstream: { mode: 'sdk' } }),
+      config: makeConfig({ upstream: { appId: undefined } }),
       credentials: {
         resolve: async (ref) => ({ value: ref === LARK_APP_SECRET_REF ? 'secret' : undefined, source: 'test' }),
         describe: async () => ({ configured: true, writable: true }),
@@ -235,25 +234,11 @@ describe('lark ChannelDefinition', () => {
     await expect(definition.createAdapter()).rejects.toThrow(/appId/);
   });
 
-  it('createAdapter for gateway mode needs no credentials', async () => {
+  it('saveConfig merges non-secret patches (appId, domain, accountId) into the snapshot used by createAdapter', async () => {
     stubStart();
     try {
       const definition = createLarkDefinition({
-        config: makeConfig({ upstream: { mode: 'gateway' } }),
-        credentials: { resolve: async () => undefined, describe: async () => ({ configured: false, writable: true }), set: async () => {} },
-      });
-      const adapter = await definition.createAdapter();
-      expect(adapter).toBeInstanceOf(LarkAdapter);
-    } finally {
-      vi.restoreAllMocks();
-    }
-  });
-
-  it('saveConfig merges non-secret patches (appId, domain, mode, accountId) into the snapshot used by createAdapter', async () => {
-    stubStart();
-    try {
-      const definition = createLarkDefinition({
-        config: makeConfig({ upstream: { mode: 'sdk', appId: 'cli_old' } }),
+        config: makeConfig({ upstream: { appId: 'cli_old' } }),
         deps: { sdkClient: fakeClient, openApiClient: fakeOpenApi },
         credentials: {
           resolve: async (ref) => ({ value: ref === LARK_APP_SECRET_REF ? 'secret' : undefined, source: 'test' }),
@@ -281,7 +266,7 @@ describe('lark ChannelDefinition', () => {
   it('persists appId changes and a transactional restore without touching credentials', async () => {
     const persistSetup = vi.fn(async () => {});
     const definition = createLarkDefinition({
-      config: makeConfig({ upstream: { mode: 'sdk', appId: 'cli_old' } }),
+      config: makeConfig({ upstream: { appId: 'cli_old' } }),
       credentials: {
         resolve: async () => undefined,
         describe: async () => ({ configured: false, writable: true }),
@@ -311,7 +296,7 @@ describe('channel-lark apply() with channel-control present', () => {
     });
 
     try {
-      apply(ctx, makeConfig({ upstream: { mode: 'sdk', appId: 'cli_abc' } }));
+      apply(ctx, makeConfig({ upstream: { appId: 'cli_abc' } }));
       await new Promise((r) => setTimeout(r, 0));
       expect(registered).toHaveLength(1);
       expect(registered[0]?.id).toBe('lark');
@@ -323,35 +308,14 @@ describe('channel-lark apply() with channel-control present', () => {
   });
 });
 
-describe('channel-lark apply() legacy AppSecret migration', () => {
-  it('writes legacy plaintext appSecret into credentials once and deletes it', async () => {
-    const ctx = new Context();
-    new ChannelService(ctx);
-    const creds = new FakeCredentials(ctx);
-    // Avoid mounting a real SDK connection in the standalone fallback; stub start.
-    stubStart();
-    const legacyConfig = makeConfig({
-      upstream: { mode: 'sdk', appId: 'cli_abc' },
-    });
-    legacyConfig.upstream.appSecret = 'legacy-plaintext-secret';
-
-    apply(ctx, legacyConfig);
-    await new Promise((r) => setTimeout(r, 20));
-
-    expect(creds.sets.map((s) => s.ref)).toEqual([LARK_APP_SECRET_REF]);
-    expect(creds.sets[0]?.value).toBe('legacy-plaintext-secret');
-    expect(legacyConfig.upstream.appSecret).toBeUndefined();
-  });
-});
-
 describe('channel-lark apply() without channel-control (standalone fallback)', () => {
-  it('does not throw and does not mount when SDK mode is unconfigured', async () => {
+  it('does not throw and does not mount when the adapter is unconfigured', async () => {
     const ctx = new Context();
     new ChannelService(ctx);
     new FakeCredentials(ctx); // empty — no appSecret
     stubStart();
     try {
-      expect(() => apply(ctx, makeConfig({ upstream: { mode: 'sdk', appId: 'cli_abc' } }))).not.toThrow();
+      expect(() => apply(ctx, makeConfig({ upstream: { appId: 'cli_abc' } }))).not.toThrow();
       await new Promise((r) => setTimeout(r, 20));
       expect(ctx.channels.get('lark')).toBeUndefined();
     } finally {
@@ -365,7 +329,7 @@ describe('channel-lark apply() without channel-control (standalone fallback)', (
     new FakeCredentials(ctx, { DSH_CHANNEL_LARK_MAIN_APP_SECRET: 'cli_secret' });
     stubStart();
     try {
-      apply(ctx, makeConfig({ upstream: { mode: 'sdk', appId: 'cli_appid' } }));
+      apply(ctx, makeConfig({ upstream: { appId: 'cli_appid' } }));
       await new Promise((r) => setTimeout(r, 0));
       await new Promise((r) => setTimeout(r, 0));
       expect(ctx.channels.get('lark')).toBeInstanceOf(LarkAdapter);

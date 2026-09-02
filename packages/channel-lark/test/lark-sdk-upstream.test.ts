@@ -1,10 +1,10 @@
 /**
- * SDK upstream driver tests (offline, fake WS client).
+ * SDK upstream driver tests (offline, fake WS client + fake OpenAPI outbound).
  *
  * Covers the `LarkSdkUpstream` inbound path: event registration, v1 message
- * event → gateway raw shape mapping, the full inbound pipeline to a
+ * event → canonical raw mapping, the full inbound pipeline to a
  * MessageReceived (dm + group + thread reply), start/stop connect/disconnect,
- * abort-driven teardown, outbound delegation to the HTTP transport, and the
+ * abort-driven teardown, outbound delegation to the OpenAPI driver, and the
  * credentials-never-leak guarantee. Events flow through a REAL SDK
  * `EventDispatcher` (pure logic, no network) driven by a fake WS client, so
  * the SDK's v1 parse/merge path is exercised offline. No real WebSocket or
@@ -16,45 +16,21 @@ import { ChannelService, ChannelError, type InteractionReceived, type MessageRec
 import { createTestContext } from '@wsz987/channel-testkit';
 import {
   LarkSdkUpstream,
-  HttpLarkUpstream,
+  LarkOpenApiOutbound,
   InboundProcessor,
   CARD_ACTION_EVENT_KEY,
-  toGatewayInteraction,
-  toGatewayRaw,
+  mapSdkCardAction,
+  mapSdkMessageEvent,
   MESSAGE_EVENT_KEY,
 } from '../src/index.ts';
 import type {
   LarkSdkClient,
   LarkSdkDispatcher,
   LarkMessageEventData,
+  LarkOpenApiClient,
+  LarkUpstream,
+  LarkOutbound,
 } from '../src/index.ts';
-import type { HttpTransport, HttpRequestInit } from '../src/index.ts';
-import type { CardCreateResult, LarkUpstream } from '../src/index.ts';
-
-/** Deterministic fake transport: routes keyed by path, records calls. */
-class FakeTransport implements HttpTransport {
-  routes = new Map<string, (init?: HttpRequestInit, signal?: AbortSignal) => unknown>();
-  calls: { path: string; init?: HttpRequestInit }[] = [];
-
-  route(path: string, handler: (init?: HttpRequestInit, signal?: AbortSignal) => unknown): this {
-    this.routes.set(path, handler);
-    return this;
-  }
-
-  request(path: string, init: HttpRequestInit = {}, signal?: AbortSignal): Promise<unknown> {
-    this.calls.push({ path, init });
-    if (signal?.aborted) {
-      return Promise.reject(new DOMException('Aborted', 'AbortError'));
-    }
-    const handler = this.routes.get(path);
-    if (!handler) return Promise.reject(new ChannelError('CHANNEL_ERROR', `no route for ${path}`));
-    try {
-      return Promise.resolve(handler(init, signal));
-    } catch (error) {
-      return Promise.reject(error);
-    }
-  }
-}
 
 /** Trivial outbound delegate for receive-focused tests. */
 class FakeOutbound implements LarkUpstream {
@@ -78,25 +54,82 @@ class FakeOutbound implements LarkUpstream {
     return Promise.resolve({});
   }
 
-  createCard(): Promise<CardCreateResult> {
-    return Promise.resolve({ cardId: 'fake-card' });
-  }
-
-  updateCard(): Promise<unknown> {
-    return Promise.resolve({});
-  }
-
-  finishCard(): Promise<unknown> {
-    return Promise.resolve({});
-  }
-
-  failCard(): Promise<unknown> {
-    return Promise.resolve({});
-  }
-
   updateInteractive(): Promise<unknown> {
     return Promise.resolve({});
   }
+
+  createCardEntity(): Promise<{ cardId: string }> {
+    return Promise.resolve({ cardId: 'cc-fake' });
+  }
+
+  sendCardEntity(): Promise<{ messageId: string }> {
+    return Promise.resolve({ messageId: 'om-fake' });
+  }
+
+  updateCardElementContent(): Promise<unknown> {
+    return Promise.resolve({});
+  }
+
+  finishStreamingCard(): Promise<unknown> {
+    return Promise.resolve({});
+  }
+}
+
+/** Fake OpenAPI client used by outbound-delegation tests. */
+class FakeOpenApiClient implements LarkOpenApiClient {
+  calls: { method: string; payload?: unknown }[] = [];
+  createResult: { code?: number; data?: { message_id?: string } } = {
+    code: 0,
+    data: { message_id: 'om_out_1' },
+  };
+
+  im = {
+    v1: {
+      message: {
+        create: async (payload: unknown) => {
+          this.calls.push({ method: 'message.create', payload });
+          return this.createResult;
+        },
+        patch: async (payload: unknown) => {
+          this.calls.push({ method: 'message.patch', payload });
+          return { code: 0 };
+        },
+      },
+      image: {
+        create: async (payload: unknown) => {
+          this.calls.push({ method: 'image.create', payload });
+          return { image_key: 'img_v2_out' };
+        },
+      },
+      file: {
+        create: async (payload: unknown) => {
+          this.calls.push({ method: 'file.create', payload });
+          return { file_key: 'file_v2_out' };
+        },
+      },
+    },
+  };
+
+  cardkit = {
+    v1: {
+      card: {
+        create: async (payload: unknown) => {
+          this.calls.push({ method: 'cardkit.card.create', payload });
+          return { code: 0, data: { card_id: 'cc_out_1' } };
+        },
+        settings: async (payload: unknown) => {
+          this.calls.push({ method: 'cardkit.card.settings', payload });
+          return { code: 0 };
+        },
+      },
+      cardElement: {
+        content: async (payload: unknown) => {
+          this.calls.push({ method: 'cardkit.cardElement.content', payload });
+          return { code: 0 };
+        },
+      },
+    },
+  };
 }
 
 /**
@@ -188,13 +221,13 @@ function cardActionEvent(): Record<string, unknown> {
   };
 }
 
-function sdkUpstream(client: LarkSdkClient, outbound: LarkUpstream): LarkSdkUpstream {
+function sdkUpstream(client: LarkSdkClient, outbound: LarkOutbound): LarkSdkUpstream {
   return new LarkSdkUpstream({ client, outbound });
 }
 
-describe('toGatewayRaw (v1 message event → gateway raw shape)', () => {
+describe('mapSdkMessageEvent (v1 message event → canonical raw)', () => {
   it('accepts null optional identity fields from live Feishu events', () => {
-    const raw = toGatewayRaw(flatEvent({
+    const raw = mapSdkMessageEvent(flatEvent({
       sender: {
         sender_id: { open_id: 'ou_user123', union_id: null, user_id: null },
         sender_type: 'user',
@@ -221,8 +254,8 @@ describe('toGatewayRaw (v1 message event → gateway raw shape)', () => {
     });
   });
 
-  it('maps a text dm event to the gateway raw shape', () => {
-    const raw = toGatewayRaw(flatEvent({
+  it('maps a text dm event to the canonical raw', () => {
+    const raw = mapSdkMessageEvent(flatEvent({
       message: {
         message_id: 'om_dm1',
         chat_id: 'oc_dm_chat',
@@ -244,7 +277,7 @@ describe('toGatewayRaw (v1 message event → gateway raw shape)', () => {
   });
 
   it('maps a group thread reply with parent_id into threadId', () => {
-    const raw = toGatewayRaw(flatEvent({
+    const raw = mapSdkMessageEvent(flatEvent({
       message: {
         message_id: 'om_reply1',
         chat_id: 'oc_conv1',
@@ -261,7 +294,7 @@ describe('toGatewayRaw (v1 message event → gateway raw shape)', () => {
   });
 
   it('prefers thread_id over root_id over parent_id for the thread reference', () => {
-    const raw = toGatewayRaw(flatEvent({
+    const raw = mapSdkMessageEvent(flatEvent({
       message: {
         message_id: 'om_reply2',
         chat_id: 'oc_conv1',
@@ -278,7 +311,7 @@ describe('toGatewayRaw (v1 message event → gateway raw shape)', () => {
   });
 
   it('maps media messages best-effort (image/audio/video/file)', () => {
-    const image = toGatewayRaw(flatEvent({
+    const image = mapSdkMessageEvent(flatEvent({
       message: {
         message_id: 'om_img',
         chat_id: 'oc_1',
@@ -290,7 +323,7 @@ describe('toGatewayRaw (v1 message event → gateway raw shape)', () => {
     }));
     expect(image).toMatchObject({ type: 'image', picUrl: 'img_v2_abc' });
 
-    const audio = toGatewayRaw(flatEvent({
+    const audio = mapSdkMessageEvent(flatEvent({
       message: {
         message_id: 'om_audio',
         chat_id: 'oc_1',
@@ -302,7 +335,7 @@ describe('toGatewayRaw (v1 message event → gateway raw shape)', () => {
     }));
     expect(audio).toMatchObject({ type: 'audio', mediaUrl: 'file_v2_a', durationMs: 5200 });
 
-    const video = toGatewayRaw(flatEvent({
+    const video = mapSdkMessageEvent(flatEvent({
       message: {
         message_id: 'om_video',
         chat_id: 'oc_1',
@@ -314,7 +347,7 @@ describe('toGatewayRaw (v1 message event → gateway raw shape)', () => {
     }));
     expect(video).toMatchObject({ type: 'video', mediaUrl: 'file_v2_v', durationMs: 9000 });
 
-    const file = toGatewayRaw(flatEvent({
+    const file = mapSdkMessageEvent(flatEvent({
       message: {
         message_id: 'om_file',
         chat_id: 'oc_1',
@@ -328,15 +361,15 @@ describe('toGatewayRaw (v1 message event → gateway raw shape)', () => {
   });
 
   it('falls back to union_id when open_id is absent', () => {
-    const raw = toGatewayRaw(flatEvent({
+    const raw = mapSdkMessageEvent(flatEvent({
       sender: { sender_id: { union_id: 'on_only' }, sender_type: 'user' },
     }));
     expect(raw).toMatchObject({ senderId: 'on_only' });
   });
 
   it('returns undefined when the event carries no message body', () => {
-    expect(toGatewayRaw({ event_id: 'evt-x' })).toBeUndefined();
-    expect(toGatewayRaw({ event_id: 'evt-x', message: undefined })).toBeUndefined();
+    expect(mapSdkMessageEvent({ event_id: 'evt-x' })).toBeUndefined();
+    expect(mapSdkMessageEvent({ event_id: 'evt-x', message: undefined })).toBeUndefined();
   });
 });
 
@@ -373,7 +406,7 @@ describe('LarkSdkUpstream.receive', () => {
 
   it('fails closed when the official chat mode cannot be resolved for a card action', async () => {
     const raw = cardActionEvent();
-    await expect(toGatewayInteraction(raw.event, async () => undefined)).resolves.toBeUndefined();
+    await expect(mapSdkCardAction(raw.event, async () => undefined)).resolves.toBeUndefined();
   });
 
   it('routes an SDK-normalized action through InboundProcessor as interaction.received', async () => {
@@ -635,55 +668,42 @@ describe('LarkSdkUpstream.receive', () => {
   });
 });
 
-describe('LarkSdkUpstream outbound (delegated to the HTTP driver)', () => {
-  it('delegates sendText and sendMedia to the outbound upstream', async () => {
-    const transport = new FakeTransport();
-    transport.route('/message/send', () => ({ id: 'out-1' }));
-    const http = new HttpLarkUpstream({ transport, longPollTimeoutMs: 1000 });
-    const upstream = sdkUpstream(new FakeWsClient(), http);
+describe('LarkSdkUpstream outbound (delegated to the OpenAPI driver)', () => {
+  it('delegates sendText/sendMedia/sendFile to the OpenAPI outbound', async () => {
+    const openApi = new FakeOpenApiClient();
+    const outbound = new LarkOpenApiOutbound({ client: openApi });
+    const upstream = sdkUpstream(new FakeWsClient(), outbound);
 
-    await expect(upstream.sendText('oc_456', 'hello')).resolves.toEqual({ id: 'out-1' });
+    await expect(upstream.sendText('oc_456', 'hello')).resolves.toMatchObject({ code: 0 });
     await expect(
-      upstream.sendMedia('oc_456', { type: 'image', url: 'https://x/p.png', alt: 'pic' }),
-    ).resolves.toEqual({ id: 'out-1' });
+      upstream.sendMedia('oc_456', { type: 'image', dataUri: 'data:image/png;base64,aGVsbG8=' }),
+    ).resolves.toMatchObject({ code: 0 });
     await expect(
       upstream.sendFile('oc_456', { type: 'file', localData: new Uint8Array([1, 2]), name: 'a.bin' }),
-    ).resolves.toEqual({ id: 'out-1' });
-    expect(transport.calls.map((c) => c.path)).toEqual(['/message/send', '/message/send', '/message/send']);
-    expect(transport.calls[0]?.init?.body).toEqual({ to: 'oc_456', type: 'text', content: 'hello' });
-    expect(transport.calls[1]?.init?.body).toEqual({
-      to: 'oc_456',
-      type: 'image',
-      url: 'https://x/p.png',
-      name: 'pic',
-    });
-    // M7A: generic file delegation posts the bytes + name to the gateway.
-    expect(transport.calls[2]?.init?.body).toMatchObject({
-      to: 'oc_456',
-      type: 'file',
-      name: 'a.bin',
-      data: [1, 2],
-    });
+    ).resolves.toMatchObject({ code: 0 });
+    expect(openApi.calls.map((c) => c.method)).toEqual([
+      'message.create',
+      'image.create',
+      'message.create',
+      'file.create',
+      'message.create',
+    ]);
   });
 
-  it('delegates card operations to the outbound upstream', async () => {
-    const transport = new FakeTransport();
-    transport.route('/card/create', () => ({ cardId: 'card-1' }));
-    transport.route('/card/update', () => ({ ok: true }));
-    transport.route('/card/finish', () => ({ ok: true }));
-    transport.route('/card/fail', () => ({ ok: true }));
-    const http = new HttpLarkUpstream({ transport, longPollTimeoutMs: 1000 });
-    const upstream = sdkUpstream(new FakeWsClient(), http);
+  it('delegates CardKit entity + streaming operations to the OpenAPI outbound', async () => {
+    const openApi = new FakeOpenApiClient();
+    const outbound = new LarkOpenApiOutbound({ client: openApi });
+    const upstream = sdkUpstream(new FakeWsClient(), outbound);
 
-    await expect(upstream.createCard('oc_456', 'hi')).resolves.toEqual({ cardId: 'card-1' });
-    await upstream.updateCard('card-1', 'hi 2');
-    await upstream.finishCard('card-1');
-    await upstream.failCard('card-1', 'boom');
-    expect(transport.calls.map((c) => c.path)).toEqual([
-      '/card/create',
-      '/card/update',
-      '/card/finish',
-      '/card/fail',
+    await expect(upstream.createCardEntity('{"schema":"2.0"}')).resolves.toEqual({ cardId: 'cc_out_1' });
+    await expect(upstream.sendCardEntity('oc_456', 'cc_out_1')).resolves.toEqual({ messageId: 'om_out_1' });
+    await upstream.updateCardElementContent('cc_out_1', 'stream_md', 'hi', 1, 'c_cc_out_1_1');
+    await upstream.finishStreamingCard('cc_out_1', 2, 'hi');
+    expect(openApi.calls.map((c) => c.method)).toEqual([
+      'cardkit.card.create',
+      'message.create',
+      'cardkit.cardElement.content',
+      'cardkit.card.settings',
     ]);
   });
 });

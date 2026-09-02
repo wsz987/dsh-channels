@@ -18,13 +18,11 @@ function makeConfig(overrides: Partial<LarkConfig> = {}): LarkConfig {
   return Config({
     enabled: true,
     accountId: 'main',
-    baseUrl: 'http://fake',
     timeoutMs: 1000,
-    longPollTimeoutMs: 1000,
     reconnect: { enabled: false, baseDelayMs: 1, maxDelayMs: 10, maxRetries: 2 },
     dedup: { enabled: true, windowMs: 5000 },
     card: { createOnFirstDelta: true },
-    upstream: { mode: 'gateway' },
+    upstream: { appId: 'cli_default' },
     ...overrides,
   });
 }
@@ -58,6 +56,7 @@ describe('channel-lark transactional mount', () => {
   it('start() rejection rolls back: registry empty, signal aborted, stop() called', async () => {
     const ctx = new Context();
     new ChannelService(ctx);
+    new FakeCredentials(ctx, { DSH_CHANNEL_LARK_MAIN_APP_SECRET: 'cli_secret' });
 
     let capturedSignal: AbortSignal | undefined;
     const stop = vi.spyOn(LarkAdapter.prototype, 'stop').mockImplementation(async function () {
@@ -71,9 +70,10 @@ describe('channel-lark transactional mount', () => {
     );
 
     try {
-      apply(ctx, makeConfig());
+      apply(ctx, makeConfig({ upstream: { appId: 'cli_appid' } }));
       // The mount effect registers the adapter, then start() rejects; the
       // rollback (abort + stop + unregister) runs as the rejection settles.
+      await tick();
       await tick();
       await tick();
 
@@ -98,7 +98,7 @@ describe('channel-lark credential resolution (SDK mode, standalone fallback)', (
     });
 
     try {
-      apply(ctx, makeConfig({ upstream: { mode: 'sdk', appId: 'cli_appid' } }));
+      apply(ctx, makeConfig({ upstream: { appId: 'cli_appid' } }));
       await tick();
       await tick();
       await tick();
@@ -119,7 +119,7 @@ describe('channel-lark credential resolution (SDK mode, standalone fallback)', (
     });
 
     try {
-      apply(ctx, makeConfig({ upstream: { mode: 'sdk', appId: 'cli_appid' } }));
+      apply(ctx, makeConfig({ upstream: { appId: 'cli_appid' } }));
       await tick();
       await tick();
       await tick();
