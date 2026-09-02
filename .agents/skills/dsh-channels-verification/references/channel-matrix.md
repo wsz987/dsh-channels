@@ -164,11 +164,13 @@ upstream.appSecretRef = DSH_CHANNEL_LARK_MAIN_APP_SECRET
 upstream.domain = feishu
 ```
 
-Fail-closed legacy guard (validation-time only):
+Fail-closed config governance:
 
 ```text
-upstream.mode: 'gateway'   → rejected (fails config validation)
-upstream.appSecret (non-empty plaintext) → rejected with a migration hint
+upstream.mode: 'gateway'    → rejected (fails config validation, mode is a fixed 'sdk' literal)
+upstream.appSecret          → not part of the config schema; the secret is resolved only via
+                              upstream.appSecretRef from ctx.credentials (no plaintext field,
+                              no runtime migration)
 ```
 
 ### Telegram
