@@ -3,7 +3,7 @@
 ## 概述
 
 - **功能**：Weixin QR/会话可靠性、入站媒体、引用消息、出站图片/文件/视频
-- **需求来源**：`docs/dsh-channels-weixin-gap-execution-plan.md` Phase 0-4
+- **需求来源**：Weixin 功能差距补齐执行方案（Phase 0-4，方案文档已随实现落地归档删除；功能与验收见 `docs/channel-platform-verification.md` 与 `docs/weixin-live-verification-runbook.md`）
 - **上游基线**：`Tencent/openclaw-weixin@2.4.6`，commit `cef0bfc390393f716903e16d50408118047f87e0`
 - **测试环境**：真实微信账号、手机、生产 iLink endpoint
 - **最后更新**：2026-08-23
