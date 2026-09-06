@@ -39,6 +39,12 @@ export interface DingTalkCardConfig {
    * `false`, deltas buffer locally and the card is only created at `finish`.
    */
   createOnFirstDelta: boolean;
+  /** Optional Card Platform template used for Harness interactive actions. */
+  interactiveTemplateId?: string;
+  /** Template variable carrying the card body text. */
+  interactiveTextParam: string;
+  /** Template variable carrying serialized button definitions. */
+  interactiveActionsParam: string;
 }
 
 /**
@@ -101,6 +107,9 @@ export const Config: Schema<DingTalkConfig> = Schema.object({
   }),
   card: Schema.object({
     createOnFirstDelta: Schema.boolean().default(true),
+    interactiveTemplateId: Schema.string(),
+    interactiveTextParam: Schema.string().default('text'),
+    interactiveActionsParam: Schema.string().default('actions'),
   }),
   upstream: Schema.object({
     mode: Schema.union(['sdk', 'gateway']).default('sdk'),

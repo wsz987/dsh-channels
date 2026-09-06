@@ -18,6 +18,7 @@ import type {
   MessageId,
   MessagePart,
   MessageReceived,
+  InteractionReceived,
   OutboundMessage,
   SenderId,
 } from '@wsz987/channel-core';
@@ -114,6 +115,33 @@ export function mapInbound(raw: unknown, meta: DingTalkInboundMeta): MessageRece
       createdAt: Date.now(),
       ...(value.mentionedBot !== undefined ? { activation: { mentionedBot: value.mentionedBot } } : {}),
     },
+    raw,
+  };
+}
+
+export function mapInteraction(raw: unknown, meta: DingTalkInboundMeta): InteractionReceived {
+  const parsed = z.object({
+    type: z.literal('interaction'),
+    senderId: z.string().min(1),
+    conversationId: z.string().min(1),
+    conversationType: z.string().optional(),
+    interactionId: z.string().min(1),
+    action: z.string().min(1),
+    value: z.unknown().optional(),
+  }).passthrough().safeParse(raw);
+  if (!parsed.success) throw new ChannelError('CHANNEL_ERROR', 'dingtalk interaction payload is invalid');
+  return {
+    type: 'interaction.received',
+    channel: meta.channel,
+    accountId: meta.accountId,
+    conversation: {
+      id: parsed.data.conversationId as ConversationId,
+      type: parsed.data.conversationType === '2' ? 'group' : 'dm',
+    },
+    sender: { id: parsed.data.senderId as SenderId },
+    interactionId: parsed.data.interactionId,
+    action: parsed.data.action,
+    value: parsed.data.value,
     raw,
   };
 }

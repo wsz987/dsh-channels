@@ -48,6 +48,14 @@ function fakePort(): { port: DingTalkOpenApiPort; proactiveCalls: unknown[] } {
       proactiveCalls.push({ kind: 'sendMedia', input });
       return { messageId: 'pm_2', raw: {} };
     },
+    async sendInteractiveCard(input) {
+      proactiveCalls.push({ kind: 'sendInteractiveCard', input });
+      return { outTrackId: 'action_1', raw: {} };
+    },
+    async updateInteractiveCard(input) {
+      proactiveCalls.push({ kind: 'updateInteractiveCard', input });
+      return { ok: true };
+    },
     async getAccessToken() {
       return 'token-1';
     },
@@ -83,6 +91,24 @@ class FakeStreamClient implements DingTalkStreamClient {
 }
 
 describe('OutboundSender — REPLY vs PROACTIVE split', () => {
+  it('sends interactive actions through the official card port and edits by outTrackId', async () => {
+    const reply = new FakeReplyUpstream();
+    const { port, proactiveCalls } = fakePort();
+    const sender = new OutboundSender({
+      reply,
+      logger: silentLogger as never,
+      proactive: port,
+      capabilities: { proactiveText: true, proactiveMedia: true },
+      interactiveTemplateId: 'template-1.schema',
+    });
+    const message = { text: '请选择', actions: [{ actions: [{ id: 'continue', label: '继续' }] }] };
+    const sent = await sender.send(targetWith({ robotCode: 'ding-app' }), message);
+    expect(sent.messageId).toBe('action_1');
+    expect((proactiveCalls[0] as { kind: string }).kind).toBe('sendInteractiveCard');
+    await sender.edit(targetWith({ robotCode: 'ding-app' }), 'action_1', { text: '已选择继续', actions: [] });
+    expect((proactiveCalls[1] as { kind: string }).kind).toBe('updateInteractiveCard');
+  });
+
   it('a target WITH a sessionWebhook reply goes through the sessionWebhook path', async () => {
     const reply = new FakeReplyUpstream();
     const { port, proactiveCalls } = fakePort();

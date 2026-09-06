@@ -134,6 +134,23 @@ export interface DingTalkOpenApiPort {
   /** Send an uploaded mediaId as a robot image/file message. */
   sendMedia(input: MediaSendInput): Promise<RobotMessageSendResult>;
 
+  sendInteractiveCard(input: {
+    target: ChannelTarget;
+    templateId: string;
+    text: string;
+    actions: import('@wsz987/channel-core').OutboundActionRow[];
+    textParam: string;
+    actionsParam: string;
+  }): Promise<{ messageId?: string; outTrackId: string; raw?: unknown }>;
+
+  updateInteractiveCard(input: {
+    outTrackId: string;
+    text: string;
+    actions: import('@wsz987/channel-core').OutboundActionRow[];
+    textParam: string;
+    actionsParam: string;
+  }): Promise<unknown>;
+
   /** Create an AI Card with initial content. */
   createCard(target: ChannelTarget, text: string): Promise<{ cardId: string }>;
 

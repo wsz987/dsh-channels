@@ -83,6 +83,7 @@ export {
 export {
   DingTalkStreamUpstream,
   ackRobotMessage,
+  toCardInteractionRaw,
   toGatewayRaw,
   type DingTalkStreamClient,
   type DingTalkStreamMessage,

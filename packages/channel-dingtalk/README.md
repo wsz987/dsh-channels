@@ -39,6 +39,11 @@ SDK mode:
       # 真实 AppSecret 只存 ctx.credentials
     card:
       createOnFirstDelta: true
+      # 卡片平台模板 ID（启用 OutboundMessage.actions 所必需）
+      interactiveTemplateId: "your-template.schema"
+      # 下面两个变量名必须与模板中的变量绑定一致
+      interactiveTextParam: text
+      interactiveActionsParam: actions
 ```
 
 Gateway mode (legacy, self-hosted HTTP gateway):
@@ -65,12 +70,29 @@ the credentials seam once and then deleted.
 DingTalk uses `edit` streaming: the adapter creates an AI Card, updates it with
 each delta, and finalizes (or marks it failed) at turn end.
 
+## Interactive buttons
+
+`OutboundMessage.actions` uses the official interactive-card APIs:
+
+- `POST /v1.0/im/interactiveCards/send`
+- `PUT /v1.0/im/interactiveCards`
+- Stream callback topic `/v1.0/card/instances/callback`
+
+This is not the legacy webhook `actionCard` API, whose buttons only open URLs
+and cannot return a selection to the Harness. Create and publish a Card
+Platform template first, configure its text/action variables to match the
+names above, and configure each button to return `cardPrivateData.params.action`
+(the action id). Without a template ID the adapter advertises interactive
+actions as unavailable and fails closed instead of silently sending a URL-only
+card.
+
 ## Capabilities
 
 | Capability | Value |
 | --- | --- |
 | text / image / file / audio | ✅ |
 | markdown / cards | ✅ |
+| interactive actions | ✅ when `interactiveTemplateId` is configured |
 | video / reactions / threads | ❌ |
 | streaming | `edit` (AI Card) |
 

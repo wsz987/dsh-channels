@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Context } from '@deepseek-ai/cordis';
-import { TOPIC_ROBOT } from 'dingtalk-stream';
+import { TOPIC_CARD, TOPIC_ROBOT } from 'dingtalk-stream';
 import { ChannelService, ChannelError, mediaCapabilitiesSchema, type MessageReceived } from '@wsz987/channel-core';
 import {
   runChannelAdapterContract,
@@ -671,10 +671,10 @@ describe('DingTalkAdapter SDK mode (fake stream client)', () => {
     const a = sdkAdapter(client);
     await a.start(ctx);
     await vi.waitFor(() => expect(client.connects).toBe(1), { timeout: 2000 });
-    expect(client.registered).toEqual([TOPIC_ROBOT]);
+    expect(client.registered).toEqual([TOPIC_ROBOT, TOPIC_CARD]);
     await a.stop();
     expect(client.disconnects).toBe(1);
-    expect(client.registered).toEqual([TOPIC_ROBOT]);
+    expect(client.registered).toEqual([TOPIC_ROBOT, TOPIC_CARD]);
   });
 
   it('delivers SDK inbound robot messages to MessageReceived', async () => {
