@@ -156,6 +156,39 @@ export interface ChannelHarnessBridgeOptions {
   questionPresenter?: ChannelQuestionPresenter;
 }
 
+/**
+ * Error historically raised when a Workspace attach failed inside fresh Session
+ * creation. Workspace attach is now non-fatal: the freshly-created session is
+ * kept (grouped as ungrouped) and the binding + followup continue, so the
+ * bridge no longer produces this error.
+ *
+ * @deprecated Workspace attachment failures are non-fatal and no longer raise
+ * this error. Retained as a public export for compatibility with existing
+ * imports; do not add new uses.
+ */
+export class ChannelWorkspaceAttachError extends Error {
+  readonly sessionId: string;
+  readonly workspaceId: string;
+  readonly cwd: string;
+  readonly channelId: string;
+  readonly accountId: string;
+  constructor(input: {
+    sessionId: string;
+    workspaceId: string;
+    cwd: string;
+    channelId: string;
+    accountId: string;
+  }) {
+    super(`channel session '${input.sessionId}' could not attach to workspace '${input.workspaceId}'`);
+    this.name = 'ChannelWorkspaceAttachError';
+    this.sessionId = input.sessionId;
+    this.workspaceId = input.workspaceId;
+    this.cwd = input.cwd;
+    this.channelId = input.channelId;
+    this.accountId = input.accountId;
+  }
+}
+
 export class ChannelHarnessBridge {
   private readonly sessionFactory: ChannelSessionFactory;
   private readonly commandDisposers = new Set<ChannelCommandDisposer>();
