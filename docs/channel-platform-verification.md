@@ -12,6 +12,7 @@ metadata:
   branch: main
   snapshot_commit: 78655a40a266c4122ecd0c030b0a882fdb92f2df
   snapshot_date: 2026-08-19
+  synced_date: 2026-09-12
 ---
 
 # DSH Channels Verification Skill
@@ -20,6 +21,11 @@ metadata:
 > `references/*`）**配套并存**，两者交叉核对以**防止平台权限/能力漂移**——Skill 目录是
 > 可被 agent 加载的可执行指引，本文是同一核验内容的持久化快照，用于跨会话检索与
 > 权限基线对照。发现二者不一致时以当前代码 + 官方平台文档为准。
+
+> **同步记录（2026-09-12）**：初版快照为 `78655a40`（2026-08-19）。本次把快照同步到
+> 当前代码：补 Lark CardKit 2.0 接口与 L1-L5 live gate、QQ 内联键盘、DingTalk 问答卡片
+> opt-in 口径，并记录两条 P0 核验发现（answerer 顺序契约、能力声明 ≠ 平台事实）。
+> 快照基线 SHA 保持初版，便于判断哪些结论早于该 SHA。
 
 > **快照基线**：`main@78655a40a266c4122ecd0c030b0a882fdb92f2df`（2026-08-19）。
 >
@@ -123,8 +129,8 @@ DeepSeek Harness / Cordis
 | 渠道 | DSH 包 | 上游策略 | 当前基线 | manifest 状态 | Setup/Auth | 主要能力 |
 |---|---|---|---|---|---|---|
 | Weixin | `@wsz987/channel-weixin` | Tencent iLink `source-port` | upstream fixture `2.4.6`，manifest live pin 待完成 | `experimental` | 无 setup 字段；QR | text/image；buffered |
-| QQ | `@wsz987/channel-qq` | Tencent 官方 SDK | `@tencent-connect/qqbot-nodejs@1.0.4` | `tested`* | AppID + AppSecret | text/image/file/audio/video；C2C native stream |
-| DingTalk | `@wsz987/channel-dingtalk` | 官方 Stream SDK + OpenAPI | `dingtalk-stream@2.1.5` | `tested`* | ClientID + ClientSecret；device/credentials | text/image/file/audio/cards；edit stream |
+| QQ | `@wsz987/channel-qq` | Tencent 官方 SDK | `@tencent-connect/qqbot-nodejs@1.0.4` | `tested`* | AppID + AppSecret | text/image/file/audio/video；C2C native stream；内联键盘 |
+| DingTalk | `@wsz987/channel-dingtalk` | 官方 Stream SDK + OpenAPI | `dingtalk-stream@2.1.5` | `tested`* | ClientID + ClientSecret；device/credentials | text/image/file/audio/cards；edit stream；问答按钮 opt-in |
 | Lark/Feishu | `@wsz987/channel-lark` | 官方 Node SDK | `@larksuiteoapi/node-sdk@1.73.1` | `tested`* | AppID + AppSecret；credentials/hybrid | text/image/file/audio/cards/reactions/threads/interactive actions；edit stream |
 | Telegram | `@wsz987/channel-telegram` | Bot API HTTP 直连 | manifest `Bot API >=10.2` | `experimental` | Bot token | text/image/file/audio/video/threads；Rich Markdown + streaming |
 
@@ -226,25 +232,49 @@ Tenant / 应用身份权限：
 - card.action.trigger（原生卡片按钮）
 ```
 
-当前实现还使用：
+当前实现还使用（全量走官方 Node SDK）：
 
 ```text
 im.v1.image.create
 im.v1.file.create
-im.v1.message.patch
+im.v1.messageResource.get        # 入站资源下载
 im.v1.chat.get（卡片按钮回调的会话类型确认）
 message reaction add/remove（Typing）
+im.v1.message.patch              # 重写已发送的交互卡片（非流式）
+cardkit.v1.card.create           # Card JSON 2.0 卡片实体
+cardkit.v1.card.settings         # 关闭 streaming_mode + summary
+cardkit.v1.cardElement.content   # 原生流式打字机更新
 ```
+
+> 卡片/流式已收敛为官方 CardKit 2.0 生命周期：创建卡片实体 → 发送卡片引用 →
+> `cardElement.content`（单调 sequence + 稳定 uuid）→ `card.settings` 关闭流式。
+> 不得用 `im.v1.message.patch` 高频全量替换冒充原生打字机流式，也不用
+> `cardkit.v1.card.idConvert` 作为主路径（官方已不推荐）。
 
 因此继续核验：
 
 - 图片/文件资源上传权限
 - 卡片/消息 patch 所需权限
+- CardKit 对应权限（应用身份必须与创建卡片实体者一致）
 - `im.v1.chat.get` 所需的当前群信息读取权限（卡片按钮启用时，无法读取则 fail-closed）
 - `card.typingIndicator=true` 时 reaction 相关权限
 - 如果产品需要群聊中“非 @ 消息”，需申请对应的敏感“群组全部消息”权限，而不是只依赖 `group_at_msg`
 
 权限或事件修改后还要核验应用版本是否已发布生效。
+
+#### Feishu live gate 清单（LIVE-REQUIRED，离线通过 ≠ 平台通过）
+
+用专用测试租户与测试群，逐项记录：应用版本、租户、chat_id、message_id、时间、结果、平台错误码。
+
+| Gate | 必须验证 |
+| --- | --- |
+| L1 连接与入站 | WS 握手成功并收到 `im.message.receive_v1`；P2P 文本进入 canonical mapper；群聊 @ 文本可达（非 @ 需按产品策略单独验证，不得默认宣称支持）；`thread_id/root_id/parent_id` 映射正确 |
+| L2 普通出站与媒体 | 文本发送返回 `message_id`；图片上传/发送/入站下载；文件上传/发送/入站下载；音频/视频入站可下载（出站仍标 unsupported） |
+| L3 Card JSON 2.0 | 新建卡片实体返回 `card_id`；发送 card reference 成功；`cardElement.content` 连续更新 ≥20 次且 sequence 无乱序；结束 `streaming_mode=false` 且会话预览不再显示生成中；触发 30,000 字符 rollover 后续卡片仍可生成；错误路径可见且不泄露 secret/raw payload |
+| L4 交互与反应 | Card 2.0 button 回调收到 `card.action.trigger`；callback value 的 action 通过统一 interaction gate；`im.v1.chat.get` 失败时 interaction 被丢弃且无本地副作用；Typing reaction add/remove 成功，权限不足只产生可诊断错误 |
+| L5 安全与运维 | 浏览器 DTO / 配置 / 日志 / 错误不含 AppSecret、token、providerState；重启后 credentials ref 仍能构造 SDK client；WS 重连重复投递不产生重复 Harness session；应用未发布或 scope 缺失时 health/日志能区分连接失败与权限失败 |
+
+未完成 L1-L5 前，manifest 不得声称 live-tested。
 
 ### 6.2 QQ
 
@@ -292,6 +322,11 @@ new QQBot({
 - C2C 原生 `stream_messages` 只适合当前代码的 C2C + reply message id 场景
 - 群聊当前走 buffered send，不应误标为 native streaming
 
+**CODE-CONFIRMED**：QQ 声明 `interactiveActions: true`，`OutboundMessage.actions` 走新版
+QQ Markdown 内联键盘（`msg_type=2` + `markdown.content` + `keyboard`，callback action type
+`1`），按钮回调产生 canonical `interaction.received` 供 Harness 问题展示使用。该能力依赖
+QQ Bot 已获 Markdown/内联键盘资格，属 **LIVE-REQUIRED**。
+
 ### 6.3 DingTalk
 
 主要模型：
@@ -327,9 +362,14 @@ Media
 - POST /v1.0/robot/messageFiles/download
 
 AI Card
-- POST /v1.0/card/instances
+- POST /v1.0/card/instances          # 流式 AI Card（callbackType: STREAM）
 - POST /v1.0/card/instances/deliver
 - PUT  /v1.0/card/streaming
+
+问答卡片按钮（OPT-IN，需 card.interactiveTemplateId）
+- POST /v1.0/im/interactiveCards/send
+- PUT  /v1.0/im/interactiveCards
+- Stream 回调 topic /v1.0/card/instances/callback（dingtalk-stream TOPIC_CARD）
 ```
 
 核验平台时不能只验证 Stream 可以收消息，还必须逐项验证：
@@ -340,6 +380,15 @@ AI Card
 - AI Card create/deliver/streaming
 
 具体 OpenAPI 权限名称以**当次官方 API 文档的“权限要求”**为准，不要从旧博客或第三方镜像猜名字。
+
+**问答按钮是 opt-in 能力（CODE-CONFIRMED，重要纠错）**：协议支持卡片「回传请求」按钮 +
+STREAM 回调（官方要求创建卡片带 `callbackType="STREAM"` 且注册
+`/v1.0/card/instances/callback`），但按钮**要求卡片模板已在本组织卡片平台发布**且含
+`text`/`actions` 变量。因此 `capabilities.interactiveActions` **不再**由内置第三方模板默认
+开启：`card.interactiveTemplateId` 无默认值，未显式配置即 `false`，问题走编号文字回复
+（与微信一致）；配置了但卡片发送失败时，`channel-harness` 会把该批问题降级为文字而非取消。
+**LIVE-REQUIRED**：`POST /v1.0/im/interactiveCards/send` 是否接受 `callbackType`，以及卡片
+点击能否真的回到 STREAM 回调 topic。
 
 群消息 @ 激活：官方机器人回调提供 `isInAtList`。当前 DSH stream upstream 在 zod
 信任边界校验该字段，并映射为 `message.activation.mentionedBot`；缺失字段不作猜测。
@@ -420,6 +469,31 @@ getupdates / sendmessage / getuploadurl / getconfig / sendtyping
 ---
 
 ## 7. 当前优先级最高的核验发现
+
+### P0 — answerer 顺序是契约（渠道问答曾经全渠道失效）
+
+官方问题域是 `user-questions/request` **waterfall**：Cordis waterfall **串行、先认领者胜**，
+第一个返回答案的 listener 否决其后全部 listener，只有 `next()` 才委托。`dsh-scope` 只保证
+「未打 tag 的根 listener 一定被准入」，**不保证顺序**。官方 `@deepseek-ai/dsh-api-remotes`
+（web profile 开机即注册）早于 `channels-harness`，因此渠道 answerer 必须用
+`ctx.on('user-questions/request', h, { prepend: true })` 注册，否则：
+
+- 有浏览器连接：问题被 Web UI 认领并挂起，渠道（含微信文字兜底）收不到；
+- 无浏览器连接：请求 park 在 `pendingRemoteEvents`（无自动 `next()`），渠道同样收不到。
+
+渠道无法展示（无 binding / 无 active reply context / `text: false` / 该会话已有 pending）
+时仍 `next()` 委托 Web answerer；无人认领由官方以 `NO_PROVIDER` 拒绝。
+回归测试：`packages/channel-harness/test/question-waterfall-backend.test.ts`。
+
+### P0 — 能力声明 ≠ 平台事实（按钮发不出去必须降级）
+
+`capabilities` 是适配器静态声明，真实平台仍可能拒绝（钉钉卡片模板未在本组织发布、缺权限，
+QQ 内联键盘未获资格……）。因此：
+
+- 适配器**不得**用操作者无法控制的默认值声明按钮能力（钉钉 `card.interactiveTemplateId`
+  已取消内置默认，fail closed）；
+- `channel-harness` 在 actions 模式发送失败时，把该批问题降级为 `text` 并重新渲染发送
+  （带上「回复 1/2/3」说明与群聊关联码），只有文字也失败才取消问题。
 
 ### P0 — 平台权限状态必须来自真实检测
 
@@ -876,9 +950,7 @@ authMethods: [credentials, hybrid]
 ```text
 enabled = true
 accountId = main
-baseUrl = http://127.0.0.1:9300
 timeoutMs = 30000
-longPollTimeoutMs = 25000
 reconnect.enabled = true
 reconnect.baseDelayMs = 1000
 reconnect.maxDelayMs = 30000
@@ -887,16 +959,19 @@ dedup.enabled = true
 dedup.windowMs = 5000
 card.createOnFirstDelta = true
 card.typingIndicator = true
-upstream.mode = sdk
+upstream.mode = sdk          # fixed literal — the official SDK is the only upstream driver
 upstream.appId?
 upstream.appSecretRef = DSH_CHANNEL_LARK_MAIN_APP_SECRET
 upstream.domain = feishu
 ```
 
-Deprecated migration-only:
+Fail-closed config governance:
 
 ```text
-upstream.appSecret
+upstream.mode: 'gateway'    → rejected (fails config validation, mode is a fixed 'sdk' literal)
+upstream.appSecret          → not part of the config schema; the secret is resolved only via
+                              upstream.appSecretRef from ctx.credentials (no plaintext field,
+                              no runtime migration)
 ```
 
 ### Telegram
@@ -1015,14 +1090,22 @@ PUT  /v1.0/card/streaming
 ### Lark
 
 ```text
-WS long connection:
+WS long connection (official SDK WSClient + EventDispatcher):
   im.message.receive_v1
+  card.action.trigger
 
-OpenAPI:
+OpenAPI (official SDK Client):
   im.v1.message.create
-  im.v1.message.patch
+  im.v1.message.patch            # rewrite an already-sent interactive card
+  im.v1.chat.get                 # card-action chat mode confirmation
   im.v1.image.create
   im.v1.file.create
+  im.v1.messageResource.get      # inbound resource download (media port)
+
+CardKit 2.0 (native streaming + card entities):
+  cardkit.v1.card.create         # Card JSON 2.0 entity
+  cardkit.v1.card.settings       # close streaming_mode + summary
+  cardkit.v1.cardElement.content # native "typewriter" stream update
 
 Optional typing:
   addReaction
@@ -1397,6 +1480,7 @@ For each target channel:
 
 - [x] QQ: DSH explicitly uses `QQ_MINIMAL_INTENTS`; it does not rely on SDK `FULL_INTENTS`.
 - [ ] QQ: `markdownSupport=true` only when platform permission exists.
+- [ ] QQ: verify the inline-keyboard (`msg_type=2` + `keyboard`) click round-trip on a real App.
 - [x] Telegram: align manifest and fixtures to Bot API 10.2; live gate remains pending.
 - [x] Telegram: document that polling startup deletes an existing webhook.
 - [x] Telegram: validate media Bot API envelopes before reporting delivery.
@@ -1407,5 +1491,8 @@ For each target channel:
 - [ ] Weixin: do not treat `channels.weixin.qq.com` as iLink protocol documentation.
 - [ ] Lark: verify three core scopes + `im.message.receive_v1`.
 - [ ] Lark: verify media/reaction permissions when those features are enabled.
+- [ ] Lark: run the L1-L5 live gate in §6.1 before claiming live-tested.
+- [x] DingTalk: `interactiveActions` is fail-closed (no default template id); a failed card send degrades to numbered text.
 - [ ] DingTalk: verify each proactive/media/card OpenAPI permission, not only Stream receive.
+- [ ] DingTalk: verify whether `interactiveCards/send` honors `callbackType` and whether a card click returns on the STREAM callback topic.
 - [ ] All: secrets must remain in credential/secrets seam.

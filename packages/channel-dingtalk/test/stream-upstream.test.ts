@@ -9,7 +9,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { Context } from '@deepseek-ai/cordis';
-import { TOPIC_ROBOT } from 'dingtalk-stream';
+import { TOPIC_CARD, TOPIC_ROBOT } from 'dingtalk-stream';
 import { ChannelService, ChannelError, type MessageReceived } from '@wsz987/channel-core';
 import { createTestContext, makeChannelTarget } from '@wsz987/channel-testkit';
 import {
@@ -17,6 +17,7 @@ import {
   HttpDingTalkUpstream,
   InboundProcessor,
   ackRobotMessage,
+  toCardInteractionRaw,
   toGatewayRaw,
 } from '../src/index.ts';
 import type { DingTalkStreamClient, DingTalkStreamMessage } from '../src/index.ts';
@@ -257,6 +258,36 @@ describe('toGatewayRaw (SDK message → gateway raw shape)', () => {
   });
 });
 
+describe('toCardInteractionRaw (interactive card callback)', () => {
+  it('maps the official card callback action params', () => {
+    const raw = toCardInteractionRaw({
+      headers: { topic: TOPIC_CARD, eventId: 'evt-card-1', messageId: 'mid-card-1' },
+      data: JSON.stringify({
+        outTrackId: 'question-1',
+        userId: 'user-1',
+        openConversationId: 'cid-1',
+        cardActionData: { cardPrivateData: { params: { action: 'continue' } } },
+      }),
+    });
+    expect(raw).toEqual({
+      type: 'interaction',
+      msgId: 'mid-card-1',
+      eventId: 'evt-card-1',
+      senderId: 'user-1',
+      conversationId: 'cid-1',
+      conversationType: '2',
+      interactionId: 'question-1',
+      action: 'continue',
+      value: { action: 'continue' },
+    });
+  });
+
+  it('rejects malformed callbacks and callbacks without an action id', () => {
+    expect(toCardInteractionRaw({ data: 'not-json' })).toBeUndefined();
+    expect(toCardInteractionRaw({ data: JSON.stringify({ outTrackId: 'x', userId: 'u' }) })).toBeUndefined();
+  });
+});
+
 describe('DingTalkStreamUpstream.receive', () => {
   it('registers the robot topic listener and connects, then disconnects on abort', async () => {
     const client = new FakeStreamClient();
@@ -266,7 +297,7 @@ describe('DingTalkStreamUpstream.receive', () => {
     const loop = upstream.receive(controller.signal, (raw) => received.push(raw));
 
     await vi.waitFor(() => expect(client.connects).toBe(1), { timeout: 2000 });
-    expect(client.registered).toEqual([TOPIC_ROBOT]);
+    expect(client.registered).toEqual([TOPIC_ROBOT, TOPIC_CARD]);
 
     client.emit(TOPIC_ROBOT, robotDownstream());
     await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: 2000 });
@@ -369,7 +400,7 @@ describe('DingTalkStreamUpstream.receive', () => {
     const second = new AbortController();
     const loop = upstream.receive(second.signal, () => {});
     await vi.waitFor(() => expect(client.connects).toBe(2), { timeout: 2000 });
-    expect(client.registered).toEqual([TOPIC_ROBOT]); // registered once
+    expect(client.registered).toEqual([TOPIC_ROBOT, TOPIC_CARD]); // registered once
     second.abort();
     await loop;
     expect(client.disconnects).toBe(2);
@@ -377,6 +408,47 @@ describe('DingTalkStreamUpstream.receive', () => {
 });
 
 describe('DingTalkStreamUpstream ACK (socketCallBackResponse)', () => {
+  it('submits and acknowledges a valid card callback', async () => {
+    const client = new FakeStreamClient();
+    const upstream = streamUpstream(client, new FakeOutbound());
+    const controller = new AbortController();
+    const received: unknown[] = [];
+    const loop = upstream.receive(controller.signal, (raw) => received.push(raw));
+    await vi.waitFor(() => expect(client.connects).toBe(1), { timeout: 2000 });
+
+    client.emit(TOPIC_CARD, {
+      headers: { topic: TOPIC_CARD, messageId: 'mid-card-1' },
+      data: JSON.stringify({
+        outTrackId: 'question-1',
+        userId: 'user-1',
+        openConversationId: 'cid-1',
+        cardActionData: { cardPrivateData: { params: { action: 'continue' } } },
+      }),
+    });
+    await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: 2000 });
+    expect(client.acks).toContainEqual({ messageId: 'mid-card-1', response: { success: true } });
+
+    controller.abort();
+    await loop;
+  });
+
+  it('does not acknowledge a malformed card callback', async () => {
+    const client = new FakeStreamClient();
+    const upstream = streamUpstream(client, new FakeOutbound());
+    const controller = new AbortController();
+    const loop = upstream.receive(controller.signal, () => {});
+    await vi.waitFor(() => expect(client.connects).toBe(1), { timeout: 2000 });
+
+    client.emit(TOPIC_CARD, {
+      headers: { topic: TOPIC_CARD, messageId: 'mid-card-bad' },
+      data: JSON.stringify({ outTrackId: 'question-1', userId: 'user-1' }),
+    });
+    expect(client.acks).toHaveLength(0);
+
+    controller.abort();
+    await loop;
+  });
+
   it('acks a valid robot message exactly once after submission', async () => {
     const client = new FakeStreamClient();
     const upstream = streamUpstream(client, new FakeOutbound());

@@ -1,18 +1,20 @@
 /**
- * Lark upstream compatibility manifest (M3 + SDK driver).
+ * Lark upstream compatibility manifest.
  *
  * Records the upstream reference and tested version so `channels doctor` and
  * the upgrade pipeline can govern compatibility without re-verifying by hand.
  *
  * Strategy: 'sdk' — inbound rides the official `@larksuiteoapi/node-sdk`
- * (WebSocket long-connection, `im.message.receive_v1`) and outbound rides the
- * same SDK's OpenAPI client (`im.v1.message.create` / `patch`,
- * `im.v1.image.create`), so SDK mode needs no localhost gateway (R7B).
+ * (WebSocket long-connection, `im.message.receive_v1` + `card.action.trigger`)
+ * and outbound rides the same SDK's OpenAPI client (`im.v1.message.create` /
+ * `patch`, media uploads, CardKit 2.0 card entities + native streaming).
+ * There is no self-hosted gateway.
  *
  * Status 'tested' is justified by the Channel Contract + fixture tests plus
- * the SDK-mode offline tests (fake WS client, real EventDispatcher) passing
- * — fully offline. Live verification against a real Lark app (AppId/AppSecret)
- * is a manual step.
+ * the official-SDK offline tests (fake WS client, real EventDispatcher) —
+ * fully offline. Live verification against a real Lark app (AppId/AppSecret),
+ * its published permissions and event subscriptions is a manual step and is
+ * LIVE-REQUIRED before the adapter may be claimed live-tested.
  */
 import pkg from '../package.json' with { type: 'json' };
 

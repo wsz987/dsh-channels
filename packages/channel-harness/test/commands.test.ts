@@ -793,7 +793,7 @@ describe('F. command result rendering', () => {
   });
 });
 
-describe('G. unknown slash command is rejected (rc.2 Host parity)', () => {
+describe('G. unknown slash command is rejected (0.1.5-rc.2 Host parity)', () => {
   it('replies with an unknown-command notice and never sends the line to the model', async () => {
     const rootCtx = new Context();
     new CommandRuntime(rootCtx);

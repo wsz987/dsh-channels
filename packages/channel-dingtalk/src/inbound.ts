@@ -3,7 +3,7 @@
  */
 import type { ChannelAdapterContext, MessagePart, MessageReceived } from '@wsz987/channel-core';
 import { z } from 'zod';
-import { dedupKey, mapInbound, type DingTalkInboundMeta } from './mapper.js';
+import { dedupKey, mapInbound, mapInteraction, type DingTalkInboundMeta } from './mapper.js';
 
 const downloadContextSchema = z.object({
   type: z.string().optional(),
@@ -104,6 +104,18 @@ export class InboundProcessor {
       }
       this.seen.set(key, now);
       this.prune(now);
+    }
+    const kind = z.object({ type: z.string().optional() }).passthrough().safeParse(raw);
+    if (kind.success && kind.data.type === 'interaction') {
+      const interaction = mapInteraction(raw, this.options.meta);
+      this.options.ctx.logger.info('[channel-dingtalk] inbound interaction', {
+        interactionId: interaction.interactionId,
+        conversationId: interaction.conversation.id,
+        senderId: interaction.sender.id,
+        action: interaction.action,
+      });
+      await this.options.ctx.emit(interaction);
+      return;
     }
     const event: MessageReceived = mapInbound(raw, this.options.meta);
     // Per-message download context (official robot schema): the callback's

@@ -313,9 +313,44 @@ interactiveActions -> 原生按钮（OutboundMessage.actions + interaction.recei
 准入只看 `text: true`（且存在 active reply context / binding / 无并发 pending），
 `interactiveActions` 只决定「按钮还是文字」，绝不决定「能否承接 Harness 问题」。
 群聊/线程文字回答通过平台 `replyTo` 或每道题生成的短关联码（`Q-XXXXXX`）关联；
-`interaction.received` 当前由 Telegram / QQ 实现，Lark / DingTalk 原生按钮按官方
-SDK 能力逐步补齐（各自完成 round-trip + live gate 后才开启
-`interactiveActions: true`）。
+`interaction.received` 当前由 Telegram / QQ / Lark 实现，DingTalk 需操作者显式配置
+本组织已发布的卡片模板才声明 `interactiveActions`（协议支持卡片按钮，但模板/权限
+属部署事实，不能靠内置默认值冒充）。
+
+**能力声明不是探测：按钮发送失败必须降级，不得取消问题。** `capabilities` 是适配器的
+静态声明，真实平台仍可能拒绝（钉钉卡片模板未在本组织发布、缺卡片权限、QQ Markdown
+keyboard 未获资格……）。因此 `ChannelQuestionPresenter.present()` 在 actions 模式下
+`adapter.send()` 抛错时，会把该 pending 批次**降级为 `text` 并重新渲染发送**（重新渲染
+才会带上「回复 1/2/3」说明与群聊关联码），只有降级后的文字发送也失败才取消问题。
+回归测试：`question-presenter.test.ts` 的「degrades a failed native-actions
+presentation to numbered text」。
+
+#### answerer 顺序是契约（`prepend`，必读）
+
+0.1.2 起官方把「单一 provider 槽位」换成 `user-questions/request` **waterfall**：
+Cordis waterfall 是**串行**的，**第一个返回答案的 listener 会否决后面所有 listener**，
+只有显式调用 `next()` 才委托。`dsh-scope` 只保证「未打 tag 的根 listener 一定被准入」，
+**不保证先后顺序**——所以「无排序契约」是错的：
+
+```text
+web profile（官方 dsh-web-app bundle）
+  @deepseek-ai/dsh-api-remotes   开机即注册（只 inject typertGateway）→ 转发给已连接 client
+  channels-harness               等 channels 服务才 apply（更晚）→ 现在用 prepend 抢到最前
+```
+
+后果（修复前的真实故障）：Web GUI 一开，所有渠道问题都被浏览器端 answerer 认领
+（client 会为任意 agentId `resolveAgentScope`，因此只要页面连着就一定认领并挂起），
+渠道侧连请求都收不到，微信文字兜底自然也永不触发；即使没有 client 连接，转发的请求
+也会park 在 `pendingRemoteEvents` 里（无自动 `next()`），渠道同样收不到。
+
+因此 `WaterfallQuestionBackend` 必须用 `ctx.on('user-questions/request', handler, { prepend: true })`
+注册：渠道能展示（有 binding + active reply context + `text: true`）就自己认领，
+不能展示时仍 `next()` 委托给官方 Web answerer。回归测试见
+`packages/channel-harness/test/question-waterfall-backend.test.ts` 的
+「boot-order race」用例（先注册一个 Web 式 answerer，渠道仍须拿到问题）。
+
+同理，启动时探测不到 `ctx.userQuestions` **不得**永久关闭渠道问答：profile 行是并发
+创建的，服务可能晚于 bridge 挂载（patch 还可热重载），只记 `warn` 并照常注册 answerer。
 
 ---
 
@@ -472,7 +507,7 @@ export interface ReplyHandle {
 统一映射：
 
 ```text
-assistant/chunk
+agent/assistant-stream（瞬时预览）
       │
       ▼
 ReplyRouter
@@ -742,8 +777,8 @@ Harness 中：
 ```text
 turn/*
 step/*
-assistant/chunk
 assistant/message
+assistant/message.stream（V3 持久化流）
 tool/call
 tool/result
 ```
@@ -765,7 +800,7 @@ event.type
 实际用于 IM 回复：
 
 ```text
-assistant/chunk
+assistant/message.stream
 assistant/message
 turn/end
 ```
@@ -933,7 +968,7 @@ Harness latest-compatible
 ```json
 {
   "name": "@wsz987/dsh-channels",
-  "version": "0.4.2",
+  "version": "0.5.1",
   "type": "module",
   "exports": {
     ".": "./lib/index.js",
@@ -976,7 +1011,7 @@ pnpm 将传递依赖提升到 profile 根目录。根入口同时承载 Web host
 
     - id: channels-harness
       name: '@wsz987/dsh-channels/harness'
-      inject: [channels, agents, agentDefaultModel, agentPresets, llm, commands, apiProxy]
+      inject: [channels, agents, agentDefaultModel, agentPresets, llm, commands]
 
     - id: channels-control
       name: '@wsz987/dsh-channels/control'
@@ -1017,11 +1052,11 @@ pnpm 将传递依赖提升到 profile 根目录。根入口同时承载 Web host
 - **DSH Bundle**：`package.json` 的 `dsh.bundle.patch` 指向 `cordis.patch.yml`；patch 行只引用 bundle 自己的 exports，实现包作内部依赖，不要求 pnpm 提升传递依赖到 profile 根。
 - **patch 语义**：`cordis.patch.yml` / profile patch 是**整体替换**目标插件 `config`，不是深度合并；覆盖时必须保留该插件完整字段。
 - **Cordis 插件形态**：`export const name` / `export const inject` / `export function apply(ctx, config)`；WS、long-poll、Gateway、heartbeat 等手动资源放 `ctx.effect()`；事件监听走 `ctx.on()` 由框架自动清理。
-- **inject 名称**：只用 Harness public service 名（`channels`、`channelControl`、`agents`、`credentials`、`llm`、`commands`、`agentDefaultModel`、`apiProxy`），禁止私造 key。
-- **命令**：统一走 `commandFactories` / `ctx.commands.register`；命令名 lowercase、以 `/` 开头；handler 返回 `{ kind: 'success' | 'error', text }`；**未注册斜杠指令直接拒绝**（`commands.execute` 未命中注册名时回复「未知命令」提示，**不进**模型历史，也不作为普通用户输入交给模型，与官方 rc.2 Host 一致）；命令结果不进模型历史。
+- **inject 名称**：只用 Harness public service 名（`channels`、`channelControl`、`agents`、`credentials`、`llm`、`commands`、`agentDefaultModel`），禁止私造 key（问题域无需 inject：`user-questions/request` 是 Cordis waterfall 事件）。
+- **命令**：统一走 `commandFactories` / `ctx.commands.register`；命令名 lowercase、以 `/` 开头；handler 返回 `{ kind: 'success' | 'error', text }`；**未注册斜杠指令直接拒绝**（`commands.execute` 未命中注册名时回复「未知命令」提示，**不进**模型历史，也不作为普通用户输入交给模型，与当前 Host 一致）；命令结果不进模型历史。
 - **Agent 输入语义**：普通聊天 `agent.followup()`；执行中纠偏才用 `agent.steer()`；额外上下文用 `agent.inject()`（不得代替聊天）。
-- **回复只消费官方 `session/event`**：`assistant/chunk`、`assistant/message`、`turn/end`；`tool/call` / `tool/result` 只作可选 UX，不混入回复协议。
-- **User Questions 只走官方 ApiProxy client contract**：`channel-harness` 消费 `ctx.apiProxy.events.mux()` 的 `question/requested`，只匹配当前 active ReplyContext，并用 `ctx.apiProxy.respond()` 返回结构化答案；禁止 adapter 访问 `ctx.userQuestions`，也禁止注册第二个 Provider。Web 与渠道同时展示时首个 accepted response 获胜，`question/resolved` 负责清理陈旧渠道按钮。
+- **回复只消费官方 `session/event`**：`assistant/message.stream`、`assistant/message`、`turn/end`；瞬时 `agent/assistant-stream` 只用于当前 Agent 的预览，`tool/call` / `tool/result` 不混入回复协议。
+- **User Questions 走官方 `user-questions/request` waterfall（0.1.5）**：`channel-harness` 在根 context 注册一个 waterfall answerer（`ctx.on('user-questions/request', …)`，**必须 `prepend: true`**，见「Harness question presentation」小节），认领时经 channel 展示并 resolve 答案；渠道无法展示时 `next()` 委托给下一个 answerer（如官方 Web UI），无人认领由官方服务以 `NO_PROVIDER` 拒绝。ApiProxy 与单一 provider 槽位不属于当前公共 API；禁止 adapter 直接访问 `ctx.userQuestions`。工具调用 abort 会清理陈旧渠道按钮。启动探测不到 `userQuestions` 只 warn（服务可能晚于 bridge 挂载），不得据此关闭渠道问答。
 - **配置与凭据**：部署可调参数进 Schemastery 配置，禁止写死常量；凭据只经 `ctx.credentials` 引用（如 `appSecretRef`），配置/patch 禁止明文 Secret。
 
 ---
@@ -1058,7 +1093,7 @@ workspace:
 ```
 
 适配器负责各平台的下载/解密和上传，`channel-harness` 不复制平台 SDK 实现。
-图片对模型是否可见由 Harness rc.2 官方 Image Pipeline 在 request projection
+图片对模型是否可见由 Harness 0.1.5 官方 Image Pipeline 在 request projection
 层决定（vision model → image variant；text-only model → deterministic
 placeholder；append-only session history 保留原始 attachment reference），
 渠道侧**不做任何 pre-step 改写**，也不提供任何图片兼容配置。
@@ -1114,7 +1149,7 @@ ctx.logger.info(
 
 ### Generic Attachment compatibility backend（通用文件是可替换扩展）
 
-Harness `0.1.1-rc.2` 的 `ctx.attachments` 仍然只提供栅格图片的验证、保存和读取
+Harness `0.1.5-rc.2` 的 `ctx.attachments` 仍然只提供栅格图片的验证、保存和读取
 （`saveImage` / `saveImages`，无通用 `saveFile`），当前 `ContentBlock` 也没有通用
 `FileBlock`；Harness 目前**没有原生 generic-file 面**。因此非图片附件
 （PDF / DOCX / XLSX / 文本 与 audio/video）暂由 `@wsz987/channel-files` 以
@@ -1172,7 +1207,7 @@ PDF 解析使用 `unpdf`（PDF.js），DOCX 使用 `mammoth`，XLSX 使用 `xlsx
   `installModelSelection` 切换模型，绝不改写 `binding.route`。
   **未注册的斜杠指令直接拒绝**：`commands.execute()` 对未知注册名返回 `undefined`
   （已 parse 出命令名但 registry miss），渠道回复一条「未知命令：/xxx，输入 /help
-  查看命令。」提示，**绝**不作为普通用户输入交给模型（与官方 rc.2 Host 一致）；Agent
+  查看命令。」提示，**绝**不作为普通用户输入交给模型（与当前 Host 一致）；Agent
   scope 会 shadow 同名 global（同 scope 重名注册直接报错）。
 - **群聊命令 Owner Gate**：普通群消息通过统一 Access Gate 后，任何已解析的斜杠命令
   仍必须满足 canonical `sender.id === policy.ownerId`；缺少 owner 或不匹配时统一拒绝。
@@ -1205,16 +1240,25 @@ PDF 解析使用 `unpdf`（PDF.js），DOCX 使用 `mammoth`，XLSX 使用 `xlsx
   返回 `undefined`。可选 seam（`sessionPersistence` / `attachments` / `channelFiles` /
   `agentDefaultModel`）一律用 `get`；`agentDefaultModel` 使用官方
   `@deepseek-ai/dsh-agent-default-model` 的 `AgentDefaultModelConfig` 类型（禁止本地结构体 port）。
+- **可选 seam 必须惰性（live）解析，禁止在 apply 启动时做一次性快照**：profile 的 loader
+  EntryGroup 用 `Promise.allSettled` **并发**创建同一组的每个 entry（
+  `cordis-plugin-loader` 的 `EntryGroup.update`），因此任何未进 `inject` 的服务在
+  `apply()` 时刻都可能尚未注册——先 apply 的插件会永久拿到 `undefined`。可行做法：
+  传 resolver（`() => ctx.get('name')`）或在每次使用时 `ctx.get`；缺失时按 fail-closed
+  降级，不得变成硬依赖。`inject` 只用于**必需**依赖，往 `inject` 里塞可选服务会让删除该
+  行的部署永久 inactive（`channels-files` 行按文档可删，故不得写入 inject）。
+  参考实现：`channel-harness/src/lifecycle.ts`（`sessionPersistence` / `attachments` /
+  `channelFiles`）与 `src/file-provider.ts` 的 `liveAttachmentProvider`。
 - **模型选择遵循 Harness 的两层语义**：Harness 在创建/恢复 Session 时读取
   `session.requestHeader`、显式 `agentOptions`，或共享的 `agentDefaultModel`。当前 Session
   的 `/model` 切换则直接委托官方 Host `session.selectModel` RPC；无 Web Host 的 headless
   渠道使用官方 `installModelSelection` hook。两条路径都保存 `agentDefaultModel`，因此
   当前 Session 与未来新 Session 仍由同一套 Harness 语义衔接。
 - **channel 不维护竞争 owner**：每个 Agent setup 时只记录一次 `host` 或 `local` 策略，
-  不缓存 `apiProxy` 身份，也不在首条消息前调用 `session.models` 做 `prepare()`。已有 Agent
-  不会因为 Host 后挂载而动态增加第二个 waterfall；Host 策略仍每次解析当前的 `apiProxy`
-  实例，以支持 HMR 替换后的恢复。图片 `agent/pre-step` 读取该 Agent 当前策略对应的
-  Session 模型视图。
+  不缓存 Host 服务身份，也不在首条消息前做任何 `prepare()`。已有 Agent 不会因为 Host
+  后挂载而动态增加第二个 waterfall；Host 策略每次解析当前的 `sessionController` 实例
+  （当前 Harness `/model` 切换走 `sessionController.selectModel`），以支持 HMR 替换后的
+  恢复。图片 `agent/pre-step` 读取该 Agent 当前策略对应的 Session 模型视图。
 - **回归测试验证边界**：`commands-model.test.ts` 覆盖当前 Session 切换、默认保存、
   reasoning 校验、header/options 优先级，并断言不需要 first-turn RPC。
 - **测试易错**：fake agent 用 `createScope(rootCtx, agent)` 会继承根服务、掩盖真实环境 agent

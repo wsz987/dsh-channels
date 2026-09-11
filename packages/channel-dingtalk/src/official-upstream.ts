@@ -16,13 +16,14 @@
  * no official-behavior basis are marked `@upstream-gap` / `@deprecated` with a
  * reason (delete any protocol with no official basis).
  */
-import type { ChannelTarget } from '@wsz987/channel-core';
+import type { ChannelTarget, OutboundActionRow } from '@wsz987/channel-core';
 import { ChannelError, SecureRemoteMediaFetcher } from '@wsz987/channel-core';
 import { z } from 'zod';
 import type { CardCreateResult, DingTalkUpstream } from './upstream.js';
 import type { HttpTransport } from './transport.js';
 import { sniffImageMime } from './media-mime.js';
 import type { RemoteMediaFetchLike } from './image-hydrator.js';
+import { DEFAULT_DINGTALK_INTERACTIVE_TEMPLATE_ID } from './config.js';
 import type {
   DingTalkOpenApiPort,
   DingTalkOpenApiCredentials,
@@ -36,7 +37,7 @@ import type {
 
 const DINGTALK_API = 'https://api.dingtalk.com';
 const DINGTALK_OAPI = 'https://oapi.dingtalk.com';
-const AI_CARD_TEMPLATE_ID = '02fcf2f4-5e02-4a85-b672-46d1f715543e.schema';
+const AI_CARD_TEMPLATE_ID = DEFAULT_DINGTALK_INTERACTIVE_TEMPLATE_ID;
 
 const tokenSchema = z.object({
   accessToken: z.string().trim().min(1),
@@ -47,6 +48,11 @@ const mediaUploadSchema = z.object({
   mediaId: z.string().min(1).optional(),
   media_id: z.string().min(1).optional(),
   mediaIdV2: z.string().min(1).optional(),
+}).passthrough();
+
+const robotSendResponseSchema = z.object({
+  messageId: z.string().min(1).optional(),
+  processQueryKey: z.string().min(1).optional(),
 }).passthrough();
 
 const replyTargetSchema = z.object({
@@ -150,7 +156,8 @@ export class DingTalkOpenApiPortImpl implements DingTalkOpenApiPort, DingTalkUps
       headers: { 'x-acs-dingtalk-access-token': token },
       body,
     });
-    const messageId = (raw as { messageId?: string })?.messageId;
+    const parsed = robotSendResponseSchema.safeParse(raw);
+    const messageId = parsed.success ? parsed.data.messageId : undefined;
     return { messageId, raw };
   }
 
@@ -211,6 +218,65 @@ export class DingTalkOpenApiPortImpl implements DingTalkOpenApiPort, DingTalkUps
     });
     const messageId = (raw as { messageId?: string })?.messageId;
     return { messageId, raw };
+  }
+
+  async sendInteractiveCard(input: {
+    target: ChannelTarget;
+    templateId: string;
+    text: string;
+    actions: OutboundActionRow[];
+    textParam: string;
+    actionsParam: string;
+  }): Promise<{ messageId?: string; outTrackId: string; raw?: unknown }> {
+    const targetData = this.targetData(input.target);
+    const robotCode = targetData.robotCode ?? this.options.clientId;
+    if (!robotCode) throw new ChannelError('CHANNEL_ERROR', 'dingtalk interactive card is missing robotCode');
+    const openConversationId = targetData.conversationId ?? String(input.target.conversationId);
+    const outTrackId = `action_${this.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    const cardParamMap: Record<string, string> = {
+      [input.textParam]: input.text,
+      [input.actionsParam]: JSON.stringify(input.actions.flatMap((row) => row.actions.map((action) => ({
+        id: action.id,
+        label: action.label,
+        style: action.style ?? 'default',
+      })))),
+    };
+    const raw = await this.options.transport.request(`${DINGTALK_API}/v1.0/im/interactiveCards/send`, {
+      method: 'POST',
+      headers: { 'x-acs-dingtalk-access-token': await this.getAccessToken() },
+      body: {
+        cardTemplateId: input.templateId,
+        openConversationId,
+        outTrackId,
+        robotCode,
+        cardData: { cardParamMap },
+      },
+    });
+    const parsed = robotSendResponseSchema.safeParse(raw);
+    const messageId = parsed.success ? (parsed.data.processQueryKey ?? parsed.data.messageId) : undefined;
+    return { messageId, outTrackId, raw };
+  }
+
+  async updateInteractiveCard(input: {
+    outTrackId: string;
+    text: string;
+    actions: OutboundActionRow[];
+    textParam: string;
+    actionsParam: string;
+  }): Promise<unknown> {
+    const cardParamMap: Record<string, string> = {
+      [input.textParam]: input.text,
+      [input.actionsParam]: JSON.stringify(input.actions.flatMap((row) => row.actions.map((action) => ({
+        id: action.id,
+        label: action.label,
+        style: action.style ?? 'default',
+      })))),
+    };
+    return this.options.transport.request(`${DINGTALK_API}/v1.0/im/interactiveCards`, {
+      method: 'PUT',
+      headers: { 'x-acs-dingtalk-access-token': await this.getAccessToken() },
+      body: { outTrackId: input.outTrackId, cardData: { cardParamMap } },
+    });
   }
 
   async createCard(target: ChannelTarget, _text: string): Promise<CardCreateResult> {
@@ -437,6 +503,8 @@ export const OFFICIAL_BASIS: Record<string, string> = {
   failCard: "oracle=@dingtalk-real-ai/dingtalk-connector@0.8.24 :: AI Card PUT /v1.0/card/streaming error (isError=true)",
   resolveMedia: "oracle=@dingtalk-real-ai/dingtalk-connector@0.8.24 :: connector downloadMediaByCode/getFileDownloadUrl — POST /v1.0/robot/messageFiles/download {downloadCode,robotCode} -> downloadUrl -> GET raw bytes (message-handler); http(s) refs fetched directly",
   getMediaDownloadUrl: "oracle=@dingtalk-real-ai/dingtalk-connector@0.8.24 :: connector getFileDownloadUrl — POST /v1.0/robot/messageFiles/download {downloadCode,robotCode} -> {downloadUrl} (message-handler)",
+  sendInteractiveCard: "official @dingtalk-real-ai/dingtalk-connector-compatible DingTalk interactiveCards API POST /v1.0/im/interactiveCards/send (Card Platform template + cardParamMap)",
+  updateInteractiveCard: "official @dingtalk-real-ai/dingtalk-connector-compatible DingTalk interactiveCards API PUT /v1.0/im/interactiveCards (outTrackId + cardData.cardParamMap)",
 };
 
 /** Legacy alias (rename): `DingTalkOfficialUpstream` -> `DingTalkOpenApiPortImpl`. */

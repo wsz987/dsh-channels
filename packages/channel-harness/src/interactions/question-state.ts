@@ -65,7 +65,7 @@ export type QuestionLifecycleState =
 /**
  * One in-flight question batch as presented on one channel conversation.
  * Transport-neutral: `key` is whatever correlation id the active backend
- * minted (ApiProxy `rpcId` in the Web profile, an internal ask key headless).
+ * minted (the waterfall ask key today).
  */
 export interface PendingChannelQuestion {
   /** Backend correlation key; echoed back on resolve/cancel. */

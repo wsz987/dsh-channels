@@ -9,7 +9,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import type { Context } from '@deepseek-ai/cordis';
-import { installAttachmentCompatibilityTools } from '../src/file-provider.ts';
+import { installAttachmentCompatibilityTools, liveAttachmentProvider } from '../src/file-provider.ts';
 import type {
   ChannelAttachmentContext,
   ChannelAttachmentDescriptor,
@@ -94,5 +94,55 @@ describe('ChannelAttachmentProvider compatibility', () => {
 
     expect(installCompatibilityTools).toHaveBeenCalledOnce();
     expect(installTools).not.toHaveBeenCalled();
+  });
+});
+
+describe('liveAttachmentProvider', () => {
+  it('observes a provider mounted AFTER the live view was created (issue #7)', async () => {
+    let mounted: ChannelAttachmentProvider | undefined;
+    const live = liveAttachmentProvider(() => mounted);
+    const context = {} as ChannelAttachmentContext;
+    const part = { type: 'image', localData: new Uint8Array([1]) } as StoredBinaryPart;
+
+    // Absent at wiring time: no throw, no store, unresolved attachment.
+    await expect(live.store(context, part)).resolves.toBeUndefined();
+    await expect(live.resolveAttachment('sha256:abc', 's-1')).rejects.toThrow(
+      'channelFiles service is unavailable',
+    );
+
+    // Mounted later: every call sees the provider without re-wiring the bridge.
+    const store = vi.fn(async () => undefined);
+    const resolveAttachment = vi.fn(async () => ({
+      kind: 'image' as const,
+      data: new Uint8Array([1, 2]),
+      name: 'photo.png',
+    }));
+    mounted = { store, resolveAttachment };
+
+    await live.store(context, part);
+    await expect(live.resolveAttachment('sha256:abc', 's-1')).resolves.toMatchObject({ kind: 'image' });
+    expect(store).toHaveBeenCalledOnce();
+    expect(resolveAttachment).toHaveBeenCalledWith('sha256:abc', 's-1');
+  });
+
+  it('delegates storeImage and the compatibility tool install lazily', async () => {
+    const storeImage = vi.fn(async () => undefined);
+    const installTools = vi.fn(async (_agentContext: Context) => {});
+    let mounted: ChannelAttachmentProvider | undefined = { store: baseStore, resolveAttachment: baseResolve, storeImage, installTools };
+    const live = liveAttachmentProvider(() => mounted);
+
+    await live.installCompatibilityTools?.({} as Context);
+    expect(installTools).toHaveBeenCalledOnce();
+
+    const context = {} as ChannelAttachmentContext;
+    await live.storeImage?.(context, { attachmentId: 'sha256:abc', data: new Uint8Array([1]) });
+    expect(storeImage).toHaveBeenCalledOnce();
+
+    // A provider that ships neither optional hook stays a no-op (never throws).
+    mounted = { store: baseStore, resolveAttachment: baseResolve };
+    await expect(live.installCompatibilityTools?.({} as Context)).resolves.toBeUndefined();
+    await expect(
+      live.storeImage?.(context, { attachmentId: 'sha256:abc', data: new Uint8Array([1]) }),
+    ).resolves.toBeUndefined();
   });
 });

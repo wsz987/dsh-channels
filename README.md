@@ -56,7 +56,7 @@
 ## 使用前须知
 
 - 确认 `npx @deepseek-ai/dsh` 可运行，且 Harness Web 普通会话可正常对话。
-- **0.5.x 版本线要求 DeepSeek Harness `0.1.1-rc.2` 及以上、Node `22.19+`**；仍在使用 Harness `0.1.0-rc.7` 的用户请停留在 `0.4.x`（版本线对照见 [兼容矩阵](docs/compatibility-matrix.md)）。
+- **当前开发线要求 DeepSeek Harness `0.1.5-rc.2`、Node `22.19+`**；该版本位于 npm 的 `next` 标签（`latest` 仍是 `0.1.5-rc.1`），因此升级时必须**显式指定版本**（或 `@next`），不能用 `@latest`。旧 Harness 不在本开发线支持范围内（版本线对照见 [兼容矩阵](docs/compatibility-matrix.md)）。
 - 渠道会话通常使用 `Workspace Write`；仅在确需访问 Workspace 外文件且信任当前任务时启用 `Full access`。
 - 项目仍在快速迭代，升级前请备份数据。
 
@@ -81,10 +81,10 @@ npx @deepseek-ai/dsh web
 
 安装、更新和卸载时请保留 `-w` 参数。
 
-> **跨版本线升级（如 0.4.x → 0.5.x）？** `update` 只在 package.json 当前版本范围内更新，跨版本线必须**先升级 Harness CLI，再用 `add ...@latest` 重新安装**（顺序不能颠倒，否则旧宿主上会出现运行不兼容）：
+> **跨版本线升级？** `update` 只在 package.json 当前版本范围内更新，必须**先升级 Harness CLI，再用 `add ...@latest` 重新安装**（顺序不能颠倒，否则旧宿主上会出现运行不兼容）：
 >
 > ```bash
-> npm i -g @deepseek-ai/dsh@latest   # 先升级 Harness（0.5.x 需要 0.1.1-rc.2+，Node ≥ 22.19）
+> npm i -g @deepseek-ai/dsh@0.1.5-rc.2   # 先升级 Harness（当前基线；在 npm 的 next 标签，@latest 仍是 rc.1）
 > npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@latest
 > ```
 
@@ -100,7 +100,7 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 
 运行时会定期检查 npm 上 `@wsz987/dsh-channels` 是否有比本地更新的版本（默认每 24 小时一次；离线或检查失败时静默跳过）。发现新版本时：
 
-- Web「设置 → 渠道」页面顶部会显示新版本提示条，并给出升级命令；跨版本线（如 0.4.x → 0.5.x）时提示两步升级（先升 Harness CLI，再重装 bundle），同版本线提示单条 update 命令。
+- Web「设置 → 渠道」页面顶部会显示新版本提示条，并给出升级命令；跨版本线时提示两步升级（先升 Harness CLI，再重装 bundle），同版本线提示单条 update 命令。
 - 渠道会话内发送 `/version` 可查看当前版本与同样的升级提示。
 
 该功能只做提示，绝不会自动安装或升级。浏览器不直接访问 npm registry（检查由 host 侧完成，页面只读净化后的结果）。如需关闭或调整频率，可在 profile patch 中覆盖 `channels-control`（注意 patch 是整体替换，需保留完整字段）：
@@ -168,11 +168,13 @@ live gate 完成前均不视为生产验证通过。
 | `/version` | 查看当前 bundle 版本、Harness 兼容基线与新版本提示 |
 | `/models [provider]` | 查看 Harness 当前注册的模型 Provider 及其模型 |
 | `/model [<provider> <model> [<reasoningEffort>]]` | 查看或切换当前会话模型 |
+| `/mirror [on\|off]` | 开关镜像模式：开启后，在 Web / CLI 发起的回复也会同步发送到本会话（默认关闭，状态持久化） |
+| `/bind <会话ID> [confirm]` | 把本对话重绑到一个已存在的会话（先解析并列出影响，确认后加 `confirm` 执行） |
 
 - `/help` 使用 Markdown 排版，并跟随 Harness Web 写入 `$DSH_HOME/settings.yaml`
   的 `locale.preference`（`zh` / `en`）；未设置时渠道端默认使用中文。
 - 若宿主加载了官方插件（`/compact`、`/goal`、`/plan`、`/feedback` 等），这些命令也会自动出现在渠道里，无需额外升级。
-- **未注册的斜杠指令直接拒绝**（与官方 rc.2 Host 行为一致）：回复一条「未知命令」提示，**不会**作为普通用户输入发给模型。
+- **未注册的斜杠指令直接拒绝**（与当前 Harness Host 行为一致）：回复一条「未知命令」提示，**不会**作为普通用户输入发给模型。
 
 #### `/model` 示例
 
@@ -197,7 +199,7 @@ live gate 完成前均不视为生产验证通过。
 ```yaml
 - id: channels-harness
   name: '@wsz987/dsh-channels/harness'
-  inject: [channels, agents, agentDefaultModel, agentPresets, llm, commands, apiProxy]
+  inject: [channels, agents, agentDefaultModel, agentPresets, llm, commands]
   config:
     workspace:
       mode: channel-account # channel-account（默认）| host-cwd | disabled

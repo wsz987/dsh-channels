@@ -31,7 +31,7 @@ export const StoredChannelAssetSchema = z.object({
   conversationType: z.enum(['dm', 'group']).optional(),
   threadId: z.string().optional(),
   messageId: z.string().min(1),
-  kind: z.enum(['file', 'audio', 'video']),
+  kind: z.enum(['file', 'audio', 'video', 'image']),
   name: z.string().min(0),
   mimeType: z.string().optional(),
   bytes: z.number().int().nonnegative(),

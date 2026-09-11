@@ -39,7 +39,30 @@ export interface DingTalkCardConfig {
    * `false`, deltas buffer locally and the card is only created at `finish`.
    */
   createOnFirstDelta: boolean;
+  /**
+   * OPT-IN Card Platform template used for Harness interactive question
+   * actions. UNSET by default on purpose: a card template only renders buttons
+   * when it is published in YOUR organization's Card Platform and exposes the
+   * `text`/`actions` variables configured below, so advertising button support
+   * from a built-in third-party template id made every `ask_user_question`
+   * fail with "无法在当前渠道展示问题，已取消。". Without it the adapter stays
+   * `interactiveActions: false` and questions use the numbered-text reply path
+   * (same as Weixin).
+   */
+  interactiveTemplateId?: string;
+  /** Template variable carrying the card body text. */
+  interactiveTextParam: string;
+  /** Template variable carrying serialized button definitions. */
+  interactiveActionsParam: string;
 }
+
+/**
+ * Vendor AI Card template used by the STREAMING reply path (`ai-card.ts`:
+ * create instance → deliver → streaming update). It is unrelated to the
+ * opt-in interactive-actions template above and is never used to claim
+ * `interactiveActions`.
+ */
+export const DEFAULT_DINGTALK_INTERACTIVE_TEMPLATE_ID = '02fcf2f4-5e02-4a85-b672-46d1f715543e.schema';
 
 /**
  * Upstream driver selection.
@@ -101,6 +124,12 @@ export const Config: Schema<DingTalkConfig> = Schema.object({
   }),
   card: Schema.object({
     createOnFirstDelta: Schema.boolean().default(true),
+    // Deliberately NO default: question buttons require a card template that is
+    // published in the operator's own Card Platform. A built-in third-party id
+    // made `interactiveActions` true everywhere and broke every question.
+    interactiveTemplateId: Schema.string(),
+    interactiveTextParam: Schema.string().default('text'),
+    interactiveActionsParam: Schema.string().default('actions'),
   }),
   upstream: Schema.object({
     mode: Schema.union(['sdk', 'gateway']).default('sdk'),

@@ -30,7 +30,7 @@ adapter, not through YAML.
 
 ```yaml
 - id: channels-weixin
-  name: '@wsz987/channel-weixin'
+  name: '@wsz987/dsh-channels/weixin'
   inject: [channels, channelControl]
   config:
     enabled: true
@@ -47,6 +47,16 @@ adapter, not through YAML.
       maxDelayMs: 30000
 ```
 
+The row above is the one shipped by the bundle patch
+(`packages/channels/cordis.patch.yml`). Two details are easy to get wrong:
+
+- `name` addresses the **bundle** subpath (`@wsz987/dsh-channels/weixin`), because
+  the bundle re-exports every plugin from one direct profile dependency. The
+  adapter package `@wsz987/channel-weixin` has no `./weixin` subpath of its own.
+- The plugin module itself declares `inject = ['channels']`; the row adds
+  `channelControl`. The loader merges the row's `inject` into the plugin's own,
+  so the two are additive rather than required to be identical.
+
 Login is QR-based: the control plane exposes the QR in Harness Web
 「设置 → 渠道」, or the adapter can be driven headlessly through
 `beginAuth` / `pollAuth` / `submitAuthInput`.
@@ -57,7 +67,9 @@ Login is QR-based: the control plane exposes the QR in Harness Web
 | --- | --- |
 | text | ✅ |
 | image | ✅ (Harness-native `saveImage` / `ImageBlock`) |
-| file | ❌ |
+| file | ✅ (inbound download + AES decrypt; outbound `uploadMedia` + `sendMedia`) |
+| video | ✅ (inbound download; outbound `sendVideo`) |
+| audio | ❌ (inbound `localData` only; no Tencent 2.4.6 outbound voice path) |
 | markdown / cards / reactions / threads | ❌ |
 | streaming | `buffered` |
 

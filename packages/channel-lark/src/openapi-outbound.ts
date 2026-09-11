@@ -1,29 +1,37 @@
 /**
- * Lark outbound over the official `@larksuiteoapi/node-sdk` OpenAPI `Client`
- * (release plan R7B).
+ * Lark outbound over the official `@larksuiteoapi/node-sdk` OpenAPI `Client`.
  *
- * Replaces the self-hosted HTTP gateway endpoints (`/message/send`,
- * `/card/create`, `/card/update`, `/card/finish`, `/card/fail`) with the
- * official OpenAPI surface so `upstream.mode: 'sdk'` needs no localhost
- * gateway at all:
+ * This driver is the ONLY outbound implementation: plain text, media and file
+ * messages, Card JSON 2.0 interactive cards, and CardKit 2.0 card entities with
+ * native streaming (`cardElement.content`) are all routed through the official
+ * client. There is no self-hosted gateway and no legacy `/message/*` or
+ * `/card/*` endpoint anywhere.
  *
- * - `sendText`    → `im.v1.message.create` (`msg_type: 'text'`)
- * - `sendMedia`   → `im.v1.image.create` (upload → `image_key`) + `im.v1.message.create` (`msg_type: 'image'`)
- * - `sendFile`    → `im.v1.file.create` (upload → `file_key`) + `im.v1.message.create` (`msg_type: 'file'`)
- * - `createCard`  → `im.v1.message.create` (`msg_type: 'interactive'`), card id = `message_id`
- * - `updateCard`  → `im.v1.message.patch` (update card content)
- * - `failCard`    → `im.v1.message.patch` (rewrite the card to a failure state)
- * - `finishCard`  → no-op: the final `patch` already carries the finished text
+ * - `sendText`      → `im.v1.message.create` (`msg_type: 'text'`)
+ * - `sendMedia`     → `im.v1.image.create` (upload → `image_key`) + `im.v1.message.create` (`msg_type: 'image'`)
+ * - `sendFile`      → `im.v1.file.create` (upload → `file_key`) + `im.v1.message.create` (`msg_type: 'file'`)
+ * - `sendInteractive` → `im.v1.message.create` (`msg_type: 'interactive'`) with Card JSON 2.0 buttons
+ * - `updateInteractive` → `im.v1.message.patch` (rewrite an already-sent interactive card)
+ * - `createCardEntity` → `cardkit.v1.card.create` (Card JSON 2.0 only)
+ * - `sendCardEntity` → `im.v1.message.create` with content `{ type: "card", data: { card_id } }`
+ * - `updateCardElementContent` → `cardkit.v1.cardElement.content` (native typewriter)
+ * - `finishStreamingCard` → `cardkit.v1.card.settings` (`streaming_mode: false` + summary)
  *
  * Only a minimal structural client surface is consumed so offline tests can
- * inject a fake; the real `Client` satisfies it structurally (mirrors the
- * `LarkSdkClient`/`WSClient` split used for the inbound leg). Credentials are
+ * inject a fake; the real `Client` satisfies it structurally. Credentials are
  * never referenced here — the `Client` is built elsewhere from config.
+ *
+ * Official responses are trust-boundary validated with zod `safeParse` before
+ * their fields are read; invalid envelopes surface as `ChannelError`s.
  */
 import { ChannelError } from '@wsz987/channel-core';
 import type { OutboundActionRow } from '@wsz987/channel-core';
 import { z } from 'zod';
-import type { CardCreateResult, LarkFileRef, LarkMediaRef, LarkOutbound } from './upstream.js';
+import type {
+  LarkFileRef,
+  LarkMediaRef,
+  LarkOutbound,
+} from './upstream.js';
 
 /** The SDK `receive_id_type` union (matches the real `Client` type). */
 export type LarkReceiveIdType = 'open_id' | 'user_id' | 'union_id' | 'email' | 'chat_id';
@@ -56,7 +64,7 @@ export interface LarkCreateImageResult {
   image_key?: string;
 }
 
-/** Minimal im.v1.file.create payload/result shapes consumed here (M7A). */
+/** Minimal im.v1.file.create payload/result shapes consumed here. */
 export interface LarkCreateFilePayload {
   data: {
     file_type: 'opus' | 'mp4' | 'pdf' | 'doc' | 'xls' | 'ppt' | 'stream';
@@ -77,10 +85,31 @@ export interface LarkApiResponse<T = Record<string, unknown>> {
   data?: T;
 }
 
+/** Minimal cardkit.v1.card.create payload/result shapes. */
+export interface LarkCardkitCardCreatePayload {
+  data: { type: 'card_json'; data: string };
+}
+
+export interface LarkCardkitCardCreateResult {
+  card_id?: string;
+}
+
+/** Minimal cardkit.v1.cardElement.content payload (streaming element replace). */
+export interface LarkCardElementContentPayload {
+  path: { card_id: string; element_id: string };
+  data: { uuid?: string; content: string; sequence: number };
+}
+
+/** Minimal cardkit.v1.card.settings payload (streaming close + summary). */
+export interface LarkCardSettingsPayload {
+  path: { card_id: string };
+  data: { settings: string; sequence: number; uuid?: string };
+}
+
 /**
  * Structural subset of the real SDK `Client` used for outbound. The real
- * `Client` (from `@larksuiteoapi/node-sdk`) satisfies this shape; tests inject
- * a fake.
+ * `Client` (from `@larksuiteoapi/node-sdk` at 1.73.1) satisfies this shape;
+ * tests inject a fake.
  */
 export interface LarkOpenApiClient {
   im: {
@@ -101,6 +130,17 @@ export interface LarkOpenApiClient {
     };
     messageReaction?: unknown;
   };
+  cardkit: {
+    v1: {
+      card: {
+        create(payload: LarkCardkitCardCreatePayload): Promise<LarkApiResponse<LarkCardkitCardCreateResult>>;
+        settings(payload: LarkCardSettingsPayload): Promise<LarkApiResponse>;
+      };
+      cardElement: {
+        content(payload: LarkCardElementContentPayload): Promise<LarkApiResponse>;
+      };
+    };
+  };
   addReaction?(messageId: string, emojiType: string): Promise<string>;
   removeReaction?(messageId: string, reactionId: string): Promise<void>;
 }
@@ -118,6 +158,61 @@ const chatModeResponseSchema = z.object({
   }).optional(),
 });
 
+/** Trust-boundary envelope: any unknown extra keys are allowed, but the read fields are validated. */
+const envelopeSchema = z.object({
+  code: z.number().optional(),
+  msg: z.string().optional(),
+  data: z.unknown().optional(),
+}).passthrough();
+
+const cardIdResultSchema = z.object({
+  card_id: z.string().trim().min(1),
+});
+
+const messageIdResultSchema = z.object({
+  message_id: z.string().trim().min(1),
+});
+
+/** The stable id of the single streaming markdown element inside a CardKit card. */
+export const STREAM_MARKDOWN_ELEMENT_ID = 'stream_md';
+
+/**
+ * The summary shown while a streaming card is still generating (Feishu
+ * previews this in chat lists until streaming is closed and a real summary is
+ * written).
+ */
+export const STREAM_GENERATING_SUMMARY = '[Generating...]';
+
+/**
+ * Build the Card JSON 2.0 payload of a native-streaming card entity. The
+ * element carries a stable `element_id` and the card opens `streaming_mode`
+ * with Feishu's typewriter `streaming_config`, matching the official "流式更新
+ * 卡片" flow (cardkit.v1.card.create → cardElement.content → card.settings).
+ */
+export function streamingCardJson(initialText: string, summary: string = STREAM_GENERATING_SUMMARY): string {
+  return JSON.stringify({
+    schema: '2.0',
+    config: {
+      streaming_mode: true,
+      summary: { content: summary },
+      streaming_config: {
+        print_frequency_ms: { default: 70 },
+        print_step: { default: 1 },
+        print_strategy: 'fast',
+      },
+    },
+    body: {
+      elements: [
+        {
+          tag: 'markdown',
+          element_id: STREAM_MARKDOWN_ELEMENT_ID,
+          content: initialText,
+        },
+      ],
+    },
+  });
+}
+
 export interface LarkOpenApiOutboundOptions {
   /** Official OpenAPI client (real `Client` or injected fake). */
   client: LarkOpenApiClient;
@@ -126,9 +221,11 @@ export interface LarkOpenApiOutboundOptions {
 }
 
 /**
- * Official-OpenAPI implementation of the outbound surface. No `receive` here:
- * in SDK mode the inbound leg stays on the WS long-connection, and this driver
- * is composed as the `outbound` half of `LarkSdkUpstream`.
+ * Official-OpenAPI implementation of the outbound surface (plain messages,
+ * media, Card JSON 2.0 interactive cards and CardKit 2.0 entities + native
+ * streaming). No `receive` here: in SDK mode the inbound leg stays on the WS
+ * long-connection, and this driver is composed as the `outbound` half of
+ * `LarkSdkUpstream`.
  */
 export class LarkOpenApiOutbound implements LarkOutbound {
   private readonly fetchImage: (url: string) => Promise<Buffer>;
@@ -140,21 +237,21 @@ export class LarkOpenApiOutbound implements LarkOutbound {
   }
 
   sendText(to: string, text: string): Promise<unknown> {
-    return this.options.client.im.v1.message.create({
+    return this.callEnvelope(() => this.options.client.im.v1.message.create({
       params: { receive_id_type: receiveIdType(to) },
       data: { receive_id: to, msg_type: 'text', content: JSON.stringify({ text }) },
-    });
+    }));
   }
 
   sendInteractive(to: string, text: string, actions: OutboundActionRow[]): Promise<unknown> {
-    return this.options.client.im.v1.message.create({
+    return this.callEnvelope(() => this.options.client.im.v1.message.create({
       params: { receive_id_type: receiveIdType(to) },
       data: {
         receive_id: to,
         msg_type: 'interactive',
         content: interactiveCardContent(text, actions),
       },
-    });
+    }));
   }
 
   async sendMedia(to: string, media: LarkMediaRef): Promise<unknown> {
@@ -166,14 +263,14 @@ export class LarkOpenApiOutbound implements LarkOutbound {
     if (!imageKey) {
       throw new ChannelError('CHANNEL_ERROR', 'lark image upload returned no image_key');
     }
-    return this.options.client.im.v1.message.create({
+    return this.callEnvelope(() => this.options.client.im.v1.message.create({
       params: { receive_id_type: receiveIdType(to) },
       data: {
         receive_id: to,
         msg_type: 'image',
         content: JSON.stringify({ image_key: imageKey }),
       },
-    });
+    }));
   }
 
   async sendFile(to: string, file: LarkFileRef): Promise<unknown> {
@@ -190,54 +287,74 @@ export class LarkOpenApiOutbound implements LarkOutbound {
     if (!fileKey) {
       throw new ChannelError('CHANNEL_ERROR', 'lark file upload returned no file_key');
     }
-    return this.options.client.im.v1.message.create({
+    return this.callEnvelope(() => this.options.client.im.v1.message.create({
       params: { receive_id_type: receiveIdType(to) },
       data: {
         receive_id: to,
         msg_type: 'file',
         content: JSON.stringify({ file_key: fileKey }),
       },
-    });
+    }));
   }
 
-  async createCard(conversationId: string, text: string): Promise<CardCreateResult> {
+  async createCardEntity(cardJson: string): Promise<{ cardId: string }> {
+    const response = await this.options.client.cardkit.v1.card.create({
+      data: { type: 'card_json', data: cardJson },
+    });
+    const envelope = parseEnvelope(response);
+    const parsed = cardIdResultSchema.safeParse(envelope.data);
+    if (!parsed.success) {
+      throw new ChannelError('CHANNEL_ERROR', 'lark cardkit.card.create returned no card_id');
+    }
+    return { cardId: parsed.data.card_id };
+  }
+
+  async sendCardEntity(conversationId: string, cardId: string): Promise<{ messageId: string }> {
     const response = await this.options.client.im.v1.message.create({
       params: { receive_id_type: receiveIdType(conversationId) },
       data: {
         receive_id: conversationId,
         msg_type: 'interactive',
-        content: cardContent(text),
+        content: JSON.stringify({ type: 'card', data: { card_id: cardId } }),
       },
     });
-    return { cardId: response.data?.message_id ?? '' };
+    const envelope = parseEnvelope(response);
+    const parsed = messageIdResultSchema.safeParse(envelope.data);
+    if (!parsed.success) {
+      throw new ChannelError('CHANNEL_ERROR', 'lark card reference send returned no message_id');
+    }
+    return { messageId: parsed.data.message_id };
   }
 
-  updateCard(cardId: string, text: string): Promise<unknown> {
-    return this.options.client.im.v1.message.patch({
-      path: { message_id: cardId },
-      data: { content: cardContent(text) },
-    });
+  async updateCardElementContent(
+    cardId: string,
+    elementId: string,
+    content: string,
+    sequence: number,
+    uuid: string,
+  ): Promise<unknown> {
+    return this.callEnvelope(() => this.options.client.cardkit.v1.cardElement.content({
+      path: { card_id: cardId, element_id: elementId },
+      data: { uuid, content, sequence },
+    }));
   }
 
-  finishCard(_cardId: string): Promise<unknown> {
-    // Lark interactive cards have no separate "finish" state — the last
-    // `patch` already carries the finished content. Keep the reply-handle
-    // contract intact with a no-op.
-    return Promise.resolve({});
-  }
-
-  failCard(cardId: string, reason?: string): Promise<unknown> {
-    return this.options.client.im.v1.message.patch({
-      path: { message_id: cardId },
-      data: { content: cardContent(reason ? `❌ ${reason}` : '❌ 出错了') },
-    });
+  async finishStreamingCard(cardId: string, sequence: number, summary: string): Promise<unknown> {
+    return this.callEnvelope(() => this.options.client.cardkit.v1.card.settings({
+      path: { card_id: cardId },
+      data: {
+        settings: JSON.stringify({ config: { streaming_mode: false, summary: { content: summary } } }),
+        sequence,
+        uuid: `s_${cardId}_${sequence}`,
+      },
+    }));
   }
 
   updateInteractive(cardId: string, text: string, actions: OutboundActionRow[]): Promise<unknown> {
-    return this.options.client.im.v1.message.patch({
+    return this.callEnvelope(() => this.options.client.im.v1.message.patch({
       path: { message_id: cardId },
       data: { content: interactiveCardContent(text, actions) },
-    });
+    }));
   }
 
   async getChatType(conversationId: string): Promise<'p2p' | 'group' | undefined> {
@@ -284,6 +401,10 @@ export class LarkOpenApiOutbound implements LarkOutbound {
     }
   }
 
+  private async callEnvelope<T>(request: () => Promise<LarkApiResponse<T>>): Promise<unknown> {
+    return parseEnvelope(await request());
+  }
+
   private reactionClient(): ReactionClient | undefined {
     if (this.options.client.addReaction && this.options.client.removeReaction) {
       return {
@@ -311,6 +432,18 @@ export class LarkOpenApiOutbound implements LarkOutbound {
     if (file.url) return this.fetchImage(file.url);
     throw new ChannelError('CHANNEL_ERROR', 'lark sendFile requires localData, url, or dataUri');
   }
+}
+
+/** Validate an SDK envelope and return the raw parsed object. */
+function parseEnvelope(response: unknown): { code?: number; msg?: string; data?: unknown } {
+  const parsed = envelopeSchema.safeParse(response);
+  if (!parsed.success) {
+    throw new ChannelError('CHANNEL_ERROR', 'lark openapi returned an invalid envelope');
+  }
+  if (parsed.data.code !== undefined && parsed.data.code !== 0) {
+    throw new ChannelError('CHANNEL_ERROR', `lark openapi request failed (${parsed.data.code}): ${parsed.data.msg ?? 'unknown error'}`);
+  }
+  return parsed.data;
 }
 
 /**
@@ -343,30 +476,10 @@ export function fileTypeFromName(name: string): LarkFileType {
 }
 
 /**
- * Build an Interactive Card payload for streaming replies.
- *
- * Lark supports two card schemas:
- *
- * - **1.0** (`elements: [{ tag: 'div', text: { tag: 'lark_md', ... } }]`):
- *   legacy; the `lark_md` text type only renders a SUBSET of Markdown
- *   (bold, italic, links, inline code; headings/lists/blockquotes/tables
- *   fall through as raw Markdown text). Several Lark docs still show this
- *   shape, which is why most third-party bots ship it and silently lose
- *   headings/lists/tables.
- * - **2.0** (`schema: '2.0'`, `body.elements: [{ tag: 'markdown', ... }]`):
- *   the supported schema since Lark deprecated 1.0 for new bots; the
- *   `markdown` element renders the full Lark-flavoured Markdown (headings,
- *   ordered/unordered lists, code blocks, blockquotes, tables, links,
- *   bold/italic, inline code, strikethrough).
- *
- * Empirically verified: when the agent reply contains Markdown the user
- * expects to see rendered (lists, tables, headings), only the 2.0 schema
- * renders them. Reference: <https://open.feishu.cn/document/common-capabilities/message-card/message-cards-content/using-markdown-tags>.
- *
- * Trade-off: 2.0 schema only patches the `body.elements[0].content` field
- * — same `im.v1.message.patch` flow, so streaming semantics are unchanged.
- * One supported element type per card, which matches our current usage
- * (the reply body is a single Markdown stream).
+ * Card JSON 2.0 content for a single markdown element (used by the interactive
+ * card rewrite path that patches an already-sent message). The 2.0 `markdown`
+ * element renders the full Lark-flavoured Markdown (headings, lists, code
+ * blocks, tables, links).
  */
 export function cardContent(text: string): string {
   return JSON.stringify({
@@ -381,7 +494,8 @@ export function cardContent(text: string): string {
 /**
  * Official Card JSON 2.0 button layout. V2 removed the legacy `action`
  * container: buttons are direct body elements and callback values belong to
- * `behaviors[].value`.
+ * `behaviors[].value`. No `tag: "action"` container and no `lark_md` are ever
+ * emitted.
  */
 export function interactiveCardContent(text: string, rows: OutboundActionRow[]): string {
   const elements: object[] = [{ tag: 'markdown', content: text }];

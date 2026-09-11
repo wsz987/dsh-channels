@@ -18,7 +18,7 @@
  */
 import { type Context } from '@deepseek-ai/cordis';
 import { credentialRef } from '@deepseek-ai/dsh-credentials';
-import { settingsNamespace, type SettingsProvider } from '@deepseek-ai/dsh-settings';
+import type { SettingsProvider } from '@deepseek-ai/dsh-settings';
 import { mountChannelAdapter } from '@wsz987/channel-core';
 import type { DingTalkConfig } from './config.js';
 import { Config, DINGTALK_CLIENT_SECRET_REF } from './config.js';
@@ -83,6 +83,7 @@ export {
 export {
   DingTalkStreamUpstream,
   ackRobotMessage,
+  toCardInteractionRaw,
   toGatewayRaw,
   type DingTalkStreamClient,
   type DingTalkStreamMessage,
@@ -135,7 +136,7 @@ export function apply(ctx: Context, config: DingTalkConfig, deps: DingTalkAdapte
     // control plane can re-enable the channel later (doc §19/§20); runtime
     // auto-starts.
     const settings = ctx.get('settings') as SettingsProvider | undefined;
-    const scope = settings?.register(settingsNamespace('channels-dingtalk'), Config, { base: config });
+    const scope = settings?.register('channels-dingtalk', Config, { base: config });
     const effectiveConfig = scope?.get() ?? config;
     control.definitions.register(
       createDingTalkDefinition({

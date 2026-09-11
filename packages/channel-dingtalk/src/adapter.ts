@@ -89,7 +89,8 @@ export class DingTalkAdapter implements ChannelAdapter {
   /** Upstream compatibility manifest (read structurally by `channels doctor`). */
   readonly manifest: DingTalkManifest = dingTalkManifest;
 
-  readonly capabilities: ChannelCapabilities = {
+  readonly capabilities: ChannelCapabilities;
+  private static readonly BASE_CAPABILITIES: Omit<ChannelCapabilities, 'interactiveActions'> = {
     text: true,
     image: true,
     file: true,
@@ -156,6 +157,14 @@ export class DingTalkAdapter implements ChannelAdapter {
   private receiveSignal?: AbortSignal;
 
   constructor(private readonly config: DingTalkConfig, deps: DingTalkAdapterDeps = {}) {
+    this.capabilities = {
+      ...DingTalkAdapter.BASE_CAPABILITIES,
+      // Declared ONLY when the operator opted into a card template that must
+      // already be published in their own Card Platform with matching
+      // `text`/`actions` variables. A capability claimed without that
+      // precondition is a lie the question presenter pays for.
+      interactiveActions: config.upstream.mode === 'sdk' && Boolean(config.card.interactiveTemplateId?.trim()),
+    };
     this.now = deps.now ?? Date.now;
     this.deps = deps;
     this.secureFetch = deps.secureFetch ?? new SecureRemoteMediaFetcher();
@@ -184,6 +193,9 @@ export class DingTalkAdapter implements ChannelAdapter {
       logger: ctx.logger,
       proactive: this.officialPort,
       capabilities: this.capProactive,
+      interactiveTemplateId: this.config.card.interactiveTemplateId,
+      interactiveTextParam: this.config.card.interactiveTextParam,
+      interactiveActionsParam: this.config.card.interactiveActionsParam,
     });
 
     this.connected = false;
@@ -214,6 +226,13 @@ export class DingTalkAdapter implements ChannelAdapter {
       throw new ChannelError('CHANNEL_NOT_STARTED', 'dingtalk adapter is not started');
     }
     return this.outbound.send(target, message);
+  }
+
+  async edit(target: ChannelTarget, messageId: string, message: OutboundMessage): Promise<SendResult> {
+    if (!this.started || !this.outbound) {
+      throw new ChannelError('CHANNEL_NOT_STARTED', 'dingtalk adapter is not started');
+    }
+    return this.outbound.edit(target, messageId, message);
   }
 
   async createReply(target: ChannelTarget, _options?: CreateReplyOptions): Promise<ReplyHandle> {

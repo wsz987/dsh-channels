@@ -25,7 +25,7 @@
  * turn finished") so the platform does not redeliver it. Malformed payloads
  * are deliberately NOT acked, so the platform can retry / surface the error.
  */
-import { TOPIC_ROBOT } from 'dingtalk-stream';
+import { TOPIC_CARD, TOPIC_ROBOT } from 'dingtalk-stream';
 import type { ChannelTarget } from '@wsz987/channel-core';
 import type { CardCreateResult, DingTalkUpstream } from './upstream.js';
 import { z } from 'zod';
@@ -260,6 +260,36 @@ export function ackRobotMessage(
   client.socketCallBackResponse(messageId, { success: true });
 }
 
+export function toCardInteractionRaw(message: DingTalkStreamMessage): Record<string, unknown> | undefined {
+  if (typeof message.data !== 'string') return undefined;
+  let parsed: unknown;
+  try { parsed = JSON.parse(message.data) as unknown; } catch { return undefined; }
+  const schema = z.object({
+    outTrackId: z.string().min(1),
+    userId: z.string().min(1),
+    openConversationId: z.string().min(1).optional(),
+    cardActionData: z.object({
+      cardPrivateData: z.object({ params: z.record(z.string(), z.unknown()).optional() }).optional(),
+    }).default({}),
+  }).passthrough();
+  const result = schema.safeParse(parsed);
+  if (!result.success) return undefined;
+  const params = result.data.cardActionData.cardPrivateData?.params ?? {};
+  const action = typeof params.action === 'string' ? params.action : typeof params.actionId === 'string' ? params.actionId : undefined;
+  if (!action) return undefined;
+  return {
+    type: 'interaction',
+    msgId: message.headers?.messageId ?? result.data.outTrackId,
+    eventId: message.headers?.eventId,
+    senderId: result.data.userId,
+    conversationId: result.data.openConversationId ?? result.data.userId,
+    conversationType: result.data.openConversationId ? '2' : '1',
+    interactionId: result.data.outTrackId,
+    action,
+    value: params,
+  };
+}
+
 /** Stream-mode implementation of `DingTalkUpstream` (inbound via SDK). */
 export class DingTalkStreamUpstream implements DingTalkUpstream {
   /** The listener is registered once per client; reconnect reuses it. */
@@ -311,6 +341,14 @@ export class DingTalkStreamUpstream implements DingTalkUpstream {
       // ACK after submitting to the inbound pipeline ("reliably received"),
       // never after the LLM turn completes.
       ackRobotMessage(this.options.client, message);
+    });
+    this.options.client.registerCallbackListener(TOPIC_CARD, (message) => {
+      const raw = toCardInteractionRaw(message);
+      if (raw === undefined) return;
+      this.onMessage?.(raw);
+      if (message.headers?.messageId) {
+        this.options.client.socketCallBackResponse(message.headers.messageId, { success: true });
+      }
     });
     this.listenerRegistered = true;
   }

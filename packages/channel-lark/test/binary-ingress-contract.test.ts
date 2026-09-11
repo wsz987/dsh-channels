@@ -40,13 +40,11 @@ function makeConfig(overrides: Partial<LarkConfig> = {}): LarkConfig {
   return Config({
     enabled: true,
     accountId: 'main',
-    baseUrl: 'http://fake',
     timeoutMs: 1000,
-    longPollTimeoutMs: 1000,
     reconnect: { enabled: false, baseDelayMs: 1, maxDelayMs: 10, maxRetries: 2 },
     dedup: { enabled: false, windowMs: 5000 },
     card: { createOnFirstDelta: true, typingIndicator: false },
-    upstream: { mode: 'gateway' },
+    upstream: { appId: 'cli_binary' },
     ...overrides,
   });
 }

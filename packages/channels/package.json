@@ -65,7 +65,8 @@
     "client": {
       "platform": "web",
       "inject": [
-        "@deepseek-ai/dsh-client-locale"
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings"
       ]
     }
   },
@@ -89,7 +90,7 @@
     "@wsz987/channel-telegram": "workspace:*",
     "@wsz987/channel-qq": "workspace:*",
     "@wsz987/channel-weixin": "workspace:*",
-    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/cordis": "^4.0.2",
     "@wsz987/channel-web": "workspace:*",
     "@wsz987/channel-control": "workspace:*"
   },

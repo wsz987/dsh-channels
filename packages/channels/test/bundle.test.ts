@@ -90,14 +90,12 @@ const BUNDLE_CLIENT_URL = new URL('../lib/client.js', import.meta.url);
 const EXPECTED_ITEMS: PatchItem[] = [
   { id: 'channels-service', name: '@wsz987/dsh-channels/service' },
   { id: 'channels-files', name: '@wsz987/dsh-channels/files' },
-  // channel-harness injects the command-plane capabilities plus `apiProxy`:
-  // the loader-level service dependency orders this entry after the
-  // api-gateway fiber, so the question-backend probe at apply time is
-  // race-free (a missing inject lets the channel register the official
-  // UserQuestionProvider first and the gateway's registration then fails the
-  // boot with DUPLICATE_PROVIDER). Do not remove `apiProxy` without
-  // replacing this ordering guarantee.
-  { id: 'channels-harness', name: '@wsz987/dsh-channels/harness', inject: ['channels', 'agents', 'agentDefaultModel', 'agentPresets', 'llm', 'commands', 'apiProxy'] },
+  // channel-harness injects the command-plane capabilities. `apiProxy` is
+  // deliberately absent: questions compose on the official
+  // `user-questions/request` waterfall, where listener ORDER is a contract, so
+  // the bridge prepends its answerer (declined presentations delegate to the
+  // next answerer via `next()`).
+  { id: 'channels-harness', name: '@wsz987/dsh-channels/harness', inject: ['channels', 'agents', 'agentDefaultModel', 'agentPresets', 'llm', 'commands'] },
   // channel-control is the universal control plane: it must load before the
   // channel plugins so ctx.channelControl exists when they register definitions.
   { id: 'channels-control', name: '@wsz987/dsh-channels/control', inject: ['channels', 'credentials'] },
@@ -189,11 +187,12 @@ describe('bundle-owned Web client face', () => {
 
     expect(manifest.dsh?.client).toMatchObject({
       platform: 'web',
-      // rc.2 client module graph: `dsh.client.inject` lists only dynamic
+      // Current client module graph: `dsh.client.inject` lists only dynamic
       // client packages. react / cordis / ui-primitives / ui-slots are static
       // shell identities (PLATFORM_MODULES seeds) and must never appear here.
       inject: [
         '@deepseek-ai/dsh-client-locale',
+        '@deepseek-ai/dsh-client-ui-settings',
       ],
     });
     expect(manifest.exports?.['./client']).toBeTruthy();
@@ -264,10 +263,10 @@ describe('optional generic-file package boundary', () => {
       // Tool definitions carry private runtime symbols. A bundled dsh-tools
       // copy cannot register with the host registry that executes the tool.
       expect(manifest.dependencies).not.toHaveProperty('@deepseek-ai/dsh-tools');
-      // §16 tested compatibility band: exact pinned rc.2 (no wide prerelease ^).
-      expect(manifest.peerDependencies?.['@deepseek-ai/dsh-tools']).toBe('0.1.1-rc.2');
+      // Tested compatibility band: exact pin (no wide prerelease range).
+      expect(manifest.peerDependencies?.['@deepseek-ai/dsh-tools']).toBe('0.1.5-rc.2');
       expect(manifest.peerDependenciesMeta?.['@deepseek-ai/dsh-tools']?.optional).toBe(true);
-      expect(manifest.devDependencies?.['@deepseek-ai/dsh-tools']).toBe('0.1.1-rc.2');
+      expect(manifest.devDependencies?.['@deepseek-ai/dsh-tools']).toBe('0.1.5-rc.2');
     }
   });
 

@@ -72,7 +72,7 @@ Harness 本体是**闭源但可读的发布产物**：源码随 npm 包以 `lib/
 排查顺序：
 
 1. **定版本**：`dsh --version`（报告问题必须带版本号）。
-2. **读安装后的源码**：`node_modules/@deepseek-ai/*`。从包名猜实现位置，例如 `dsh-workspace`（工作区/归档）、`dsh-session-persistence-jsonl`（会话落盘）、`dsh-storage-json`（JSON 存储）、`dsh-host-apiproxy`（RPC API 契约）、`dsh-client-ui-*`（前端）、`dsh-web-app`（web bundle）。每个包的 `package.json` 有 `repository.directory` 指向 monorepo 目录，`README.md` 常引用仓库相对路径。
+2. **读安装后的源码**：`node_modules/@deepseek-ai/*`。从包名猜实现位置，例如 `dsh-workspace`（工作区/归档）、`dsh-session-persistence-jsonl`（会话落盘）、`dsh-storage-json`（JSON 存储）、`dsh-user-questions`（问题 waterfall seam）、`dsh-api-gateway` / `dsh-api-remotes`（Remote 网关与转发事件）、`dsh-client-ui-*`（前端）、`dsh-web-app`（web bundle）。每个包的 `package.json` 有 `repository.directory` 指向 monorepo 目录，`README.md` 常引用仓库相对路径。
 3. **排配置**：`dsh --help`（启动器 flag）、`dsh web --help`（web 应用 flag）、`dsh --profile web --dump-config`（合并后完整配置，含用户层与 `--patch`）、`--dump-default-config`（仅 bundle 层）。配置层优先级：各 bundle patch → profile `cordis.patch.yml` → `$DSH_HOME/cordis.patch.yml` → `--patch`；patch 是**整体替换**目标行 config，不是合并。
 4. **查数据目录** `~/.dsh`（`$DSH_HOME` 可覆盖；Windows 下 `%USERPROFILE%\.dsh`）：
 

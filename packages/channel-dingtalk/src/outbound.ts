@@ -18,6 +18,7 @@
 import type {
   ChannelLogger,
   ChannelTarget,
+  OutboundActionRow,
   OutboundMessage,
   SendResult,
 } from '@wsz987/channel-core';
@@ -52,6 +53,9 @@ export interface OutboundSenderOptions {
    * defaults to all-false (fail closed) when not supplied.
    */
   capabilities?: OutboxCapabilities;
+  interactiveTemplateId?: string;
+  interactiveTextParam?: string;
+  interactiveActionsParam?: string;
 }
 
 export class OutboundSender {
@@ -59,12 +63,19 @@ export class OutboundSender {
   private readonly logger: ChannelLogger;
   private readonly proactive?: DingTalkOpenApiPort;
   private readonly capabilities: OutboxCapabilities;
+  private readonly interactiveTemplateId?: string;
+  private readonly interactiveTextParam: string;
+  private readonly interactiveActionsParam: string;
+  private readonly interactiveCards = new Map<string, { text: string; actions: OutboundActionRow[] }>();
 
   constructor(options: OutboundSenderOptions) {
     this.reply = options.reply;
     this.logger = options.logger;
     this.proactive = options.proactive;
     this.capabilities = options.capabilities ?? { proactiveText: false, proactiveMedia: false };
+    this.interactiveTemplateId = options.interactiveTemplateId?.trim() || undefined;
+    this.interactiveTextParam = options.interactiveTextParam ?? 'text';
+    this.interactiveActionsParam = options.interactiveActionsParam ?? 'actions';
   }
 
   /** Proactive capability flags the harness outbox reads. */
@@ -82,6 +93,24 @@ export class OutboundSender {
     const probe = (target.raw ?? {}) as TargetRawProbe;
     const isReply = typeof probe.sessionWebhook === 'string' && probe.sessionWebhook !== '';
     try {
+      if (message.actions?.length) {
+        if (!this.proactive || !this.interactiveTemplateId || !this.capabilities.proactiveText) {
+          throw new ChannelSendError('dingtalk interactive card template is not configured');
+        }
+        const text = toTextPayload(target, message).content;
+        const result = await this.proactive.sendInteractiveCard({
+          target,
+          templateId: this.interactiveTemplateId,
+          text,
+          actions: message.actions,
+          textParam: this.interactiveTextParam,
+          actionsParam: this.interactiveActionsParam,
+        });
+        this.interactiveCards.set(result.outTrackId, { text, actions: message.actions });
+        // `outTrackId` is the stable identifier accepted by the official PUT
+        // update API; keep it as the contract messageId for later edits.
+        return { delivered: true, messageId: result.outTrackId, raw: result.raw };
+      }
       if (isReply || !this.proactive) {
         // REPLY path (sessionWebhook) — or gateway fallback (no proactive port).
         const payload = toTextPayload(target, message);
@@ -145,6 +174,23 @@ export class OutboundSender {
         `dingtalk send failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+  }
+
+  async edit(target: ChannelTarget, messageId: string, message: OutboundMessage): Promise<SendResult> {
+    if (!this.proactive) throw new ChannelSendError('dingtalk interactive card update is unavailable');
+    const known = this.interactiveCards.get(messageId);
+    if (!known) throw new ChannelSendError('dingtalk cannot edit an unknown interactive card');
+    const text = message.text ?? known.text;
+    const actions = message.actions ?? [];
+    const raw = await this.proactive.updateInteractiveCard({
+      outTrackId: messageId,
+      text,
+      actions,
+      textParam: this.interactiveTextParam,
+      actionsParam: this.interactiveActionsParam,
+    });
+    this.interactiveCards.set(messageId, { text, actions });
+    return { delivered: true, messageId, raw };
   }
 
   /**

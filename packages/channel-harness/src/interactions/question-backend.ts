@@ -1,30 +1,26 @@
 /**
- * Question interaction backend contract + one-shot capability selection.
+ * Question interaction backend contract + answerer assembly.
  *
- * Two official transports exist for the Harness question domain
- * (`ask_user_question` -> `ctx.userQuestions`):
+ * The official question domain (`ask_user_question` -> `ctx.userQuestions`)
+ * dispatches the `user-questions/request` Cordis waterfall; answerers claim a
+ * request by returning an answer or delegate with `next()`. The channel
+ * composes ONE waterfall answerer that serves every profile:
  *
- * - **Web profile**: the ApiProxy gateway is itself the registered
- *   `UserQuestionProvider` and forwards questions as `question/requested`
- *   mux frames. One Context allows exactly ONE provider
- *   (`registerProvider` throws `DUPLICATE_PROVIDER`), so the channel side
- *   must consume the mux stream here and NEVER register a provider of its
- *   own in this mode.
- * - **Headless / no ApiProxy**: nothing serves `ctx.userQuestions`, so the
- *   channel side registers its own official `UserQuestionProvider` and the
- *   tool call flows `ask_user_question` -> UserQuestionService -> provider ->
- *   channel -> resolve -> Agent continues. No ApiProxy is simulated.
+ * - **Headless**: the channel is typically the only answerer, so a declined
+ *   presentation fails the ask (`NO_PROVIDER` from the official service).
+ * - **Web profile**: the official Remote/Web answerer is composed on the same
+ *   waterfall and claims first unless the channel answerer is PREPENDED (see
+ *   `question-waterfall-backend.ts`); a channel decline still delegates to it.
  *
- * The mode is decided by ONE capability probe at startup, in this file
- * (no `if (version >= …)` scattering). A failed probe
- * fails safe: an explicit error is logged and channel question presentation
- * is disabled — never a silent double registration.
+ * There is no version branching here: the waterfall is the only transport,
+ * and the `userQuestions` probe is diagnostic (never an admission gate).
  *
  * Naming leaves room for the upcoming approval interaction:
  * everything here is `QuestionInteraction*` under `interactions/`,
- * and the official mux already carries `approval/requested` /
- * `approval/resolved` frames a future `ApprovalInteraction` can reuse.
+ * and the official domain already carries approval requests a future
+ * `ApprovalInteraction` can compose the same way.
  */
+import type { Context } from '@deepseek-ai/cordis';
 import type {
   AskUserQuestionAnswer,
   AskUserQuestionItem,
@@ -32,13 +28,12 @@ import type {
 import type { ChannelAdapter, ChannelLogger } from '@wsz987/channel-core';
 import type { AgentManager } from '../agent-manager.js';
 import type { ReplyContextStore } from '../reply-context-store.js';
-import { ApiProxyQuestionBackend, type ChannelQuestionApiProxy } from './question-apiproxy-backend.js';
-import { DirectQuestionBackend, type ChannelUserQuestionService } from './question-direct-backend.js';
+import { WaterfallQuestionBackend, type ChannelUserQuestionService } from './question-waterfall-backend.js';
 import { ChannelQuestionPresenter } from './question-presenter.js';
 
 /** One question batch arriving from the Harness question domain. */
 export interface QuestionInteractionRequest {
-  /** Correlation key the backend minted (ApiProxy rpcId / direct ask key). */
+  /** Correlation key the backend minted (the waterfall ask key). */
   key: string;
   sessionId: string;
   /** Official question items; every field (incl. `intent`) is carried verbatim. */
@@ -57,12 +52,13 @@ export interface QuestionInteractionSink {
    * @returns true when the channel took ownership (it will later resolve or
    * cancel through the backend); false when the channel declined (no bound
    * conversation, adapter absent / text unsupported, or a question already
-   * pending there) and the backend must settle the ask some other way.
+   * pending there) and the backend must delegate the ask to the next
+   * answerer.
    */
   questionRequested(request: QuestionInteractionRequest): Promise<boolean>;
   /**
-   * The question settled WITHOUT the channel — another client answered, or
-   * the owning tool call aborted. Removes stale channel controls.
+   * The question settled WITHOUT the channel — the owning tool call aborted.
+   * Removes stale channel controls.
    */
   questionSettledExternally(
     key: string,
@@ -85,7 +81,7 @@ export interface QuestionInteractionCancellation {
 }
 
 /** Which official transport a backend speaks. */
-export type QuestionBackendKind = 'apiproxy' | 'direct';
+export type QuestionBackendKind = 'waterfall';
 
 /**
  * Transport-neutral question domain port consumed by the presenter.
@@ -104,12 +100,16 @@ export interface QuestionInteractionBackend {
   cancel(cancellation: QuestionInteractionCancellation): Promise<void>;
 }
 
-/** Live service probes (startup snapshot; call sites stay dumb). */
+/**
+ * Live service probes. The waterfall answerer registers on `ctx` and never
+ * calls the service, so `getUserQuestions()` is a DIAGNOSTIC probe: it only
+ * decides whether the startup miss is logged.
+ */
 export interface QuestionBackendProbe {
-  /** The public ApiProxy gateway, when this deployment runs the Web profile. */
-  getApiProxy(): ChannelQuestionApiProxy | undefined;
   /** The official `ctx.userQuestions` service, when the host spine provides it. */
   getUserQuestions(): ChannelUserQuestionService | undefined;
+  /** Root Cordis context the waterfall listener registers on. */
+  ctx: Context;
 }
 
 /** Channel presentation dependencies shared by every backend mode. */
@@ -121,50 +121,43 @@ export interface QuestionInteractionDeps {
   timeoutMs: number;
 }
 
-export interface QuestionInteractionOptions extends QuestionInteractionDeps, QuestionBackendProbe {}
-
-/**
- * One-shot backend selection. ApiProxy wins whenever present —
- * in the Web profile ApiProxy is already the registered UserQuestion
- * provider, so the channel side consumes its mux stream instead of ever
- * registering a second provider. Only without ApiProxy does the channel
- * register the official provider headless. A probe that finds neither
- * transport fails safe: explicit error, no backend (never both).
- *
- * ORDERING CONTRACT: this probe is only race-free when the api-gateway fiber
- * has already applied (both sides claim the single provider slot; the second
- * registration throws DUPLICATE_PROVIDER and kills the boot). The stock
- * bundle guarantees that with `inject: [apiProxy]` on the channels-harness
- * patch row; custom hosts mounting the gateway must order the same way.
- */
-export function selectQuestionBackend(
-  probe: QuestionBackendProbe,
-  deps: Pick<QuestionInteractionDeps, 'logger'>,
-): QuestionInteractionBackend | undefined {
-  const apiProxy = probe.getApiProxy();
-  if (apiProxy) {
-    return new ApiProxyQuestionBackend({ apiProxy, logger: deps.logger });
-  }
-  const userQuestions = probe.getUserQuestions();
-  if (userQuestions) {
-    return new DirectQuestionBackend({ userQuestions, logger: deps.logger });
-  }
-  deps.logger.error(
-    '[channel-harness] user question backend unavailable: neither the public apiProxy gateway nor the userQuestions service is mounted; channel question presentation is disabled',
-  );
-  return undefined;
+export interface QuestionInteractionOptions extends QuestionInteractionDeps, Omit<QuestionBackendProbe, 'ctx'> {
+  ctx: Context;
 }
 
 /**
- * Assemble the whole question interaction stack: probe the transport once,
- * build the matching backend, and wire the channel presenter on top.
- * Returns undefined (after an explicit error log) when no transport exists.
+ * Backend selection: the waterfall answerer always exists, because it needs
+ * only the ROOT context — `ctx.userQuestions` dispatches the event, and this
+ * backend never calls the service. The probe is therefore DIAGNOSTIC ONLY.
+ *
+ * Treating a missing service as fatal (the pre-waterfall behavior) made a
+ * transient startup state permanent: profile rows are composed concurrently
+ * and `cordis.patch.yml` layers hot-reload, so a `userQuestions` service that
+ * mounts after the bridge used to leave channel question presentation
+ * disabled for the whole process — every channel-bound ask silently answered
+ * by the Web UI instead. A registered listener with no service is inert, so
+ * the answerer is composed unconditionally and the miss is only logged.
+ */
+export function selectQuestionBackend(
+  probe: Omit<QuestionBackendProbe, 'ctx'> & { ctx: Context },
+  deps: Pick<QuestionInteractionDeps, 'logger'>,
+): QuestionInteractionBackend {
+  if (!probe.getUserQuestions()) {
+    deps.logger.warn(
+      '[channel-harness] the userQuestions service is not mounted yet; the channel question answerer is registered anyway and claims asks as soon as the service appears',
+    );
+  }
+  return new WaterfallQuestionBackend({ ctx: probe.ctx, logger: deps.logger });
+}
+
+/**
+ * Assemble the whole question interaction stack: probe the service (diagnostic
+ * only), build the waterfall backend, and wire the channel presenter on top.
  */
 export function createQuestionInteraction(
   options: QuestionInteractionOptions,
-): ChannelQuestionPresenter | undefined {
+): ChannelQuestionPresenter {
   const backend = selectQuestionBackend(options, options);
-  if (!backend) return undefined;
   return new ChannelQuestionPresenter({
     backend,
     agentManager: options.agentManager,

@@ -73,6 +73,7 @@ not implemented yet.
 | reactions    | ❌        |
 | cards        | ❌        |
 | threads      | ✅        |
+| interactive actions | ✅ (inline keyboard buttons via `callback_query`) |
 | streaming    | DM Rich Draft; group plain preview + rich final edit; set `streaming.enabled: false` for buffered |
 
 ## Known limits

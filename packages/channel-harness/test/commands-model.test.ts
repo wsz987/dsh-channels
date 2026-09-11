@@ -252,31 +252,32 @@ describe('/model', () => {
     expect(saveSelection).toHaveBeenCalledWith({ provider: 'openai', model: 'ghost-model' });
   });
 
-  it('delegates a live-session switch and read to the official Host API when present', async () => {
+  it('delegates a live-session switch to the official sessionController when present', async () => {
     const rootCtx = new Context();
     new CommandRuntime(rootCtx);
-    const selectModel = vi.fn(async () => ({
-      result: { ok: true, value: { selected: { provider: 'openai', model: 'gpt-5.6' } } },
-    }));
-    const models = vi.fn(async () => ({
-      result: { ok: true, value: { current: { provider: 'openai', model: 'gpt-5.6' } } },
-    }));
-    rootCtx.provide('apiProxy', { sessions: { selectModel, models } });
+    const selectModel = vi.fn(async () => ({ selected: { provider: 'openai', model: 'gpt-5.6' } }));
+    rootCtx.provide('sessionController', { selectModel });
+    const saveSelection = vi.fn(async () => {});
+    rootCtx.provide('agentDefaultModel', {
+      currentSelection: () => ({ provider: 'old', model: 'old-model' }),
+      saveSelection,
+    });
     withLlm(rootCtx, { openai: { models: [{ id: 'gpt-5.6', name: 'GPT 5.6' }] } });
     const { bridge, adapter, gateway } = makeBridge(rootCtx);
     await bridge.handleChannelEvent(makeMessageEvent('hello'));
     const sessionId = gateway.agents.keys().next().value as string;
     await bridge.handleChannelEvent(makeMessageEvent('/model openai gpt-5.6', 'm2'));
     expect(selectModel).toHaveBeenCalledWith({
-      rpcId: expect.any(String),
-      payload: { sessionId, provider: 'openai', model: 'gpt-5.6' },
+      sessionId: SessionId(sessionId),
+      provider: 'openai',
+      model: 'gpt-5.6',
     });
+    expect(lastSent(adapter)).toContain('模型已切换');
+    // Host mode owns no local ModelSelectionRef: the plain `/model` read falls
+    // back to the local chain (header/options/default) and never RPCs the host.
     await bridge.handleChannelEvent(makeMessageEvent('/model', 'm3'));
-    expect(models).toHaveBeenCalledWith({
-      rpcId: expect.any(String),
-      payload: { sessionId },
-    });
-    expect(lastSent(adapter)).toContain('Provider: openai');
+    expect(selectModel).toHaveBeenCalledOnce();
+    expect(lastSent(adapter)).toContain('Provider: old');
   });
 });
 
@@ -307,8 +308,8 @@ describe('ChannelModelSelectionController', () => {
     const controller = new ChannelModelSelectionController(rootCtx);
     const agent = fakeAgent(rootCtx, 's-late-host');
     const dispose = controller.install(agent.ctx);
-    const selectModel = vi.fn(async () => ({ result: { ok: true } }));
-    rootCtx.provide('apiProxy', { sessions: { selectModel } });
+    const selectModel = vi.fn(async () => ({ selected: { provider: 'local', model: 'local-model' } }));
+    rootCtx.provide('sessionController', { selectModel });
 
     await controller.select(agent as never, { provider: 'local', model: 'local-model' });
 
@@ -319,19 +320,23 @@ describe('ChannelModelSelectionController', () => {
 
   it('keeps a Host Agent owner while the Host implementation is replaced', async () => {
     const rootCtx = new Context();
-    const hostOneSelect = vi.fn(async () => ({ result: { ok: true } }));
-    const hostOneDispose = rootCtx.provide('apiProxy', { sessions: { selectModel: hostOneSelect } });
+    const hostOneSelect = vi.fn(async () => ({ selected: { provider: 'host', model: 'host-model' } }));
+    const hostOneDispose = rootCtx.provide('sessionController', { selectModel: hostOneSelect });
     const controller = new ChannelModelSelectionController(rootCtx);
     const agent = fakeAgent(rootCtx, 's-host-hmr');
     const dispose = controller.install(agent.ctx);
     hostOneDispose();
-    const hostTwoSelect = vi.fn(async () => ({ result: { ok: true } }));
-    rootCtx.provide('apiProxy', { sessions: { selectModel: hostTwoSelect } });
+    const hostTwoSelect = vi.fn(async () => ({ selected: { provider: 'host', model: 'host-model' } }));
+    rootCtx.provide('sessionController', { selectModel: hostTwoSelect });
 
     await controller.select(agent as never, { provider: 'host', model: 'host-model' });
 
     expect(hostOneSelect).not.toHaveBeenCalled();
-    expect(hostTwoSelect).toHaveBeenCalledOnce();
+    expect(hostTwoSelect).toHaveBeenCalledWith({
+      sessionId: SessionId('s-host-hmr'),
+      provider: 'host',
+      model: 'host-model',
+    });
     dispose();
   });
 });

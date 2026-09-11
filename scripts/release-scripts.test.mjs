@@ -122,6 +122,10 @@ test('Changesets ignores development and governance packages', () => {
     '@wsz987/channel-compat',
     '@wsz987/channel-verify',
   ]);
+  // Private workspace apps must never be versioned or tagged: without this,
+  // `changeset version` bumps apps/fake-channel and writes it a CHANGELOG that
+  // no publish step can ever consume.
+  assert.deepEqual(config.privatePackages, { version: false, tag: false });
 });
 
 test('npm dist-tag follows the bundle release channel', () => {

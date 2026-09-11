@@ -57,6 +57,8 @@ function secureFetch(data: Uint8Array, mimeType?: string, calls?: Array<{ url: s
 const PORT_METHODS = [
   'getAccessToken',
   'sendProactiveText',
+  'sendInteractiveCard',
+  'updateInteractiveCard',
   'uploadMedia',
   'sendMedia',
   'createCard',
@@ -178,6 +180,45 @@ describe('DingTalkOpenApiPortImpl — method inventory', () => {
     expect(resolved.mimeType).toBe('image/jpeg');
     expect(fetchCalls[0]?.url).toBe('http://cdn.example.com/a.jpg');
     expect(fetchCalls[0]?.options.allowHttp).toBe(false);
+  });
+});
+
+describe('DingTalkOpenApiPortImpl — interactive cards', () => {
+  it('sends and updates an interactive card through the official endpoints', async () => {
+    const transport = new FakeTransport()
+      .route(tokenPath, () => ({ accessToken: 'token-1', expireIn: 7200 }))
+      .route(`${API}/v1.0/im/interactiveCards/send`, () => ({ processQueryKey: 'card-msg-1' }))
+      .route(`${API}/v1.0/im/interactiveCards`, () => ({ success: true }));
+    const port = new DingTalkOpenApiPortImpl({ transport, clientId: 'ding-app', clientSecret: 'secret', now: () => 1000 });
+    const sent = await port.sendInteractiveCard({
+      target: target({ robotCode: 'robot-1' }),
+      templateId: 'template-1.schema',
+      text: '请选择',
+      actions: [{ actions: [{ id: 'continue', label: '继续', style: 'primary' }] }],
+      textParam: 'text',
+      actionsParam: 'actions',
+    });
+    expect(sent.messageId).toBe('card-msg-1');
+    expect(sent.outTrackId).toMatch(/^action_1000_/);
+    const sendCall = transport.calls.find((call) => call.path.endsWith('/interactiveCards/send'));
+    expect(sendCall?.init?.body).toMatchObject({
+      cardTemplateId: 'template-1.schema',
+      openConversationId: 'cid_123',
+      robotCode: 'robot-1',
+      cardData: { cardParamMap: { text: '请选择', actions: JSON.stringify([{ id: 'continue', label: '继续', style: 'primary' }]) } },
+    });
+    await port.updateInteractiveCard({
+      outTrackId: sent.outTrackId,
+      text: '已选择继续',
+      actions: [],
+      textParam: 'text',
+      actionsParam: 'actions',
+    });
+    const updateCall = transport.calls.find((call) => call.path.endsWith('/interactiveCards') && call.init?.method === 'PUT');
+    expect(updateCall?.init?.body).toEqual({
+      outTrackId: sent.outTrackId,
+      cardData: { cardParamMap: { text: '已选择继续', actions: '[]' } },
+    });
   });
 });
 

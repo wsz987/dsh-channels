@@ -23,10 +23,12 @@ function fakeUpstream(): LarkUpstream & Record<string, ReturnType<typeof vi.fn>>
     sendText: vi.fn().mockResolvedValue({ id: 'out-text' }),
     sendMedia: vi.fn().mockResolvedValue({ id: 'out-img' }),
     sendFile: vi.fn().mockResolvedValue({ id: 'out-file' }),
-    createCard: vi.fn().mockResolvedValue({ cardId: 'card-1' }),
-    updateCard: vi.fn().mockResolvedValue({}),
-    finishCard: vi.fn().mockResolvedValue({}),
-    failCard: vi.fn().mockResolvedValue({}),
+    sendInteractive: vi.fn().mockResolvedValue({}),
+    updateInteractive: vi.fn().mockResolvedValue({}),
+    createCardEntity: vi.fn().mockResolvedValue({ cardId: 'cc-1' }),
+    sendCardEntity: vi.fn().mockResolvedValue({ messageId: 'om-1' }),
+    updateCardElementContent: vi.fn().mockResolvedValue({}),
+    finishStreamingCard: vi.fn().mockResolvedValue({}),
   };
   return outbound as LarkUpstream & Record<string, ReturnType<typeof vi.fn>>;
 }

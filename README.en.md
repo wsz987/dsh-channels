@@ -58,7 +58,7 @@ Once installed, configure and authorize channels via QR code in the Harness Web 
 ## Before you start
 
 - Confirm that `npx @deepseek-ai/dsh` runs and a normal Harness Web session can chat.
-- **The 0.5.x line requires DeepSeek Harness `0.1.1-rc.2` or newer and Node `22.19+`**; users still on Harness `0.1.0-rc.7` should stay on `0.4.x` (see the [compatibility matrix](docs/compatibility-matrix.md)).
+- **The 0.5.x line requires DeepSeek Harness `0.1.5-rc.2` and Node `22.19+`**; that version sits on npm's `next` tag (`latest` is still `0.1.5-rc.1`), so upgrade with an **explicit version** (or `@next`) rather than `@latest`. Users still on Harness `0.1.0-rc.7` / `0.1.1-rc.2` should stay on `0.4.x` (see the [compatibility matrix](docs/compatibility-matrix.md)).
 - Channel sessions normally use `Workspace Write`; enable `Full access` only when the task must access files outside the Workspace and you trust it.
 - The project is evolving quickly; back up your data before upgrading.
 
@@ -86,7 +86,7 @@ Keep the `-w` flag when installing, updating and uninstalling.
 > **Crossing a release line (e.g. 0.4.x → 0.5.x)?** `update` only refreshes within the current package.json range. Crossing a release line requires **upgrading the Harness CLI first, then re-adding the bundle with `@latest`** (in that order — running the newer bundle on an old host is not supported):
 >
 > ```bash
-> npm i -g @deepseek-ai/dsh@latest   # upgrade Harness first (0.5.x needs 0.1.1-rc.2+, Node >= 22.19)
+> npm i -g @deepseek-ai/dsh@0.1.5-rc.2   # upgrade Harness first (current baseline; on npm's next tag — @latest is still rc.1)
 > npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@latest
 > ```
 
@@ -163,6 +163,8 @@ In any channel conversation you can send slash commands, parsed and executed by 
 | `/version` | Show the bundle version, Harness compatibility baseline and update hint |
 | `/models [provider]` | List the model providers and their models registered in Harness |
 | `/model [<provider> <model> [<reasoningEffort>]]` | Show or switch the current session's model |
+| `/mirror [on\|off]` | Toggle mirror mode: when on, replies to turns you start in Web / CLI are also delivered to this conversation (off by default, persisted) |
+| `/bind <session-id> [confirm]` | Rebind this conversation to an existing session (resolve first, then add `confirm` to apply) |
 
 If the host loads official plugins (`/compact`, `/goal`, `/plan`, `/feedback`, ...), those commands also appear in channels automatically — no channel upgrade needed.
 `/help` renders with Markdown and follows the `locale.preference` (`zh` / `en`) that Harness Web writes to `$DSH_HOME/settings.yaml`; when unset, the channel side defaults to Chinese.
@@ -191,7 +193,7 @@ To reuse the Harness launch directory or disable isolation, override `channels-h
 ```yaml
 - id: channels-harness
   name: '@wsz987/dsh-channels/harness'
-  inject: [channels, agents, agentDefaultModel, agentPresets, llm, commands, apiProxy]
+  inject: [channels, agents, agentDefaultModel, agentPresets, llm, commands]
   config:
     workspace:
       mode: channel-account # channel-account (default) | host-cwd | disabled

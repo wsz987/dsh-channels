@@ -121,10 +121,21 @@ reconnect.maxRetries = 10
 dedup.enabled = true
 dedup.windowMs = 5000
 card.createOnFirstDelta = true
+card.interactiveTemplateId = <unset by default>   # opt-in question buttons
+card.interactiveTextParam = text
+card.interactiveActionsParam = actions
 upstream.mode = sdk
 upstream.clientId?
 upstream.clientSecretRef = DSH_CHANNEL_DINGTALK_MAIN_CLIENT_SECRET
 ```
+
+`card.interactiveTemplateId` has **no default**: question buttons require a Card
+Platform template published in the operator's own org with matching
+`text`/`actions` variables, so `interactiveActions` is `false` unless the
+operator sets it. Without it questions use the numbered-text path (same as
+Weixin). A configured template whose send still fails degrades to text (see
+`question-presenter.ts`). LIVE-REQUIRED before claiming button verification: a
+real click arriving on the `/v1.0/card/instances/callback` STREAM topic.
 
 Deprecated migration-only:
 
@@ -149,9 +160,7 @@ authMethods: [credentials, hybrid]
 ```text
 enabled = true
 accountId = main
-baseUrl = http://127.0.0.1:9300
 timeoutMs = 30000
-longPollTimeoutMs = 25000
 reconnect.enabled = true
 reconnect.baseDelayMs = 1000
 reconnect.maxDelayMs = 30000
@@ -160,16 +169,19 @@ dedup.enabled = true
 dedup.windowMs = 5000
 card.createOnFirstDelta = true
 card.typingIndicator = true
-upstream.mode = sdk
+upstream.mode = sdk          # fixed literal — the official SDK is the only upstream driver
 upstream.appId?
 upstream.appSecretRef = DSH_CHANNEL_LARK_MAIN_APP_SECRET
 upstream.domain = feishu
 ```
 
-Deprecated migration-only:
+Fail-closed config governance:
 
 ```text
-upstream.appSecret
+upstream.mode: 'gateway'    → rejected (fails config validation, mode is a fixed 'sdk' literal)
+upstream.appSecret          → not part of the config schema; the secret is resolved only via
+                              upstream.appSecretRef from ctx.credentials (no plaintext field,
+                              no runtime migration)
 ```
 
 ### Telegram
@@ -283,21 +295,33 @@ POST /v1.0/robot/messageFiles/download
 POST /v1.0/card/instances
 POST /v1.0/card/instances/deliver
 PUT  /v1.0/card/streaming
+# OPT-IN question buttons (card.interactiveTemplateId required)
+POST /v1.0/im/interactiveCards/send
+PUT  /v1.0/im/interactiveCards
+# STREAM card callback topic (dingtalk-stream TOPIC_CARD)
+/v1.0/card/instances/callback
 ```
 
 ### Lark
 
 ```text
-WS long connection:
+WS long connection (official SDK WSClient + EventDispatcher):
   im.message.receive_v1
   card.action.trigger
 
-OpenAPI:
+OpenAPI (official SDK Client):
   im.v1.message.create
-  im.v1.message.patch
-  im.v1.chat.get (card-action chat mode confirmation)
+  im.v1.message.patch            # rewrite an already-sent interactive card
+  im.v1.chat.get                 # card-action chat mode confirmation
   im.v1.image.create
   im.v1.file.create
+  im.v1.messageResource.get      # inbound resource download (media port)
+
+CardKit 2.0 (native streaming + card entities):
+  cardkit.v1.card.create         # Card JSON 2.0 entity
+  cardkit.v1.card.settings       # close streaming_mode + summary
+  cardkit.v1.cardElement.content # native "typewriter" stream update
+  (cardkit.v1.card.update / batchUpdate / cardElement.update when needed)
 
 Optional typing:
   addReaction

@@ -45,10 +45,13 @@ profile still boots.
 The package declares a `dsh.client` block so the Harness Web runtime loads the
 client surface from `@wsz987/channel-web/client`.
 
-Against the rc.2 client module graph the contract is:
+Against the Harness `0.1.5-rc.2` client module graph the contract is:
 
-- `dsh.client.inject` lists **dynamic client packages only** (currently
-  `@deepseek-ai/dsh-client-locale`, provider of the `locale` service).
+- `dsh.client.inject` lists client package dependency edges:
+  `@deepseek-ai/dsh-client-locale` provides the `locale` service and
+  `@deepseek-ai/dsh-client-ui-settings` owns the settings slot contract/runtime.
+  `dsh.client.external` is reserved for exact non-platform module requests;
+  this bundle has none.
   `react`, `@deepseek-ai/cordis`, `@deepseek-ai/dsh-client-ui-primitives` and
   `@deepseek-ai/dsh-client-ui-slots` are **static shell identities**
   (`PLATFORM_MODULES` seeds compiled into the Vite shell) and must never

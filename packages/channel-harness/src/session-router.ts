@@ -49,6 +49,15 @@ export interface SessionBinding {
    * temporarily unavailable persistence service cannot trigger recreation.
    */
   durability?: SessionDurability;
+  /**
+   * Opt-in mirror (issue #5): when true, turns initiated OUTSIDE the channel
+   * (web/CLI) on this bound session deliver their final assistant text to the
+   * bound conversation as buffered replies. Off by default — a non-channel
+   * turn must never auto-route without explicit owner consent. Toggled by the
+   * `/mirror` channel command; transient platform state still never travels
+   * through the binding.
+   */
+  mirror?: boolean;
   /** Routing snapshot used for create/resume parity. */
   route: AgentRouteSpec;
   schemaVersion: typeof SESSION_BINDING_SCHEMA_VERSION;

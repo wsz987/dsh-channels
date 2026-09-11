@@ -5,7 +5,8 @@
  * Raw payloads only ever ride along in `event.raw` for debugging — core and
  * the harness bridge never depend on their shape (red line 6).
  *
- * Lark-ish raw shapes are protocol-level and deliberately simple, e.g.:
+ * Lark canonical raw shapes are deliberately simple (produced by
+ * `mapSdkMessageEvent` / `mapSdkCardAction` from official SDK events), e.g.:
  * ```json
  * { "type": "text", "msgId": "msg_1", "senderId": "ou_123",
  *   "conversationId": "oc_456", "threadId": "om_789", "content": "hello" }
@@ -84,7 +85,7 @@ function parseLarkRaw(raw: unknown): LarkRaw {
   return parsed.data;
 }
 
-/** Stable hash for ids when the gateway omits a msgId. */
+/** Stable hash for ids when the SDK event omits a msgId. */
 export function simpleHash(input: string): string {
   let hash = 0;
   for (let i = 0; i < input.length; i += 1) {
@@ -121,7 +122,7 @@ export function mapInbound(raw: unknown, meta: LarkInboundMeta): MessageReceived
   const value = parseLarkRaw(raw);
   const sender: SenderId = (value.senderId ?? 'unknown') as SenderId;
   // Lark payloads carry a conversation id; fall back to the sender when the
-  // gateway omits it (direct/one-off payloads).
+  // SDK event omits it (direct/one-off payloads).
   const conversationId: ConversationId = (value.conversationId ?? sender) as ConversationId;
 
   const messageId: MessageId = value.msgId
@@ -174,9 +175,8 @@ function partsFor(raw: LarkRaw): MessagePart[] {
     case 'picture': {
       // Per the url/resourceRef rule a Lark image locator is an opaque image_key (NOT a
       // URL): it MUST live in `resourceRef`, never `url` — `url` is reserved
-      // for genuine http(s) URLs. The real SDK path sets picUrl = image_key
-      // (opaque → resourceRef); a legacy gateway that already resolved it to
-      // an http(s) URL keeps the URL carrier.
+      // for genuine http(s) URLs. The SDK path sets picUrl = image_key
+      // (opaque → resourceRef).
       const locator = raw.picUrl ?? raw.mediaUrl;
       const part: ImagePart = { type: 'image', alt: raw.title };
       if (isHttpUrl(locator)) part.url = locator;

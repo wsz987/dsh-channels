@@ -17,7 +17,12 @@
 /** Schema version of `StoredChannelAsset` (mirrors the v1 directory). */
 export const ASSET_SCHEMA_VERSION = 1 as const;
 
-export type ChannelAssetKind = 'file' | 'audio' | 'video';
+export type ChannelAssetKind = 'file' | 'audio' | 'video' | 'image';
+// `image` exists so the inbound image path can MIRROR the harness
+// attachment-store bytes under the model-visible `sha256:…` attachmentId
+// (issue #7): the harness image seam stays authoritative, the asset store
+// copy is only an outbound-resolution mirror. Ordinary binary inbound
+// processing still produces only file/audio/video kinds.
 
 export type ExtractionStatus =
   | 'not-needed'

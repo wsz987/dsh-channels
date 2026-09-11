@@ -9,17 +9,16 @@
  * - `setup.fields`   — `appId` is a plain config string (kind 'text'); `appSecret`
  *                       is a secret referenced by `LARK_APP_SECRET_REF` and only
  *                       ever written through the credentials seam (doc §31).
- * - `getConfiguredState` — SDK mode is configured when both `appId` (config) and
- *                       the `appSecretRef` credential exist; gateway mode owns its
- *                       credentials inside the self-hosted gateway so it reports
- *                       configured=true.
- * - `saveConfig`     — merges only non-secret keys (appId/domain/mode + nested
+ * - `getConfiguredState` — the official-SDK adapter is configured when both
+ *                       `appId` (config) and the `appSecretRef` credential exist.
+ * - `saveConfig`     — merges only non-secret keys (appId/domain + nested
  *                       reconnect/dedup/card + accountId/enabled) into an internal
  *                       mutable snapshot used by createAdapter. Secret fields are
  *                       rejected upstream by the control plane.
- * - `createAdapter`  — SDK mode resolves `appSecretRef` via the injected credentials
- *                       seam and throws a stable error when it is missing; gateway
- *                       mode needs no resolved credentials.
+ * - `createAdapter`  — resolves `appSecretRef` via the injected credentials seam
+ *                       and throws a stable error when either the AppId or the
+ *                       credential is missing (fail closed; the official SDK is
+ *                       the only upstream driver).
  * - `setup.setupUrl` — points at the official Feishu/Lark console. Console
  *                       navigation is not modeled as an auth session.
  *
@@ -67,7 +66,7 @@ export interface CreateLarkDefinitionOptions {
 /** Allowed non-secret nested sub-config keys merged by saveConfig. */
 const NESTED_KEYS = ['reconnect', 'dedup', 'card'] as const;
 /** Allowed non-secret 'upstream.*' keys merged by saveConfig (doc §30). */
-const UPSTREAM_KEYS = ['appId', 'domain', 'mode'] as const;
+const UPSTREAM_KEYS = ['appId', 'domain'] as const;
 
 /** Deep-copy a LarkConfig into an independent mutable snapshot. */
 function snapshotOf(config: LarkConfig): LarkConfig {
@@ -140,16 +139,6 @@ export function createLarkDefinition(
   const configuredState = async (): Promise<ConfiguredState> => {
     const appIdConfigured = Boolean(state.upstream.appId);
     const secret = await credentials.describe(appSecretRef());
-    if (state.upstream.mode === 'gateway') {
-      // Gateway owns platform credentials; only appId is plain config here.
-      return {
-        configured: true,
-        fields: {
-          appId: { configured: appIdConfigured, writable: true, value: state.upstream.appId },
-          appSecret: { configured: true, writable: true },
-        },
-      };
-    }
     const configured = appIdConfigured && secret.configured;
     return {
       configured,
@@ -214,9 +203,6 @@ export function createLarkDefinition(
   };
 
   const createAdapter = async () => {
-    if (state.upstream.mode === 'gateway') {
-      return new LarkAdapter(state, deps);
-    }
     const appId = state.upstream.appId;
     const resolved = await credentials.resolve(appSecretRef());
     const appSecret = resolved?.value;
@@ -224,7 +210,7 @@ export function createLarkDefinition(
       // Stable, logged-out error — never includes the secret value.
       throw new ChannelError(
         'CHANNEL_ERROR',
-        `lark upstream mode "sdk" requires configured appId (config) and appSecret (credentials ref ${appSecretRef()})`,
+        `lark upstream requires configured appId (config) and appSecret (credentials ref ${appSecretRef()})`,
       );
     }
     return new LarkAdapter(state, { ...deps, appId, appSecret });

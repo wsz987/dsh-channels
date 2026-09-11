@@ -30,11 +30,13 @@ import { SessionId, type Session, type SessionStore } from '@deepseek-ai/dsh-ses
 import type { ChannelAdapter, ChannelEvent, ChannelLogger, ChannelService, ChannelTarget } from '@wsz987/channel-core';
 import type { Config } from './config.js';
 import { createBindingStore } from './binding-store.js';
-import { AgentManager, HarnessAgentGateway } from './agent-manager.js';
+import { AgentManager, HarnessAgentGateway, resolvePersistedInspection } from './agent-manager.js';
+import { confirmBindTarget, resolveBindTarget } from './bind-support.js';
 import { AgentRouter } from './agent-router.js';
 import { ReplyRouter } from './reply-router.js';
 import { ChannelHarnessBridge } from './bridge.js';
 import { ChannelOutboxService } from './outbox/service.js';
+import { OutboxError } from './outbox/types.js';
 import { HarnessChannelWorkspaceResolver } from './workspace-resolver.js';
 import { ReplyContextStore, type ChannelReplyContext } from './reply-context-store.js';
 import type { ChannelHarnessBridgeOptions } from './bridge.js';
@@ -42,9 +44,9 @@ import type { SaveImageHook } from './message-converter.js';
 import { installDebugConsoleExporter } from './debug-logger.js';
 import { StoredChannelAccessPolicyResolver } from './access/resolver.js';
 import type { ChannelAttachmentProvider } from './file-provider.js';
+import { liveAttachmentProvider } from './file-provider.js';
 import { createQuestionInteraction } from './interactions/question-backend.js';
 import type {
-  ChannelQuestionApiProxy,
   ChannelUserQuestionService,
 } from './interactions/index.js';
 
@@ -71,15 +73,16 @@ export function startBridge(
     channels.get(channelId);
 
   const replyContexts = new ReplyContextStore();
-  // One-shot capability probe: with the public ApiProxy
-  // gateway mounted (Web profile) questions ride the official mux frames and
-  // the channel side NEVER registers a user-questions provider; without it
-  // (headless) the channel registers the official UserQuestionProvider
-  // through ctx.userQuestions. The probe lives entirely in
-  // interactions/question-backend.ts and fails safe with an explicit error.
+  // Question answerer composition: the channel composes ONE PREPENDED answerer
+  // on the official `user-questions/request` waterfall — headless it is
+  // typically the only answerer; in the Web profile it must win over the
+  // official Remote/Web answerer (which registers at boot, before this bridge)
+  // or every channel-bound ask would be swallowed by the browser. A declined
+  // presentation still delegates via `next()`. Everything lives in
+  // interactions/question-backend.ts.
   const questionPresenter = config.userQuestions.enabled
     ? createQuestionInteraction({
-        getApiProxy: () => ctx.get('apiProxy') as ChannelQuestionApiProxy | undefined,
+        ctx,
         getUserQuestions: () => ctx.get('userQuestions') as ChannelUserQuestionService | undefined,
         agentManager,
         replyContexts,
@@ -90,17 +93,29 @@ export function startBridge(
     : undefined;
   questionPresenter?.start();
 
-  // Optional attachment service -> real image path (WX5). Absent in deployments
-  // without an attachment backend; the converter then keeps text placeholders.
-  const attachments = ctx.get('attachments');
-  const saveImage: SaveImageHook | undefined = attachments
-    ? (input) => attachments.saveImage(input)
-    : undefined;
+  // Optional attachment service -> real image path (WX5). Resolved LIVE at
+  // every use, exactly like `sessionPersistence` above: the profile entry group
+  // creates every row concurrently (`Promise.allSettled`), so a startup
+  // snapshot can precede the service's own fiber. A deployment without an
+  // attachment backend keeps today's fallback — the hook throws, `imageBlock`
+  // catches, and the converter emits the deterministic text placeholder.
+  const saveImage: SaveImageHook = async (input) => {
+    const attachments = ctx.get('attachments');
+    if (!attachments) {
+      throw new Error('the Harness attachments service is not mounted');
+    }
+    return attachments.saveImage(input);
+  };
 
   // Optional generic-file extension. Harness currently has a native image
   // service but no generic FileBlock/FileAttachment surface, so deployments
-  // may provide this separately without coupling document parsers to the bridge.
-  const fileProvider = ctx.get('channelFiles') as ChannelAttachmentProvider | undefined;
+  // may provide this separately without coupling document parsers to the
+  // bridge. The provider is resolved LIVE per call (see
+  // `liveAttachmentProvider`): the bundle's `channels-files` row loads
+  // concurrently with this plugin, and deleting that row must stay supported.
+  const resolveFileProvider = (): ChannelAttachmentProvider | undefined =>
+    ctx.get('channelFiles') as ChannelAttachmentProvider | undefined;
+  const fileProvider: ChannelAttachmentProvider = liveAttachmentProvider(resolveFileProvider);
 
   // Best-effort typing indicator wiring: a typing API failure must NEVER break
   // the inbound/outbound flow, so every call is fire-and-forget with a swallow.
@@ -169,15 +184,44 @@ export function startBridge(
   const outbox = new ChannelOutboxService({
     bindingStore,
     getAdapter,
-    attachmentResolver: fileProvider
-      ? (attachmentId, sessionId) => fileProvider.resolveAttachment(attachmentId, sessionId)
-      : undefined,
+    // Live again: the resolver runs per send, so a provider mounted after the
+    // bridge started (or an HMR replacement) is picked up instead of leaving
+    // the outbox permanently without an attachment resolver (issue #7).
+    attachmentResolver: async (attachmentId, sessionId) => {
+      const provider = resolveFileProvider();
+      if (!provider) {
+        throw new OutboxError(
+          'OUTBOX_CAPABILITY_UNAVAILABLE',
+          'outbound attachments require a private asset store that is not configured',
+          { sessionId },
+        );
+      }
+      return provider.resolveAttachment(attachmentId, sessionId);
+    },
     logger,
   });
 
   let bridge!: ChannelHarnessBridge;
   const commandDeps: ChannelHarnessBridgeOptions['commandDeps'] = {
     startNewSession: (agent) => bridge.startNewSession(agent),
+    // /mirror (issue #5): the toggle state lives on the durable binding.
+    mirror: {
+      get: async (agent) =>
+        (await bindingStore.findBySessionId(String(agent.id)))?.mirror === true,
+      set: async (agent, on) => {
+        const binding = await bindingStore.findBySessionId(String(agent.id));
+        if (!binding) throw new Error(`no session binding for '${String(agent.id)}'`);
+        await bindingStore.put({ ...binding, mirror: on, updatedAt: Date.now() });
+      },
+    },
+    // /bind (issue #6): fail-closed rebind support over the durable bindings
+    // and the persisted session universe.
+    bind: {
+      resolve: (agent, query) =>
+        resolveBindTarget(agentGateway, bindingStore, agent, query),
+      confirm: (agent, sessionId) =>
+        confirmBindTarget(agentGateway, bindingStore, agent, sessionId),
+    },
   };
   // Fail-closed Access Gate: production ALWAYS resolves the
   // policy from the shared ChannelStorage and logs decisions on the
@@ -300,12 +344,15 @@ async function reconcileReplies(
     try {
       const live = sessions?.get(SessionId(sessionId)) as Session | undefined;
       if (live) {
-        await replyRouter.reconcileSession({ id: sessionId, events: live.events });
+        await replyRouter.reconcileSession({ id: sessionId, events: live.snapshotEvents() });
         continue;
       }
       if (persistence) {
-        const inspection = await persistence.inspect(SessionId(sessionId));
-        await replyRouter.reconcileSession({ id: sessionId, events: inspection.events });
+        // V3 persistence inspection uses the public read handle.
+        const inspection = await resolvePersistedInspection(persistence, SessionId(sessionId));
+        if (inspection) {
+          await replyRouter.reconcileSession({ id: sessionId, events: inspection.events });
+        }
       }
       // else: no live session and no persistence — skip gracefully.
     } catch (error) {

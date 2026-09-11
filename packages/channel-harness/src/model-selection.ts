@@ -4,31 +4,33 @@
  * Harness owns the default model and the Web Host owns the session RPC. The
  * channel only bridges `/model` to those official surfaces. In headless mode
  * it uses the official Agent-scoped `ModelSelectionRef` required to affect the
- * current Session. There is no per-Agent owner pin, apiProxy identity cache,
+ * current Session. There is no per-Agent owner pin, host identity cache,
  * first-turn prepare, or fallback state machine.
+ *
+ * Host transport: the official `ctx.sessionController`
+ * (`@deepseek-ai/dsh-api-session-controller`), which the Web profile mounts as
+ * the session business API. Selection goes through
+ * `sessionController.selectModel()`; the current-selection read is a
+ * best-effort local chain (a Web-side selection that is pending but not yet
+ * used by a request is not visible here — the official controller does not
+ * expose a host-side current-selection read).
  */
-import { randomUUID } from 'node:crypto';
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent, ModelSelection, ModelSelectionRef } from '@deepseek-ai/dsh-agent';
 import { installModelSelection } from '@deepseek-ai/dsh-agent';
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm';
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model';
-import {
-  RpcId,
-  type ApiProxy,
-} from '@deepseek-ai/dsh-host-apiproxy/api';
+import type { SessionController } from '@deepseek-ai/dsh-api-session-controller';
 
 export type ChannelModelSelectionRef = ModelSelectionRef;
 export type ChannelModelSelectionMode = 'host' | 'local';
 
 /**
- * Narrow channel view over the official Host ApiProxy contract — only the
- * session model surfaces this bridge consumes, derived from
- * `@deepseek-ai/dsh-host-apiproxy/api` instead of a local duplicate.
+ * Narrow channel view over the official Host session business API — only the
+ * model surface this bridge consumes, derived from
+ * `@deepseek-ai/dsh-api-session-controller` instead of a local duplicate.
  */
-export type ChannelHostApiProxy = Pick<ApiProxy, 'sessions'> & {
-  sessions: Pick<ApiProxy['sessions'], 'models' | 'selectModel'>;
-};
+export type ChannelHostSessionController = Pick<SessionController, 'selectModel'>;
 
 export class ChannelModelSelectionController {
   private readonly refs = new WeakMap<Context, ChannelModelSelectionRef>();
@@ -42,10 +44,10 @@ export class ChannelModelSelectionController {
   constructor(private readonly rootCtx: Context) {}
 
   get mode(): ChannelModelSelectionMode {
-    return this.hostApiProxy() ? 'host' : 'local';
+    return this.hostSessionController() ? 'host' : 'local';
   }
 
-  /** Install only the headless hook; Web Host owns it when apiProxy is present. */
+  /** Install only the headless hook; Web Host owns it when sessionController is present. */
   install(agentCtx: Context): () => void {
     const strategy = this.mode;
     this.strategies.set(agentCtx, strategy);
@@ -65,10 +67,6 @@ export class ChannelModelSelectionController {
   }
 
   async current(agent: Agent): Promise<ModelSelection | undefined> {
-    if (this.strategyFor(agent) === 'host') {
-      const host = await this.readHostCurrent(agent);
-      if (host) return host;
-    }
     return this.readLocal(agent);
   }
 
@@ -82,21 +80,21 @@ export class ChannelModelSelectionController {
 
   async select(agent: Agent, selection: ModelSelection): Promise<void> {
     if (this.strategyFor(agent) === 'host') {
-      const selectModel = this.hostApiProxy()?.sessions.selectModel;
-      if (!selectModel) throw new Error('host model selection is unavailable: session.selectModel is not mounted');
-      const response = await selectModel({
-        // Locally minted correlation id: in-process calls only need the echo;
-        // the official RpcRequest contract requires it on every request.
-        rpcId: RpcId(randomUUID()),
-        payload: {
+      const controller = this.hostSessionController();
+      if (!controller) {
+        throw new Error('host model selection is unavailable: sessionController is not mounted');
+      }
+      try {
+        await controller.selectModel({
           sessionId: agent.id,
           provider: selection.provider,
           model: selection.model,
           ...(selection.reasoningEffort ? { reasoningEffort: String(selection.reasoningEffort) } : {}),
-        },
-      });
-      if (response.result.ok === false) {
-        throw new Error(response.result.error.message || 'model selection was rejected');
+        });
+      } catch (error) {
+        throw new Error(
+          `model selection was rejected: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
       return;
     }
@@ -111,8 +109,8 @@ export class ChannelModelSelectionController {
     }
   }
 
-  private hostApiProxy(): ChannelHostApiProxy | undefined {
-    return this.rootCtx.get('apiProxy') as ChannelHostApiProxy | undefined;
+  private hostSessionController(): ChannelHostSessionController | undefined {
+    return this.rootCtx.get('sessionController') as ChannelHostSessionController | undefined;
   }
 
   /**
@@ -122,26 +120,6 @@ export class ChannelModelSelectionController {
    */
   private strategyFor(agent: Agent): ChannelModelSelectionMode {
     return this.strategies.get(agent.ctx) ?? this.mode;
-  }
-
-  private async readHostCurrent(agent: Agent): Promise<ModelSelection | undefined> {
-    const models = this.hostApiProxy()?.sessions.models;
-    if (!models) return undefined;
-    try {
-      const response = await models({
-        rpcId: RpcId(randomUUID()),
-        payload: { sessionId: agent.id },
-      });
-      const current = response.result.ok ? response.result.value.current : undefined;
-      if (!current?.provider || !current.model) return undefined;
-      return {
-        provider: current.provider,
-        model: current.model,
-        ...(current.reasoningEffort ? { reasoningEffort: ReasoningEffortId(current.reasoningEffort) } : {}),
-      };
-    } catch {
-      return undefined;
-    }
   }
 
   private readLocal(agent: Agent): ModelSelection | undefined {

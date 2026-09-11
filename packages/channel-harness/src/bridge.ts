@@ -13,7 +13,7 @@
  * is resolved through the official registry and its `CommandResult` is
  * rendered directly to the channel — it is never sent to the model and never
  * creates `assistant/message` (`ReplyRouter` is bypassed). An UNREGISTERED
- * slash command follows rc.2 official Host semantics: it is rejected with a
+ * slash command follows official Host semantics: it is rejected with a
  * direct channel notice and never enters the Agent prompt — `commands.execute`
  * returns `undefined` for admission misses, which (given the syntax already
  * parsed) means `ctx.commands.find(agent, name)` missed.
@@ -148,22 +148,23 @@ export interface ChannelHarnessBridgeOptions {
    */
   outbox?: ChannelOutboxService;
   /**
-   * Optional question interaction presenter (Web profile: official ApiProxy
-   * mux frames; headless: official UserQuestionProvider). Absent when the
-   * user-questions feature is disabled or no transport was probed.
+   * Optional question interaction presenter (the channel composes an answerer
+   * on the official `user-questions/request` waterfall). Absent when the
+   * user-questions feature is disabled or the userQuestions service was not
+   * probed.
    */
   questionPresenter?: ChannelQuestionPresenter;
 }
 
 /**
- * Retained for API compatibility: an error historically raised when Workspace
- * attach failed inside fresh Session creation. As of the soft-attach semantics
- * (soft-attach semantics), a Workspace attach failure NO LONGER throws — the
- * freshly-created session is kept, grouped as ungrouped, and the binding +
- * followup continue. This class is no longer produced by the bridge.
+ * Error historically raised when a Workspace attach failed inside fresh Session
+ * creation. Workspace attach is now non-fatal: the freshly-created session is
+ * kept (grouped as ungrouped) and the binding + followup continue, so the
+ * bridge no longer produces this error.
  *
- * @deprecated Workspace attachment failures are now non-fatal and no longer
- * produce this error. Retained only for compatibility with existing imports.
+ * @deprecated Workspace attachment failures are non-fatal and no longer raise
+ * this error. Retained as a public export for compatibility with existing
+ * imports; do not add new uses.
  */
 export class ChannelWorkspaceAttachError extends Error {
   readonly sessionId: string;
@@ -473,7 +474,7 @@ export class ChannelHarnessBridge {
    * session gets the channel commands and channel hooks before any driving
    * happens. Harness still resolves the Session model at creation/resume.
    * Channel images are NOT rewritten here: the inbound converter hands raw
-   * images to the Harness Attachment Store and the official rc.2 image
+   * images to the Harness Attachment Store and the official image
    * pipeline owns model-capability projection (vision variant / text-only
    * deterministic placeholder), so the Agent-scoped history keeps the
    * original ImageBlock.
@@ -759,7 +760,7 @@ export class ChannelHarnessBridge {
       // Every other first message (ordinary text, /help, /status, /models,
       // /model, or an unknown /foo) mints the session and continues below —
       // first-message /help/status/models/model must work (spec §38). An
-      // unknown /foo is then rejected at command admission (rc.2 Host parity;
+      // unknown /foo is then rejected at command admission (Host parity;
       // the session must exist first because channel commands register in the
       // Agent scope and cannot be resolved without one).
       const fresh = await this.sessionFactory.create(this.conversationInput(event), route);
@@ -813,14 +814,14 @@ export class ChannelHarnessBridge {
       this.options.agentManager.registerBinding(binding);
     }
 
-    // --- Command admission (rc.2 Host parity) -------------------------------
+    // --- Command admission (Host parity) ------------------------------------
     // Registered commands run on the Human Command Plane; an UNREGISTERED
     // slash command is always rejected with a direct channel notice and never
     // enters the Agent prompt.
     if (parsed) {
       const beforeSessionId = binding.sessionId;
       const controller = new AbortController();
-      // rc.2 commands.execute takes base64 composer images; channel command
+      // `commands.execute` takes base64 composer images; channel command
       // admission is text-only for now (command image parity is a later phase).
       const execution = await this.options.ctx.commands.execute(
         agentRef!.agent,
@@ -841,7 +842,7 @@ export class ChannelHarnessBridge {
       }
       // `execution === undefined` with syntax already parsed means the
       // registry missed the name (`ctx.commands.find(agent, parsed.name)`
-      // returned nothing) — rc.2 official Host answers `unknown-command` and
+      // returned nothing) — the official Host answers `unknown-command` and
       // never forwards the line to the model.
       this.options.logger.info('[channel-harness] rejected unknown command', {
         channel: event.channel,
@@ -862,7 +863,7 @@ export class ChannelHarnessBridge {
     this.logInboundBinaryAvailability(event, binding.sessionId);
     const userMessage = await toHarnessUserMessage(event, {
       includeMetadataPrefix: this.options.config.includeMetadataPrefix,
-      saveImage: this.options.saveImage,
+      saveImage: this.saveImageHook(event, binding.sessionId),
       fileStore: this.fileStoreHook(event, binding.sessionId),
     });
     // Register the reply context keyed by the Harness UserMessage id strictly
@@ -905,7 +906,7 @@ export class ChannelHarnessBridge {
       if (agent) {
         try {
           const controller = new AbortController();
-          // rc.2 commands.execute takes base64 composer images; none accompany
+          // `commands.execute` takes base64 composer images; none accompany
           // an inbound IM stop command.
           const execution = await this.options.ctx.commands.execute(agent, text, [], controller.signal);
           if (execution !== undefined) {
@@ -950,6 +951,51 @@ export class ChannelHarnessBridge {
 
   private isGenerationCurrent(key: string, generation: number): boolean {
     return this.generationOf(key) === generation;
+  }
+
+  /**
+   * Build the converter's per-message image hook: the official Harness
+   * attachment seam stays the sole authority for the durable image ref, and
+   * — best-effort — the same bytes are MIRRORED into the private channel
+   * asset store under the harness attachment id (the model-visible
+   * `sha256:…`), so `send_channel_message` can resolve the image for
+   * outbound sends (issue #7). A mirror failure never breaks delivery: the
+   * ref is already committed and the converter falls back exactly as before.
+   */
+  private saveImageHook(event: MessageReceived, sessionId: string): SaveImageHook | undefined {
+    const commit = this.options.saveImage;
+    if (!commit) return undefined;
+    const mirror = this.options.fileProvider?.storeImage?.bind(this.options.fileProvider);
+    if (!mirror) return commit;
+    return async (input) => {
+      const ref = await commit(input);
+      try {
+        await mirror(
+          {
+            sessionId,
+            channelId: event.channel,
+            accountId: event.accountId,
+            conversationId: event.conversation.id,
+            ...(event.conversation.type ? { conversationType: event.conversation.type } : {}),
+            ...(event.conversation.threadId ? { threadId: event.conversation.threadId } : {}),
+            messageId: event.message.id,
+          },
+          {
+            attachmentId: ref.attachmentId,
+            data: input.data,
+            mimeType: input.mediaType,
+            ...(input.name === undefined ? {} : { name: input.name }),
+          },
+        );
+      } catch (error) {
+        this.options.logger.warn('[channel-harness] inbound image mirror failed', {
+          sessionId,
+          attachmentId: ref.attachmentId,
+          error: toLoggableError(error),
+        });
+      }
+      return ref;
+    };
   }
 
   /**

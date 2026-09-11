@@ -7,8 +7,8 @@ const PROVIDER_FAILURE_BODY_SCHEMA = z.object({
 
 /**
  * Project a Harness terminal failure into text that is safe to send through a
- * channel. This preserves the Harness rc.2 client behaviour: provider AUTH
- * diagnostics are not user-facing because they can contain credential data.
+ * channel: provider AUTH diagnostics are not user-facing because they can
+ * contain credential data.
  */
 export function displayChannelFailure(failure: LlmFailure): string {
   if (failure.code === 'AUTH') {

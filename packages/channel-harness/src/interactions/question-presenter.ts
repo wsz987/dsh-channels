@@ -8,7 +8,10 @@
  * rendering questions as actions    option / multi-select / custom / skip
  * capability-driven presentation    interactiveActions -> native buttons,
  *                                   otherwise text -> numbered fallback
- * callback + text answer collection per-conversation + per-rpc dedup
+ * action-failure degradation        a declared native-actions capability that
+ *                                   FAILS to send degrades that batch to the
+ *                                   numbered text form instead of cancelling
+ * callback + text answer collection per-conversation + per-ask dedup
  * timeout                           channel message updates (edit / clear)
  * ```
  *
@@ -85,8 +88,8 @@ function textOf(event: MessageReceived): string {
 }
 
 /**
- * Presents Harness-origin questions (Web profile: ApiProxy mux; headless:
- * the official UserQuestionProvider) through generic channel actions.
+ * Presents Harness-origin questions (the official `user-questions/request`
+ * waterfall) through generic channel actions.
  */
 export class ChannelQuestionPresenter implements QuestionInteractionSink {
   private readonly state = new QuestionStateStore();
@@ -233,7 +236,30 @@ export class ChannelQuestionPresenter implements QuestionInteractionSink {
       await adapter.edit(pending.target, pending.messageId, message);
       return;
     }
-    const result = await adapter.send(pending.target, message);
+    let result;
+    try {
+      result = await adapter.send(pending.target, message);
+    } catch (error) {
+      // A DECLARED native-actions capability can still be unusable in a live
+      // deployment: a DingTalk interactive-card template that is not published
+      // in THIS org, a missing card/markdown-keyboard permission, … The
+      // capability flag is a declaration, never a probe, so a failed
+      // interactive presentation must NOT kill the question — every
+      // `text: true` adapter can answer the numbered-text form. Degrade this
+      // batch to text and re-render (that rendering adds the reply
+      // instructions and, in a group, the correlation token).
+      if (pending.presentationMode !== 'actions') throw error;
+      this.options.logger.warn(
+        '[channel-harness] interactive actions failed to present; falling back to numbered text',
+        {
+          channel: pending.target.channelId,
+          conversationType: pending.target.conversationType,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+      pending.presentationMode = 'text';
+      return this.present(pending, adapter, false);
+    }
     if (pending.state !== 'pending') {
       if (message.actions?.length && result.messageId && adapter.edit) {
         await adapter.edit(pending.target, result.messageId, { actions: [] }).catch(() => {});

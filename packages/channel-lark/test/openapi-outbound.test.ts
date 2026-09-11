@@ -15,6 +15,7 @@ import {
   fileTypeFromName,
   cardContent,
   interactiveCardContent,
+  streamingCardJson,
   type LarkApiResponse,
   type LarkCreateImagePayload,
   type LarkCreateImageResult,
@@ -35,6 +36,10 @@ class FakeOpenApiClient implements LarkOpenApiClient {
   };
   imageCreateResult: LarkCreateImageResult | null = { image_key: 'img_v2_out' };
   fileCreateResult: LarkCreateFileResult | null = { file_key: 'file_v2_out' };
+  cardCreateResult: { code?: number; data?: { card_id?: string } } = {
+    code: 0,
+    data: { card_id: 'cc_out_1' },
+  };
 
   im = {
     v1: {
@@ -58,6 +63,27 @@ class FakeOpenApiClient implements LarkOpenApiClient {
         create: async (payload: LarkCreateFilePayload) => {
           this.calls.push({ method: 'file.create', payload });
           return this.fileCreateResult;
+        },
+      },
+    },
+  };
+
+  cardkit = {
+    v1: {
+      card: {
+        create: async (payload: { data: { type: string; data: string } }) => {
+          this.calls.push({ method: 'cardkit.card.create', payload });
+          return this.cardCreateResult;
+        },
+        settings: async (payload: unknown) => {
+          this.calls.push({ method: 'cardkit.card.settings', payload });
+          return { code: 0 };
+        },
+      },
+      cardElement: {
+        content: async (payload: unknown) => {
+          this.calls.push({ method: 'cardkit.cardElement.content', payload });
+          return { code: 0 };
         },
       },
     },
@@ -111,6 +137,13 @@ describe('LarkOpenApiOutbound.sendText', () => {
     await outbound.sendText('ou_user1', 'hi');
     const call = createCall(client, 'message.create');
     expect(call?.payload).toMatchObject({ params: { receive_id_type: 'open_id' } });
+  });
+
+  it('rejects a nonzero platform code instead of treating it as success', async () => {
+    const client = new FakeOpenApiClient();
+    client.messageCreateResult = { code: 999, msg: 'permission denied' };
+    const outbound = new LarkOpenApiOutbound({ client });
+    await expect(outbound.sendText('ou_user1', 'hi')).rejects.toThrow(/999.*permission denied/);
   });
 });
 
@@ -188,53 +221,114 @@ describe('LarkOpenApiOutbound.sendMedia', () => {
   });
 });
 
-describe('LarkOpenApiOutbound card operations', () => {
-  it('creates an interactive card and returns message_id as cardId', async () => {
+describe('LarkOpenApiOutbound CardKit 2.0 entity + streaming', () => {
+  it('creates a CardKit card entity from Card JSON 2.0 and returns the card_id', async () => {
     const client = new FakeOpenApiClient();
     const outbound = new LarkOpenApiOutbound({ client });
-    const result = await outbound.createCard('oc_456', 'hello');
-    expect(result).toEqual({ cardId: 'om_out_1' });
+    const spec = streamingCardJson('hello');
+    const result = await outbound.createCardEntity(spec);
+    expect(result).toEqual({ cardId: 'cc_out_1' });
+    const call = createCall(client, 'cardkit.card.create');
+    expect(call?.payload).toEqual({
+      data: { type: 'card_json', data: spec },
+    });
+  });
+
+  it('throws when the entity create returns no card_id', async () => {
+    const client = new FakeOpenApiClient();
+    client.cardCreateResult = { code: 0 };
+    const outbound = new LarkOpenApiOutbound({ client });
+    await expect(outbound.createCardEntity(streamingCardJson('x'))).rejects.toMatchObject({
+      code: 'CHANNEL_ERROR',
+    });
+  });
+
+  it('sends a card reference message ({ type: card, data: { card_id } })', async () => {
+    const client = new FakeOpenApiClient();
+    const outbound = new LarkOpenApiOutbound({ client });
+    const result = await outbound.sendCardEntity('oc_456', 'cc_out_1');
+    expect(result).toEqual({ messageId: 'om_out_1' });
     const call = createCall(client, 'message.create');
     expect(call?.payload).toMatchObject({
       params: { receive_id_type: 'chat_id' },
-      data: { receive_id: 'oc_456', msg_type: 'interactive' },
-    });
-    expect(JSON.parse((call?.payload as LarkCreateMessagePayload).data.content)).toMatchObject({
-      schema: '2.0',
-      config: { wide_screen_mode: true },
-      body: {
-        elements: [{ tag: 'markdown' }],
+      data: {
+        receive_id: 'oc_456',
+        msg_type: 'interactive',
+        content: JSON.stringify({ type: 'card', data: { card_id: 'cc_out_1' } }),
       },
     });
   });
 
-  it('updates a card via message.patch with the card content', async () => {
+  it('throws when the card reference send returns no message_id', async () => {
     const client = new FakeOpenApiClient();
+    client.messageCreateResult = { code: 0, data: {} };
     const outbound = new LarkOpenApiOutbound({ client });
-    await outbound.updateCard('om_card_1', 'streaming…');
-    const call = createCall(client, 'message.patch');
-    expect(call?.payload).toEqual({
-      path: { message_id: 'om_card_1' },
-      data: { content: cardContent('streaming…') },
+    await expect(outbound.sendCardEntity('oc_456', 'cc_out_1')).rejects.toMatchObject({
+      code: 'CHANNEL_ERROR',
     });
   });
 
-  it('finishCard is a no-op that performs no client call', async () => {
+  it('streams content via cardkit.cardElement.content with sequence + uuid', async () => {
     const client = new FakeOpenApiClient();
     const outbound = new LarkOpenApiOutbound({ client });
-    await expect(outbound.finishCard('om_card_1')).resolves.toEqual({});
-    expect(client.calls).toHaveLength(0);
+    await outbound.updateCardElementContent('cc_out_1', 'stream_md', 'hello', 3, 'c_cc_out_1_3');
+    const call = createCall(client, 'cardkit.cardElement.content');
+    expect(call?.payload).toEqual({
+      path: { card_id: 'cc_out_1', element_id: 'stream_md' },
+      data: { uuid: 'c_cc_out_1_3', content: 'hello', sequence: 3 },
+    });
   });
 
-  it('failCard patches the card to a failure state', async () => {
+  it('rejects nonzero CardKit update responses', async () => {
+    const client = new FakeOpenApiClient();
+    client.cardkit.v1.cardElement.content = async (payload: unknown) => {
+      client.calls.push({ method: 'cardkit.cardElement.content', payload });
+      return { code: 230099, msg: 'element too large' };
+    };
+    const outbound = new LarkOpenApiOutbound({ client });
+    await expect(outbound.updateCardElementContent('cc_out_1', 'stream_md', 'x', 1, 'u'))
+      .rejects.toThrow(/230099.*element too large/);
+  });
+
+  it('closes streaming via cardkit.card.settings with streaming_mode false and a summary', async () => {
     const client = new FakeOpenApiClient();
     const outbound = new LarkOpenApiOutbound({ client });
-    await outbound.failCard('om_card_1', 'boom');
-    const call = createCall(client, 'message.patch');
+    await outbound.finishStreamingCard('cc_out_1', 5, 'final summary');
+    const call = createCall(client, 'cardkit.card.settings');
     expect(call?.payload).toEqual({
-      path: { message_id: 'om_card_1' },
-      data: { content: cardContent('❌ boom') },
+      path: { card_id: 'cc_out_1' },
+      data: {
+        settings: JSON.stringify({
+          config: { streaming_mode: false, summary: { content: 'final summary' } },
+        }),
+        sequence: 5,
+        uuid: 's_cc_out_1_5',
+      },
     });
+  });
+});
+
+describe('streamingCardJson', () => {
+  it('builds a Card JSON 2.0 streaming spec with streaming_mode + a stable element_id', () => {
+    const spec = JSON.parse(streamingCardJson('thinking…')) as Record<string, any>;
+    expect(spec.schema).toBe('2.0');
+    expect(spec.config).toMatchObject({
+      streaming_mode: true,
+      summary: { content: '[Generating...]' },
+      streaming_config: { print_strategy: 'fast' },
+    });
+    const element = (spec.body as { elements: Array<Record<string, unknown>> }).elements[0];
+    expect(element).toMatchObject({
+      tag: 'markdown',
+      element_id: 'stream_md',
+      content: 'thinking…',
+    });
+  });
+
+  it('never emits a legacy lark_md element or action container', () => {
+    const spec = streamingCardJson('hi');
+    expect(spec).not.toContain('lark_md');
+    expect(spec).not.toContain('"tag":"action"');
   });
 });
 

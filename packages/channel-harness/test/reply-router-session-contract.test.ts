@@ -1,13 +1,13 @@
 /**
- * ReplyRouter × rc.2 Session contract tests.
+ * ReplyRouter × 0.1.5-rc.2 Session contract tests.
  *
  * Locks the ReplyRouter against the REAL `@deepseek-ai/dsh-session`
- * `0.1.1-rc.2` event model — the fixtures are produced by the real
+ * `0.1.5-rc.2` event model — the fixtures are produced by the real
  * `SessionStore`/`Session.append` (surface metadata, seq contiguity and
  * `session/event` publication all validated/published by the official
  * runtime), not hand-typed shapes that could silently drift.
  *
- * rc.2 facts these tests pin (from `dsh-session` .d.ts, the authority):
+ * 0.1.5-rc.2 facts these tests pin (from `dsh-session` .d.ts, the authority):
  * - `SessionEvent` is a discriminated union over `type` with `seq`/`time`/
  *   `data` on the ENVELOPE (never in `data`).
  * - `sourceEventSeqs?: number[]` and `surfaceOp?: 'append' | { op: 'replace',
@@ -23,11 +23,11 @@
  *   with `interrupted: true`; an aborted turn with no such event streamed no
  *   visible content.
  *
- * Boundary principle asserted throughout (rc.2 Session Surface contract):
+ * Boundary principle asserted throughout (0.1.5-rc.2 Session Surface contract):
  *   model-facing history  → `session.surface` (replacements shadow nodes);
  *   human transcript      → append-origin events in the raw log.
  * The ReplyRouter consumes ONLY the raw `session/event` firehose
- * (`assistant/chunk`, `assistant/message`, `turn/end`) — the correct
+ * (`agent/assistant-stream`, `assistant/message`, `turn/end`) — the correct
  * human-transcript source — and never reads `session.surface`.
  */
 import { describe, expect, it, vi } from 'vitest';
@@ -40,7 +40,7 @@ import SessionStore, {
   type Session,
   type SessionEvent,
 } from '@deepseek-ai/dsh-session';
-import { CallId, MessageId, type AssistantMessage, type ToolResultMessage, type UserMessage } from '@deepseek-ai/dsh-llm';
+import { MessageId, ToolCallId, type AssistantMessage, type ToolResultMessage, type UserMessage } from '@deepseek-ai/dsh-llm';
 import type { ChannelAdapter, ChannelTarget } from '@wsz987/channel-core';
 import { ReplyRouter } from '../src/reply-router.ts';
 import { SESSION_BINDING_SCHEMA_VERSION, type SessionBinding } from '../src/session-router.ts';
@@ -49,7 +49,7 @@ import { ReplyContextStore } from '../src/reply-context-store.ts';
 const silentLogger = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
 
 // ---------------------------------------------------------------------------
-// Fixture builders (rc.2 shapes; brand constructors where the type demands).
+// Fixture builders (0.1.5-rc.2 shapes; brand constructors where the type demands).
 // ---------------------------------------------------------------------------
 
 function userMessage(text: string): UserMessage {
@@ -70,14 +70,18 @@ function assistantMessage(text: string): AssistantMessage {
   };
 }
 
+function assistantStream(texts: string[]) {
+  return [{ type: 'text-chunks' as const, time0: Date.now(), index: 0, dt: texts.map(() => 0), texts }];
+}
+
 function toolResult(text: string): ToolResultMessage {
   return {
     id: MessageId('m-tool'),
     role: 'user',
     content: [
-      { type: 'tool-result', toolCallId: CallId('call-1'), content: [{ type: 'text', text }] },
+      { type: 'tool-result', toolCallId: ToolCallId('call-1'), content: [{ type: 'text', text }] },
     ],
-    source: { kind: 'tool', callId: CallId('call-1') },
+    source: { kind: 'tool', callId: ToolCallId('call-1') },
   };
 }
 
@@ -134,7 +138,7 @@ interface ContractFixture {
 }
 
 /**
- * Real rc.2 stack: a `SessionStore`-published `Session` whose appends flow to
+ * Real 0.1.5-rc.2 stack: a `SessionStore`-published `Session` whose appends flow to
  * the ReplyRouter through the OFFICIAL `session/event` firehose (`attach`),
  * exactly like the production bridge.
  */
@@ -192,20 +196,10 @@ function appendSuccessfulTurn(
   session.append('turn/start', { turn });
   session.append('user/message', userMessage(`question ${turn}`), { surfaceOp: 'append' });
   session.append('step/start', { turn, step: 0 });
-  const chunkSeqs: number[] = [];
-  for (const delta of deltas) {
-    chunkSeqs.push(
-      session.append('assistant/chunk', {
-        turn,
-        step: 0,
-        chunk: { type: 'text-delta', index: 0, text: delta },
-      }).seq,
-    );
-  }
   session.append(
     'assistant/message',
-    { turn, step: 0, message: assistantMessage(finalText) },
-    { surfaceOp: 'append', sourceEventSeqs: chunkSeqs },
+    { turn, step: 0, message: assistantMessage(finalText), stream: assistantStream(deltas) },
+    { surfaceOp: 'append' },
   );
   session.append('step/end', { turn, step: 0 });
   session.append('turn/end', { turn, reason: { kind: 'completed' } });
@@ -219,7 +213,7 @@ async function settled(): Promise<void> {
 // Streaming → finalization.
 // ---------------------------------------------------------------------------
 
-describe('rc.2 contract: streaming chunks + final assistant/message', () => {
+describe('0.1.5-rc.2 contract: streaming chunks + final assistant/message', () => {
   it('delivers the concatenated chunk text exactly once (buffer wins, no duplication)', async () => {
     const { session, adapter, detach } = makeFixture();
     try {
@@ -241,12 +235,10 @@ describe('rc.2 contract: streaming chunks + final assistant/message', () => {
     try {
       session.append('turn/start', { turn: 0 });
       session.append('step/start', { turn: 0, step: 0 });
-      // Empty provider stream: rc.2 allows a present EMPTY sourceEventSeqs on
-      // assistant/message.
       session.append(
         'assistant/message',
-        { turn: 0, step: 0, message: assistantMessage('直接定稿') },
-        { surfaceOp: 'append', sourceEventSeqs: [] },
+        { turn: 0, step: 0, message: assistantMessage('直接定稿'), stream: [] },
+        { surfaceOp: 'append' },
       );
       session.append('turn/end', { turn: 0, reason: { kind: 'completed' } });
       await vi.waitFor(() => {
@@ -284,30 +276,25 @@ describe('rc.2 contract: streaming chunks + final assistant/message', () => {
 // Append-origin assistant message (human-visible transcript source).
 // ---------------------------------------------------------------------------
 
-describe('rc.2 contract: append-origin assistant message (human transcript source)', () => {
+describe('0.1.5-rc.2 contract: append-origin assistant message (human transcript source)', () => {
   it('routes an append-origin assistant/message and pins the model-vs-human boundary', async () => {
     const { session, adapter, detach } = makeFixture();
     try {
       session.append('turn/start', { turn: 0 });
       session.append('user/message', userMessage('q'), { surfaceOp: 'append' });
-      const chunk = session.append('assistant/chunk', {
-        turn: 0,
-        step: 0,
-        chunk: { type: 'text-delta', index: 0, text: 'visible reply' },
-      });
       const final = session.append(
         'assistant/message',
-        { turn: 0, step: 0, message: assistantMessage('visible reply') },
-        { surfaceOp: 'append', sourceEventSeqs: [chunk.seq] },
+        { turn: 0, step: 0, message: assistantMessage('visible reply'), stream: assistantStream(['visible reply']) },
+        { surfaceOp: 'append' },
       );
       session.append('turn/end', { turn: 0, reason: { kind: 'completed' } });
 
-      // Boundary facts (rc.2 Surface contract): the assistant message is an
+      // Boundary facts (0.1.5-rc.2 Surface contract): the assistant message is an
       // append-origin surface node — the human transcript's durable source —
       // and the router consumes it through the RAW event log, not the surface.
       expect(isAppendSurfaceEvent(final)).toBe(true);
       expect(isReplacementSurfaceEvent(final)).toBe(false);
-      expect(final.sourceEventSeqs).toEqual([chunk.seq]);
+      expect(final.sourceEventSeqs).toBeUndefined();
 
       await vi.waitFor(() => {
         expect(adapter.sent).toHaveLength(1);
@@ -323,16 +310,17 @@ describe('rc.2 contract: append-origin assistant message (human transcript sourc
 // Turn error / aborted.
 // ---------------------------------------------------------------------------
 
-describe('rc.2 contract: turn error and aborted turns', () => {
+describe('0.1.5-rc.2 contract: turn error and aborted turns', () => {
   it('an errored turn with streamed partial content delivers the partial and a separate terminal notice', async () => {
     const { session, adapter, detach } = makeFixture();
     try {
       session.append('turn/start', { turn: 0 });
-      session.append('assistant/chunk', {
+      session.append('assistant/message', {
         turn: 0,
         step: 0,
-        chunk: { type: 'text-delta', index: 0, text: 'partial before failure' },
-      });
+        message: assistantMessage('partial before failure'),
+        stream: assistantStream(['partial before failure']),
+      }, { surfaceOp: 'append' });
       session.append('turn/end', {
         turn: 0,
         reason: {
@@ -461,12 +449,7 @@ describe('rc.2 contract: turn error and aborted turns', () => {
     const { session, adapter, detach } = makeFixture();
     try {
       session.append('turn/start', { turn: 0 });
-      const chunk = session.append('assistant/chunk', {
-        turn: 0,
-        step: 0,
-        chunk: { type: 'text-delta', index: 0, text: '被打断之前已输出的' },
-      });
-      // rc.2: a turn cancelled mid-stream finalizes its delivered prefix as
+      // 0.1.5-rc.2: a turn cancelled mid-stream finalizes its delivered prefix as
       // an assistant/message carrying `interrupted: true`.
       session.append(
         'assistant/message',
@@ -474,9 +457,10 @@ describe('rc.2 contract: turn error and aborted turns', () => {
           turn: 0,
           step: 0,
           message: assistantMessage('被打断之前已输出的'),
+          stream: assistantStream(['被打断之前已输出的']),
           interrupted: true,
         },
-        { surfaceOp: 'append', sourceEventSeqs: [chunk.seq] },
+        { surfaceOp: 'append' },
       );
       session.append('turn/end', {
         turn: 0,
@@ -565,7 +549,7 @@ describe('rc.2 contract: turn error and aborted turns', () => {
 // Non-text / unknown events must not produce reply noise.
 // ---------------------------------------------------------------------------
 
-describe('rc.2 contract: non-text events never become replies', () => {
+describe('0.1.5-rc.2 contract: non-text events never become replies', () => {
   it('user/message echo, todo/write, request/context, step boundaries and command lifecycle produce no output', async () => {
     const { session, adapter, replyContexts, detach } = makeFixture();
     try {
@@ -590,11 +574,12 @@ describe('rc.2 contract: non-text events never become replies', () => {
         kind: 'success',
         text: 'done',
       });
-      session.append('assistant/chunk', {
+      session.append('assistant/message', {
         turn: 0,
         step: 0,
-        chunk: { type: 'text-delta', index: 0, text: 'only this text' },
-      });
+        message: assistantMessage('only this text'),
+        stream: assistantStream(['only this text']),
+      }, { surfaceOp: 'append' });
       session.append('step/end', { turn: 0, step: 0 });
       session.append('turn/end', { turn: 0, reason: { kind: 'completed' } });
       await vi.waitFor(() => {
@@ -614,17 +599,18 @@ describe('rc.2 contract: non-text events never become replies', () => {
     try {
       session.append('turn/start', { turn: 0 });
       session.append('step/start', { turn: 0, step: 0 });
-      session.append('assistant/chunk', {
+      session.append('assistant/message', {
         turn: 0,
         step: 0,
-        chunk: { type: 'text-delta', index: 0, text: '先查一下：' },
-      });
+        message: assistantMessage('先查一下：'),
+        stream: assistantStream(['先查一下：']),
+      }, { surfaceOp: 'append' });
       session.append('tool/call', {
         turn: 0,
         step: 0,
-        callId: CallId('call-1'),
+        callId: ToolCallId('call-1'),
         name: 'search',
-        arguments: '{"q":"rc.2"}',
+        arguments: '{"q":"0.1.5-rc.2"}',
       });
       const result = session.append(
         'tool/result',
@@ -632,11 +618,12 @@ describe('rc.2 contract: non-text events never become replies', () => {
         { surfaceOp: 'append' },
       );
       expect(isAppendSurfaceEvent(result)).toBe(true);
-      session.append('assistant/chunk', {
+      session.append('assistant/message', {
         turn: 0,
         step: 0,
-        chunk: { type: 'text-delta', index: 0, text: '结论' },
-      });
+        message: assistantMessage('结论'),
+        stream: assistantStream(['结论']),
+      }, { surfaceOp: 'append' });
       session.append('turn/end', { turn: 0, reason: { kind: 'completed' } });
       await vi.waitFor(() => {
         expect(adapter.sent).toHaveLength(1);
@@ -653,7 +640,7 @@ describe('rc.2 contract: non-text events never become replies', () => {
 // Unknown / ignorable events (vocabulary growth in newer runtimes).
 // ---------------------------------------------------------------------------
 
-describe('rc.2 contract: unknown and ignorable events', () => {
+describe('0.1.5-rc.2 contract: unknown and ignorable events', () => {
   it('an unknown event type marked ignorable is skipped without crash or reply noise', async () => {
     const { session, router, adapter, replyContexts } = makeFixture();
     // `ignorable: true` cannot be produced by Session.append (it is a
@@ -695,22 +682,17 @@ describe('rc.2 contract: unknown and ignorable events', () => {
 // Compaction replacement (surfaceOp replace semantics).
 // ---------------------------------------------------------------------------
 
-describe('rc.2 contract: compaction replacement event', () => {
+describe('0.1.5-rc.2 contract: compaction replacement event', () => {
   it('a landed replacement shadows the model surface but produces no channel output', async () => {
     const { session, adapter, detach } = makeFixture();
     try {
       session.append('turn/start', { turn: 0 });
       const user = session.append('user/message', userMessage('长对话'), { surfaceOp: 'append' });
       session.append('step/start', { turn: 0, step: 0 });
-      const chunk = session.append('assistant/chunk', {
-        turn: 0,
-        step: 0,
-        chunk: { type: 'text-delta', index: 0, text: '原始长回答' },
-      });
       const answer = session.append(
         'assistant/message',
-        { turn: 0, step: 0, message: assistantMessage('原始长回答') },
-        { surfaceOp: 'append', sourceEventSeqs: [chunk.seq] },
+        { turn: 0, step: 0, message: assistantMessage('原始长回答'), stream: assistantStream(['原始长回答']) },
+        { surfaceOp: 'append' },
       );
       session.append('step/end', { turn: 0, step: 0 });
       session.append('turn/end', { turn: 0, reason: { kind: 'completed' } });
@@ -719,16 +701,16 @@ describe('rc.2 contract: compaction replacement event', () => {
       });
       expect(adapter.sent[0]?.text).toBe('原始长回答');
 
-      // Compaction AFTER the turn: one assistant/message replacement node
-      // covering [user, answer] (rc.2: sourceEventSeqs must include every
+      // Compaction AFTER the turn: one user/message replacement node
+      // covering [user, answer] (0.1.5-rc.2: sourceEventSeqs must include every
       // shadowed surface node). It carries a stale turn number and no live
       // ReplyContext — the router must treat it as pure log bookkeeping.
       const before = adapter.sent.length;
       const replacement = session.append(
-        'assistant/message',
-        { turn: 0, step: 0, message: assistantMessage('[compaction summary]') },
+        'user/message',
+        { ...userMessage('[compaction summary]') },
         {
-          surfaceOp: { op: 'replace', start: user.seq, end: answer.seq },
+          surfaceOp: { op: 'replace', startSeq: user.seq, endSeq: answer.seq },
           sourceEventSeqs: [user.seq, answer.seq],
         },
       );
@@ -737,12 +719,12 @@ describe('rc.2 contract: compaction replacement event', () => {
       // the shadowed nodes, while the raw log (the human transcript source)
       // still contains the ORIGINAL append-origin events.
       expect(isReplacementSurfaceEvent(replacement)).toBe(true);
-      const fold = foldSurface(session.events);
+      const fold = foldSurface(session.snapshotEvents());
       expect(fold.nodes).not.toContain(user.seq);
       expect(fold.nodes).not.toContain(answer.seq);
       expect(fold.nodes).toContain(replacement.seq);
       expect(fold.replacements).toHaveLength(1);
-      expect(session.events.filter(isAppendSurfaceEvent).map((e) => e.seq)).toContain(answer.seq);
+      expect(session.snapshotEvents().filter(isAppendSurfaceEvent).map((e) => e.seq)).toContain(answer.seq);
 
       await settled();
       expect(adapter.sent).toHaveLength(before); // no extra channel reply
@@ -757,16 +739,17 @@ describe('rc.2 contract: compaction replacement event', () => {
 // Unload before turn/end + durable-log reconcile (resume paths).
 // ---------------------------------------------------------------------------
 
-describe('rc.2 contract: unload before turn/end', () => {
+describe('0.1.5-rc.2 contract: unload before turn/end', () => {
   it('flushAll finalizes an unfinished turn exactly like turn/end (no content lost)', async () => {
     const { session, router, adapter, replyContexts, detach } = makeFixture();
     try {
       session.append('turn/start', { turn: 0 });
-      session.append('assistant/chunk', {
+      session.append('assistant/message', {
         turn: 0,
         step: 0,
-        chunk: { type: 'text-delta', index: 0, text: 'unload 时已产出' },
-      });
+        message: assistantMessage('unload 时已产出'),
+        stream: assistantStream(['unload 时已产出']),
+      }, { surfaceOp: 'append' });
       // No turn/end — the lifecycle drain calls flushAll() instead. Delivery
       // must still happen (or the reply handle fails); content is never lost.
       await router.flushAll();
@@ -785,22 +768,17 @@ describe('rc.2 contract: unload before turn/end', () => {
 // Durable-log reconcile (listener detached — the resume/unload repair path).
 // ---------------------------------------------------------------------------
 
-describe('rc.2 contract: reconcileSession over the real durable log', () => {
+describe('0.1.5-rc.2 contract: reconcileSession over the real durable log', () => {
   it('rebuilds and delivers the last unfinished turn from the raw event log', async () => {
     const ctx = new Context();
     const sessions = new SessionStore(ctx);
     const session = sessions.create(SessionId('contract-reconcile'));
     // Build an unfinished turn with NO live session/event listener attached.
     session.append('turn/start', { turn: 0 });
-    session.append('assistant/chunk', {
+    session.append('assistant/attempt', {
       turn: 0,
       step: 0,
-      chunk: { type: 'text-delta', index: 0, text: '崩溃前' },
-    });
-    session.append('assistant/chunk', {
-      turn: 0,
-      step: 0,
-      chunk: { type: 'text-delta', index: 0, text: '的部分输出' },
+      stream: assistantStream(['崩溃前', '的部分输出']),
     });
 
     const adapter = new BufferedAdapter();
@@ -820,7 +798,7 @@ describe('rc.2 contract: reconcileSession over the real durable log', () => {
       logger: silentLogger,
     });
 
-    await router.reconcileSession(session);
+    await router.reconcileSession({ id: session.id, events: session.snapshotEvents() });
     expect(adapter.sent).toHaveLength(1);
     expect(adapter.sent[0]?.text).toBe('崩溃前的部分输出');
     expect(replyContexts.getActiveForSession('contract-reconcile')).toBeUndefined();
@@ -831,10 +809,10 @@ describe('rc.2 contract: reconcileSession over the real durable log', () => {
     const sessions = new SessionStore(ctx);
     const session = sessions.create(SessionId('contract-reconcile-foreign'));
     session.append('turn/start', { turn: 0 });
-    session.append('assistant/chunk', {
+    session.append('assistant/attempt', {
       turn: 0,
       step: 0,
-      chunk: { type: 'text-delta', index: 0, text: 'web/cli driven turn' },
+      stream: assistantStream(['web/cli driven turn']),
     });
 
     const adapter = new BufferedAdapter();
@@ -852,7 +830,7 @@ describe('rc.2 contract: reconcileSession over the real durable log', () => {
       logger: silentLogger,
     });
 
-    await router.reconcileSession(session);
+    await router.reconcileSession({ id: session.id, events: session.snapshotEvents() });
     expect(adapter.sent).toEqual([]);
   });
 });

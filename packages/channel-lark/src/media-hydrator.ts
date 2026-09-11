@@ -147,10 +147,9 @@ export class MediaHydrator {
         maxBytes: this.options.maxBytes ?? LARK_MESSAGE_RESOURCE_MAX_BYTES,
         signal: this.options.signal,
       });
-      // Legacy lark image parts never carried `size`; restore that exact
-      // shape so existing image consumers observe the same part as before
-      // §23-A4, while file/audio/video keep the authoritative `size` derived
-      // from the real bytes (mirrors channel-qq §23-A3).
+      // Image parts never carry `size` (keep that shape stable), while
+      // file/audio/video keep the authoritative `size` derived from the real
+      // bytes (mirrors channel-qq).
       if (part.type === 'image') delete part.size;
     } catch (error) {
       this.options.logger?.debug('[channel-lark] ' + resourceType + ' hydration failed', error);

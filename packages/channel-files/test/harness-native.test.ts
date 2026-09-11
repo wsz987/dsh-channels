@@ -1,7 +1,7 @@
 /**
  * Native Harness Generic Attachment capability seam.
  *
- * Harness rc.2 has no generic attachment API, so this module only tests the
+ * Harness 0.1.5-rc.2 has no generic attachment API, so this module only tests the
  * unavailable production capability and the explicit fake used by migration
  * tests. Runtime detection is intentionally absent until a public API exists.
  */
