@@ -1,13 +1,20 @@
 /**
  * Shared fixtures for the question interaction tests (interactions/ modules).
  *
- * Wire fixtures use the OFFICIAL ApiProxy mux shapes
- * (`RpcRequest<MuxFrame>` envelopes, `AskUserQuestionItem` payloads incl.
- * `intent`) so the tests exercise the real dsh-host-apiproxy 0.1.1-rc.2
- * contract rather than a local mirror.
+ * Questions are driven through the OFFICIAL `ctx.userQuestions.ask()` — the
+ * same waterfall dispatch the `ask_user_question` tool uses in dsh 0.1.2 —
+ * so the tests exercise the real `user-questions/request` contract (items
+ * incl. `intent`, agent-scoped dispatch, NO_PROVIDER delegation) rather than
+ * a local mirror.
  */
+import { Context } from '@deepseek-ai/cordis';
+import { SessionId } from '@deepseek-ai/dsh-session';
+import {
+  UserQuestionService,
+  type AskUserQuestionAnswer,
+  type AskUserQuestionItem,
+} from '@deepseek-ai/dsh-user-questions';
 import { vi } from 'vitest';
-import type { AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions/types';
 import type {
   ChannelAdapter,
   InteractionReceived,
@@ -16,9 +23,8 @@ import type {
 } from '@wsz987/channel-core';
 import type { AgentManager } from '../src/agent-manager.ts';
 import { ReplyContextStore } from '../src/reply-context-store.ts';
-import { ApiProxyQuestionBackend } from '../src/interactions/question-apiproxy-backend.ts';
+import { WaterfallQuestionBackend } from '../src/interactions/question-waterfall-backend.ts';
 import { ChannelQuestionPresenter } from '../src/interactions/question-presenter.ts';
-import type { ChannelQuestionApiProxy } from '../src/interactions/question-apiproxy-backend.ts';
 
 export const testLogger = {
   debug: vi.fn(),
@@ -34,6 +40,8 @@ export class QuestionAdapter {
   readonly edited: OutboundMessage[] = [];
   editGate?: Promise<void>;
   failSend = false;
+  /** Fail ONLY the first send (e.g. a native-actions attempt), then succeed. */
+  failSendOnce = false;
 
   constructor(options: { interactiveActions?: boolean } = {}) {
     this.capabilities = {
@@ -44,6 +52,10 @@ export class QuestionAdapter {
 
   async send(_target: unknown, message: OutboundMessage) {
     if (this.failSend) throw new Error('send failed');
+    if (this.failSendOnce) {
+      this.failSendOnce = false;
+      throw new Error('actions send failed');
+    }
     this.sent.push(message);
     return { delivered: true, messageId: String(this.sent.length) };
   }
@@ -98,20 +110,6 @@ export function interaction(
   };
 }
 
-/** Official `question/requested` MuxFrame payload fixture. */
-export function requestedFrame(questions: AskUserQuestionItem[], sessionId = 'session-1') {
-  return {
-    type: 'question/requested' as const,
-    sessionId,
-    questions,
-  };
-}
-
-/** Official `RpcRequest<MuxFrame>` mux envelope fixture. */
-export function muxEnvelope(payload: unknown, rpcId = 'rpc-1') {
-  return { rpcId, payload };
-}
-
 export const packageManagerQuestion: AskUserQuestionItem = {
   id: 'pkg_mgr',
   header: '包管理器',
@@ -132,35 +130,47 @@ export const planReviewQuestion: AskUserQuestionItem = {
   intent: { kind: 'plan-review', approve: '执行' },
 };
 
-/** Minimal fake of the official ApiProxy question surfaces. */
-export function makeApiProxy() {
-  const responses: unknown[] = [];
-  const apiProxy = {
-    events: {
-      async *mux() {
-        // Tests drive validated envelopes directly through handleMuxEnvelope.
-      },
-    },
-    respond: vi.fn(async (response: unknown) => {
-      responses.push(response);
-      return { accepted: true as const };
-    }),
-  };
-  return { apiProxy: apiProxy as unknown as ChannelQuestionApiProxy, responses };
+export interface PresenterHarness {
+  adapter: QuestionAdapter;
+  backend: WaterfallQuestionBackend;
+  presenter: ChannelQuestionPresenter;
+  userQuestions: UserQuestionService;
+  /**
+   * Dispatch one official ask and wait until the presentation decision has
+   * landed (the question was rendered, or the ask settled — e.g. declined /
+   * aborted). Resolves to `{ pending }` — the ask promise wrapped in a
+   * NON-thenable object, because `await` would otherwise adopt and wait on
+   * the still-open ask itself. Channel interactions later resolve or reject
+   * `pending`.
+   */
+  present(
+    questions: AskUserQuestionItem[],
+    options?: { signal?: AbortSignal },
+  ): Promise<{ pending: Promise<AskUserQuestionAnswer> }>;
 }
 
-/** Wire a presenter on the ApiProxy backend (Web profile path). */
+/**
+ * Wire a presenter on the waterfall backend and mount the official
+ * `ctx.userQuestions` service (with the fake live-agents registry `ask()`
+ * validates against) so tests drive the real ask() dispatch.
+ */
 export function setupPresenter(options: {
   active?: boolean;
   timeoutMs?: number;
   conversationType?: 'dm' | 'group';
   threadId?: string;
   interactiveActions?: boolean;
-} = {}) {
+} = {}): PresenterHarness {
   const adapter = new QuestionAdapter({
     interactiveActions: options.interactiveActions ?? true,
   });
-  const { apiProxy, responses } = makeApiProxy();
+  const rootCtx = new Context();
+  const userQuestions = new UserQuestionService(rootCtx);
+  const liveAgent = { id: SessionId('session-1') };
+  rootCtx.provide('agents', {
+    get: (id: unknown) => (String(id) === 'session-1' ? liveAgent : undefined),
+    roots: (): unknown[] => [liveAgent],
+  });
   const replyContexts = new ReplyContextStore();
   if (options.active !== false) {
     replyContexts.register('message-1', {
@@ -185,7 +195,7 @@ export function setupPresenter(options: {
         }
       : undefined,
   } as unknown as AgentManager;
-  const backend = new ApiProxyQuestionBackend({ apiProxy, logger: testLogger });
+  const backend = new WaterfallQuestionBackend({ ctx: rootCtx, logger: testLogger });
   const presenter = new ChannelQuestionPresenter({
     backend,
     agentManager,
@@ -197,7 +207,36 @@ export function setupPresenter(options: {
     timeoutMs: options.timeoutMs ?? 300_000,
   });
   presenter.start();
-  return { adapter, apiProxy, backend, presenter, responses };
+
+  function present(
+    questions: AskUserQuestionItem[],
+    options: { signal?: AbortSignal } = {},
+  ): Promise<{ pending: Promise<AskUserQuestionAnswer> }> {
+    let settled = false;
+    const sentBefore = adapter.sent.length;
+    const pending = userQuestions.ask({
+      questions,
+      agent: liveAgent as never,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    });
+    void pending.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    // Presentation decision: the question rendered (a NEW sent message), or
+    // the ask already settled (declined -> NO_PROVIDER rejection, abort,
+    // timeout).
+    return vi.waitFor(() => {
+      if (adapter.sent.length > sentBefore || settled) return;
+      throw new Error('presentation still pending');
+    }).then(() => ({ pending }));
+  }
+
+  return { adapter, backend, presenter, userQuestions, present };
 }
 
 export function actionId(adapter: QuestionAdapter, label: string): string {

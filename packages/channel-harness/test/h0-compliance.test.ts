@@ -401,8 +401,7 @@ describe('durable unload reconcile', () => {
     // Durable Session log: turn 0 started, streamed chunks, but NO turn/end.
     const events: SessionEvent[] = [
       { type: 'turn/start', seq: 0, time: 1, data: { turn: 0 } },
-      { type: 'assistant/chunk', seq: 1, time: 2, data: { turn: 0, step: 0, chunk: { type: 'text-delta', index: 0, text: 'final ' } } },
-      { type: 'assistant/chunk', seq: 2, time: 3, data: { turn: 0, step: 0, chunk: { type: 'text-delta', index: 1, text: 'answer' } } },
+      { type: 'assistant/attempt', seq: 1, time: 2, data: { turn: 0, step: 0, stream: [{ type: 'text-chunks', time0: 2, index: 0, dt: [0, 0], texts: ['final ', 'answer'] }] } },
     ];
 
     // NO onSessionEvent was ever called (the listener is ALREADY removed).
@@ -445,7 +444,7 @@ describe('durable unload reconcile', () => {
     });
     const events: SessionEvent[] = [
       { type: 'turn/start', seq: 0, time: 1, data: { turn: 0 } },
-      { type: 'assistant/message', seq: 1, time: 2, data: { turn: 0, step: 0, message: { role: 'assistant', content: [{ type: 'text', text: 'assembled only' }] } } },
+      { type: 'assistant/message', seq: 1, time: 2, data: { turn: 0, step: 0, message: { role: 'assistant', content: [{ type: 'text', text: 'assembled only' }] }, stream: [] } },
     ];
 
     await router.reconcileSession({ id: 's1', events });
@@ -485,13 +484,14 @@ describe('durable unload reconcile', () => {
     // A turn was streaming through the listener and has an active reply.
     const session = { id: 's1' } as never;
     router.onSessionEvent(session, { type: 'turn/start', seq: 0, time: 1, data: { turn: 0 } } as never);
-    router.onSessionEvent(session, { type: 'assistant/chunk', seq: 1, time: 2, data: { turn: 0, step: 0, chunk: { type: 'text-delta', index: 0, text: 'hel' } } } as never);
+    const agent = { id: 's1', session } as never;
+    router.onAssistantStream(agent, { type: 'start', attemptId: 'attempt-1' as never, revision: 1, turn: 0, step: 0 } as never);
+    router.onAssistantStream(agent, { type: 'chunk', attemptId: 'attempt-1' as never, revision: 1, index: 0, time: 2, chunk: { type: 'text-delta', index: 0, text: 'hel' } } as never);
     await new Promise((resolve) => setTimeout(resolve, 5));
 
     const events: SessionEvent[] = [
       { type: 'turn/start', seq: 0, time: 1, data: { turn: 0 } },
-      { type: 'assistant/chunk', seq: 1, time: 2, data: { turn: 0, step: 0, chunk: { type: 'text-delta', index: 0, text: 'hel' } } },
-      { type: 'assistant/chunk', seq: 2, time: 3, data: { turn: 0, step: 0, chunk: { type: 'text-delta', index: 1, text: 'lo reco' } } },
+      { type: 'assistant/attempt', seq: 1, time: 2, data: { turn: 0, step: 0, stream: [{ type: 'text-chunks', time0: 2, index: 0, dt: [0, 0], texts: ['hel', 'lo reco'] }] } },
     ];
     await router.reconcileSession({ id: 's1', events });
     await new Promise((resolve) => setTimeout(resolve, 5));

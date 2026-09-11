@@ -3,7 +3,7 @@
  *
  * This module defines the INTERFACE and the FAKE only. There is deliberately
  * NO real Harness generic attachment implementation here, because DeepSeek
- * Harness (distribution 0.1.1-rc.2) only ships an IMAGE attachment seam
+ * Harness (distribution 0.1.5-rc.2) only ships an IMAGE attachment seam
  * (`@deepseek-ai/dsh-attachment` SaveImageHook / ImageAttachmentRef /
  * ImageBlock) — an image-only service MUST NOT be mistaken for a generic
  * attachment surface.

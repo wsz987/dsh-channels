@@ -2,9 +2,9 @@
  * ReplyRouter — the outbound reply pipeline (architecture §19).
  *
  * Consumes only official `session/event` records:
- * - `assistant/chunk` (text-delta) feeds the reply buffer, throttled per
- *   strategy;
- * - `assistant/message` provides a fallback final text when no deltas flowed;
+ * - `assistant/message.stream` is the V3 durable stream source and feeds the
+ *   reply buffer;
+ * - `assistant/message` content provides the final fallback text;
  * - `turn/end` flushes and finishes the reply, then cleans up.
  *
  * Strategy comes from the adapter's resolved streaming mode, which may be
@@ -32,7 +32,7 @@
  * back to the channel.
  *
  * - `turn/start` only establishes turn existence (no active reply);
- * - `assistant/chunk` / `assistant/message` require an active `ReplyContext`
+ * - `assistant/message` requires an active `ReplyContext`
  *   (authoritative by then because `agent/inbox/claimed` fired first) and
  *   otherwise drop the output;
  * - `turn/end` releases the active context via `releaseTurn`.
@@ -40,8 +40,9 @@
  * target-aware adapters (e.g. QQ C2C native streaming) behave correctly.
  */
 import type { Context } from '@deepseek-ai/cordis';
+import type { Agent, AssistantStreamFrame } from '@deepseek-ai/dsh-agent';
 import type { Session, SessionEvent, TurnEndReason } from '@deepseek-ai/dsh-session';
-import type { AssistantMessage } from '@deepseek-ai/dsh-llm';
+import { joinAssistantStreamText, type AssistantMessage } from '@deepseek-ai/dsh-llm';
 import type {
   ChannelAdapter,
   ChannelLogger,
@@ -60,6 +61,13 @@ interface ActiveReply {
   strategy: ReplyStrategy;
   target: ChannelTarget;
   context?: ChannelReplyContext;
+  /**
+   * Mirror mode (issue #5): this reply tracks a turn initiated OUTSIDE the
+   * channel (web/CLI) for a binding with `mirror: true`. Always buffered —
+   * only the final assistant text is delivered, no streaming preview — and
+   * settled without a ReplyContext (nothing to release).
+   */
+  mirror?: boolean;
   handle: ReplyHandle | null;
   buffer: string;
   /** Fallback text from `assistant/message` when no deltas flowed. */
@@ -87,14 +95,37 @@ export interface ReplyRouterOptions {
 
 export class ReplyRouter {
   private readonly active = new Map<string, ActiveReply>();
+  private readonly streamTurns = new Map<string, number>();
 
   constructor(private readonly options: ReplyRouterOptions) {}
 
   /** Register the `session/event` listener; returns a disposer. */
   attach(ctx: Context): () => boolean {
-    return ctx.on('session/event', (session: Session, event: SessionEvent) => {
+    const stopSessionEvents = ctx.on('session/event', (session: Session, event: SessionEvent) => {
       this.onSessionEvent(session, event);
     });
+    const stopAssistantStream = ctx.on('agent/assistant-stream', ({ agent, frame }) => {
+      this.onAssistantStream(agent, frame);
+    });
+    return () => stopSessionEvents() && stopAssistantStream();
+  }
+
+  /** Consume transient V3 stream frames for native/edit previews. */
+  onAssistantStream(agent: Agent, frame: AssistantStreamFrame): void {
+    const key = `${agent.id}:${frame.attemptId}`;
+    if (frame.type === 'start') {
+      this.streamTurns.set(key, frame.turn);
+      return;
+    }
+    if (frame.type === 'end') {
+      this.streamTurns.delete(key);
+      return;
+    }
+    if (frame.chunk.type !== 'text-delta') return;
+    const turn = this.streamTurns.get(key);
+    if (turn === undefined) return;
+    const active = this.ensureActive(agent.session, turn);
+    if (active) this.appendText(active, frame.chunk.text);
   }
 
   /** Testable entry point; the registered listener delegates here. */
@@ -106,19 +137,19 @@ export class ReplyRouter {
         // turn), which is only authoritative once chunks flow. A non-channel
         // turn on a channel-bound session must NOT auto-route (see header).
         break;
-      case 'assistant/chunk': {
-        const { turn, chunk } = event.data;
-        if (chunk.type === 'text-delta') {
-          const active = this.ensureActive(session, turn);
-          if (active) this.appendText(active, chunk.text);
-        }
-        break;
-      }
       case 'assistant/message': {
-        const text = assistantText(event.data.message);
-        if (text) {
+        const streamedText = joinAssistantStreamText(event.data.stream);
+        const finalText = assistantText(event.data.message) || streamedText;
+        if (streamedText || finalText) {
           const active = this.ensureActive(session, event.data.turn);
-          if (active) active.finalText = text;
+          if (active) {
+            const existingText = active.buffer;
+            const remaining = streamedText.startsWith(existingText)
+              ? streamedText.slice(existingText.length)
+              : streamedText || finalText;
+            if (remaining) this.appendText(active, remaining);
+            active.finalText = finalText;
+          }
         }
         break;
       }
@@ -153,9 +184,8 @@ export class ReplyRouter {
    *
    * Finds the last `turn/start` with no matching `turn/end`; if the
    * ReplyRouter already holds an active reply for it, finalizes normally.
-   * Otherwise it rebuilds the assistant text by replaying the turn's
-   * `assistant/chunk` text-delta events (falling back to the
-   * `assistant/message` text) and delivers it via `adapter.send` (buffered
+   * Otherwise it rebuilds the assistant text from each V3
+   * `assistant/message.stream` (falling back to the message text) and delivers it via `adapter.send` (buffered
    * strategy), then finishes/cleans up. The Session log is the ONLY source of
    * transcript truth — reconcile never maintains a second copy.
    */
@@ -168,10 +198,21 @@ export class ReplyRouter {
 
     // Same outbound gate as the live path: a durable-log turn with no active
     // ReplyContext was not channel-inbound, so it must not be delivered back
-    // to the channel on unload.
+    // to the channel on unload — unless the binding opted into mirroring
+    // (issue #5), in which case the rebuilt final text is delivered buffered.
     const context = this.options.replyContexts.getTurn(sessionId, turn);
     if (!context) {
       this.options.replyContexts.releaseTurn(sessionId, turn);
+      const mirrorBinding = rebuilt ? this.options.getBinding(sessionId) : undefined;
+      if (!mirrorBinding || mirrorBinding.mirror !== true || !rebuilt) return;
+      const binding = mirrorBinding;
+      const adapter = this.options.getAdapter(binding.channelId);
+      if (!adapter || !adapter.capabilities.text) return;
+      const mirrorContext: ChannelReplyContext = {
+        conversationType: binding.conversationType,
+        ...(binding.senderId === undefined ? {} : { senderId: binding.senderId }),
+      };
+      await this.deliver(adapter, targetFor(binding, mirrorContext), rebuilt);
       return;
     }
 
@@ -220,17 +261,20 @@ export class ReplyRouter {
       active.finished = true;
     }
     this.active.clear();
+    this.streamTurns.clear();
   }
 
   private ensureActive(session: Session, turn: number): ActiveReply | null {
     const sessionId = String(session.id);
 
-    // ReplyContext is the outbound gate: a turn without an active context was
-    // not triggered by a channel inbound message, so it must never be routed
-    // back to the channel (even if the session is channel-bound).
     const context = this.options.replyContexts.getTurn(sessionId, turn);
     if (!context) {
-      return null;
+      // ReplyContext is the outbound gate: a turn without an active context
+      // was not triggered by a channel inbound message, so it must never be
+      // routed back to the channel (even if the session is channel-bound) —
+      // unless the owner explicitly opted in via the binding's `mirror` flag
+      // (issue #5), in which case the turn is tracked as a buffered mirror.
+      return this.ensureMirrorActive(session, turn);
     }
 
     const existing = this.active.get(sessionId);
@@ -267,6 +311,50 @@ export class ReplyRouter {
       strategy: strategyFor(adapter, target),
       target,
       context,
+      handle: null,
+      buffer: '',
+      finalText: '',
+      timer: null,
+      lastFlush: 0,
+      lastSentLength: 0,
+      turn,
+      finished: false,
+      flushing: null,
+    };
+    this.active.set(sessionId, active);
+    return active;
+  }
+
+  /**
+   * Mirror tracking for a non-channel turn (issue #5): only when the bound
+   * conversation opted in (`binding.mirror === true`) does the router attach
+   * a buffered-only reply that delivers the final assistant text to the bound
+   * conversation at `turn/end`. Everything else stays unrouted. The synthetic
+   * context carries NO platform state (no replyToMessageId / raw / runId) —
+   * the binding's stable identity is the sole delivery address.
+   */
+  private ensureMirrorActive(session: Session, turn: number): ActiveReply | null {
+    const sessionId = String(session.id);
+    const existing = this.active.get(sessionId);
+    if (existing) return existing;
+
+    const binding = this.options.getBinding(sessionId);
+    if (!binding || binding.mirror !== true) return null;
+    const adapter = this.options.getAdapter(binding.channelId);
+    if (!adapter || !adapter.capabilities.text) return null;
+
+    const context: ChannelReplyContext = {
+      conversationType: binding.conversationType,
+      ...(binding.senderId === undefined ? {} : { senderId: binding.senderId }),
+    };
+    const active: ActiveReply = {
+      binding,
+      // Mirror is always buffered: no edit streaming, no partial previews —
+      // only the final assistant text lands on the conversation.
+      strategy: 'buffered',
+      target: targetFor(binding, context),
+      context,
+      mirror: true,
       handle: null,
       buffer: '',
       finalText: '',
@@ -597,20 +685,17 @@ function lastUnfinishedTurn(events: readonly SessionEvent[]): { turn: number } |
 }
 
 /**
- * Rebuild the assistant text for one turn by replaying its `assistant/chunk`
- * text-delta events (in seq order), falling back to the `assistant/message`
- * text when no deltas flowed.
+ * Rebuild the assistant text for one turn from its V3 compact assistant
+ * streams, falling back to `assistant/message` text when no delta flowed.
  */
 function rebuildAssistantText(events: readonly SessionEvent[], turn: number): string {
   let text = '';
-  let sawDelta = false;
   for (const event of events) {
-    if (event.type === 'assistant/chunk' && event.data.turn === turn && event.data.chunk.type === 'text-delta') {
-      text += event.data.chunk.text;
-      sawDelta = true;
+    if ((event.type === 'assistant/message' || event.type === 'assistant/attempt') && event.data.turn === turn) {
+      text += joinAssistantStreamText(event.data.stream);
     }
   }
-  if (sawDelta || text.length > 0) return text;
+  if (text.length > 0) return text;
   for (const event of events) {
     if (event.type === 'assistant/message' && event.data.turn === turn) {
       const fallback = assistantText(event.data.message);

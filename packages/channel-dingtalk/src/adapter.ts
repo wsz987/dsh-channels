@@ -159,6 +159,10 @@ export class DingTalkAdapter implements ChannelAdapter {
   constructor(private readonly config: DingTalkConfig, deps: DingTalkAdapterDeps = {}) {
     this.capabilities = {
       ...DingTalkAdapter.BASE_CAPABILITIES,
+      // Declared ONLY when the operator opted into a card template that must
+      // already be published in their own Card Platform with matching
+      // `text`/`actions` variables. A capability claimed without that
+      // precondition is a lie the question presenter pays for.
       interactiveActions: config.upstream.mode === 'sdk' && Boolean(config.card.interactiveTemplateId?.trim()),
     };
     this.now = deps.now ?? Date.now;

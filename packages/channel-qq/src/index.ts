@@ -24,7 +24,7 @@
  */
 import { type Context } from '@deepseek-ai/cordis';
 import { credentialRef } from '@deepseek-ai/dsh-credentials';
-import { settingsNamespace, type SettingsProvider } from '@deepseek-ai/dsh-settings';
+import type { SettingsProvider } from '@deepseek-ai/dsh-settings';
 import { mountChannelAdapter } from '@wsz987/channel-core';
 import type { QQConfig } from './config.js';
 import { Config, QQ_APP_SECRET_REF } from './config.js';
@@ -85,7 +85,7 @@ export function apply(ctx: Context, config: QQConfig, deps: QQAdapterDeps = {}):
     // plane can re-enable it later (doc §19/§20).
     const credentials = (ctx as Context & { credentials: CredentialSeam }).credentials;
     const settings = ctx.get('settings') as SettingsProvider | undefined;
-    const scope = settings?.register(settingsNamespace('channels-qq'), Config, { base: config });
+    const scope = settings?.register('channels-qq', Config, { base: config });
     control.definitions.register(
       createQQDefinition({
         config: scope?.get() ?? config,

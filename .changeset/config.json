@@ -7,6 +7,10 @@
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
+  "privatePackages": {
+    "version": false,
+    "tag": false
+  },
   "ignore": [
     "@wsz987/channel-testkit",
     "@wsz987/channel-compat",

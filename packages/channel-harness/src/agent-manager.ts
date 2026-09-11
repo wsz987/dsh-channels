@@ -27,12 +27,15 @@
  * are in flight at once across all sessions; `get()` (a live lookup) is never
  * limited.
  */
-import { SessionId } from '@deepseek-ai/dsh-session';
-import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence';
+import { SessionId, type SessionEvent, type SessionHeader } from '@deepseek-ai/dsh-session';
+import type {
+  SessionPersistence,
+  SessionPersistenceSnapshot,
+} from '@deepseek-ai/dsh-session-persistence';
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent, AgentHandle, AgentOptions, AgentSetup, ModelSelection } from '@deepseek-ai/dsh-agent';
 import type { AgentDefaultModelConfig } from '@deepseek-ai/dsh-agent-default-model';
-import { resolveSessionPreset, type AgentPresets } from '@deepseek-ai/dsh-agent-presets';
+import { agentPresetProjectionDefinition, type AgentPresets } from '@deepseek-ai/dsh-agent-presets';
 import type { UserMessage } from '@deepseek-ai/dsh-llm';
 import type { ChannelLogger } from '@wsz987/channel-core';
 import type { AgentRouteSpec } from './agent-router.js';
@@ -208,7 +211,7 @@ export class PersistenceMembershipProbe implements PersistenceProbe {
     if (!persistence) return false;
     const headers = await persistence.list();
     const target = sessionId;
-    return headers.some((header) => String(header.id) === target);
+    return headers.some((header) => persistedSessionId(header) === target);
   }
 
   /** Atomic probe: the live capability is resolved exactly once per call. */
@@ -216,8 +219,60 @@ export class PersistenceMembershipProbe implements PersistenceProbe {
     const persistence = this.resolvePersistence();
     if (!persistence) return 'unavailable';
     const headers = await persistence.list();
-    return headers.some((header) => String(header.id) === sessionId) ? 'present' : 'missing';
+    return headers.some((header) => persistedSessionId(header) === sessionId) ? 'present' : 'missing';
   }
+}
+
+/**
+ * Session V3 persistence `list()` always returns snapshots. Identity lives in
+ * the snapshot header; the bridge intentionally does not retain the removed
+ * pre-V3 bare-header compatibility path.
+ */
+function persistedSessionId(entry: SessionPersistenceSnapshot): string {
+  return String(entry.header.id);
+}
+
+/**
+ * Read one durable V3 session through the public read handle. A channel bridge
+ * never depends on an implementation-specific persistence reader.
+ */
+export async function resolvePersistedInspection(
+  persistence: SessionPersistence,
+  sessionId: SessionId,
+): Promise<PersistedInspection | undefined> {
+  const handle = await persistence.open(sessionId, 'read');
+  try {
+    return {
+      meta: handle.header,
+      events: (await handle.read()).events,
+    };
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Structural subset of the official `SessionInspection` the bridge consumes. */
+export interface PersistedInspection {
+  readonly meta: SessionHeader;
+  readonly events: readonly SessionEvent[];
+}
+
+/**
+ * Reconstruct the preset a persisted session actually runs, from its durable
+ * inspection: the creation header's `agentPreset` advanced by every
+ * `agent-preset/selected` event — the official `agentPresetProjectionDefinition`
+ * fold (dsh 0.1.2 replaced the retired `resolveSessionPreset` helper with the
+ * projection definition; the reconstruction semantics are unchanged).
+ */
+function resolvePersistedPreset(
+  header: SessionHeader,
+  events: readonly SessionEvent[],
+): string | undefined {
+  let state = agentPresetProjectionDefinition.init(header);
+  for (const event of events) {
+    state = agentPresetProjectionDefinition.apply(state, event);
+  }
+  return state ?? undefined;
 }
 
 /**
@@ -233,6 +288,29 @@ export class PersistenceMembershipProbe implements PersistenceProbe {
 export class HarnessAgentGateway implements AgentGateway {
   private readonly probe: PersistenceMembershipProbe;
   private readonly resolvePersistence: () => SessionPersistence | undefined;
+
+  /**
+   * All persisted session ids (shape-tolerant, issue #8) — the `/bind`
+   * resolution universe. Empty when no persistence is mounted.
+   */
+  async listPersistedSessionIds(): Promise<string[]> {
+    const persistence = this.resolvePersistence();
+    if (!persistence) return [];
+    const rows = await persistence.list();
+    return rows.map((row) => persistedSessionId(row));
+  }
+
+  /**
+   * The persisted Agent preset of one session (issue #6 route parity): the
+   * official `agentPresetProjectionDefinition` fold over the durable
+   * inspection. Undefined when no persistence / no recorded preset.
+   */
+  async persistedPresetOf(sessionId: string): Promise<string | undefined> {
+    const persistence = this.resolvePersistence();
+    if (!persistence) return undefined;
+    const inspection = await resolvePersistedInspection(persistence, SessionId(sessionId));
+    return inspection ? resolvePersistedPreset(inspection.meta, inspection.events) : undefined;
+  }
 
   constructor(
     private readonly ctx: Context,
@@ -289,9 +367,9 @@ export class HarnessAgentGateway implements AgentGateway {
     const resolvedId = (await presets.resolve(presetId)).id;
     return {
       agentPreset: resolvedId,
-      setup: async (agentCtx) => {
+      setup: async (agentCtx, agent) => {
         await presets.mount(agentCtx, resolvedId);
-        return setup?.(agentCtx);
+        return setup?.(agentCtx, agent);
       },
     };
   }
@@ -327,9 +405,11 @@ export class HarnessAgentGateway implements AgentGateway {
     // as create. NEVER `model ?? agentId`.
     const resolved = resolveRoute(route, this.defaultSelection());
     const persistence = this.resolvePersistence();
-    const inspected = persistence ? await persistence.inspect(SessionId(sessionId)) : undefined;
+    const inspected = persistence
+      ? await resolvePersistedInspection(persistence, SessionId(sessionId))
+      : undefined;
     const persistedPreset = inspected
-      ? resolveSessionPreset({ header: inspected.meta, events: inspected.events })
+      ? resolvePersistedPreset(inspected.meta, inspected.events)
       : undefined;
     if (persistedPreset && resolved.preset && persistedPreset !== resolved.preset) {
       throw new AgentPresetConflictError(sessionId, resolved.preset, persistedPreset);
@@ -569,7 +649,7 @@ export class AgentManager {
   private async ensureBorrowedSetup(agent: GatewayAgent, setup: AgentSetup | undefined): Promise<void> {
     if (!setup) return;
     if (this.configuredAgents.has(agent.agent)) return;
-    const commit = await setup(agent.agent.ctx);
+    const commit = await setup(agent.agent.ctx, agent.agent);
     commit?.commit();
     this.configuredAgents.add(agent.agent);
   }

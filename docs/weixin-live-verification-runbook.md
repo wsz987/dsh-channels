@@ -15,7 +15,7 @@ status: runbook
 ## 0. 前置条件
 
 - 独立测试微信账号和手机，不建议用主账号执行 stale-token 场景。
-- Node 22、pnpm 9.15.3，以及可运行的 `dsh 0.1.1-rc.2` 或兼容版本。
+- Node 22、pnpm 9.15.3，以及可运行的 `dsh 0.1.5-rc.2`。
 - 已知 Tencent `openclaw-weixin` 的精确 npm package version 和 40 位 commit SHA。
 - 三个不含敏感信息的本地素材：JPEG/PNG、普通文件、MP4。
 - 执行 GitHub workflow 时，准备受保护的 Linux self-hosted runner，并添加

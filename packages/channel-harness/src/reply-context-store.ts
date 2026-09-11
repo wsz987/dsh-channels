@@ -14,7 +14,7 @@
  *    actually picks it up, `agent/inbox/claimed { agent, message, turn }`
  *    fires, and the store *claims* the pending context by `message.id`,
  *    moving it to the active slot for `sessionId`+`turn`.
- * 3. `assistant/chunk` / `assistant/message` (which only flow after the claim)
+ * 3. `agent/assistant-stream` / `assistant/message` (which only flow after the claim)
  *    resolve the active context lazily via `getTurn`, so the reply target is
  *    bound exactly once per message-id — never via a session FIFO guessed at
  *    `turn/start`.

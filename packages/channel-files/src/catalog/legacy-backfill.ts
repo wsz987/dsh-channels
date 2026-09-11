@@ -17,10 +17,13 @@ import {
 
 /**
  * Guard: only generic (non-image) kinds can be cataloged. Images never enter
- * the v1 store today (`StoredChannelAsset.kind` is already limited to
- * file/audio/video), so this is a defensive contract for future kind values.
+ * the v1 store (the image mirror writes live assets only, issue #7), so this
+ * stays a type-level contract: the catalog v2 `file.kind` vocabulary is
+ * file/audio/video.
  */
-export function isCatalogableLegacyKind(asset: StoredChannelAsset): boolean {
+export function isCatalogableLegacyKind(
+  asset: StoredChannelAsset,
+): asset is StoredChannelAsset & { kind: 'file' | 'audio' | 'video' } {
   return asset.kind === 'file' || asset.kind === 'audio' || asset.kind === 'video';
 }
 
@@ -31,10 +34,15 @@ export function isCatalogableLegacyKind(asset: StoredChannelAsset): boolean {
  * - `migration.sourceBackend` -> `'channel-v1'` records where this record
  *   originated; no `migratedAt` / `verifiedAt` (nothing migrated yet).
  * - provenance / file fields map 1:1 from the legacy metadata.
+ * - Fails loud on non-catalogable kinds (e.g. the issue #7 image mirror) —
+ *   v1 trees can never contain them.
  */
 export function buildCatalogRecordFromLegacy(
   asset: StoredChannelAsset,
 ): AttachmentCatalogRecordV2 {
+  if (!isCatalogableLegacyKind(asset)) {
+    throw new Error(`legacy catalog backfill received a non-catalogable kind '${asset.kind}'`);
+  }
   return {
     schemaVersion: CATALOG_SCHEMA_VERSION,
     attachmentId: asset.attachmentId,

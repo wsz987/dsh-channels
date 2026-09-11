@@ -203,6 +203,29 @@ describe('mapper (fixture-driven)', () => {
     expect(a.capabilities.audio).toBe(true);
   });
 
+  it('does NOT claim interactiveActions without an explicitly configured card template', () => {
+    // Regression: a built-in third-party template id defaulted
+    // `interactiveActions` to true for every SDK deployment, so every
+    // `ask_user_question` tried the Card Platform API and died with
+    // "无法在当前渠道展示问题，已取消。". Fail closed -> numbered-text questions.
+    const sdk = new DingTalkAdapter(makeConfig({ upstream: { mode: 'sdk', clientId: 'ding-app' } }));
+    expect(sdk.capabilities.interactiveActions).toBe(false);
+  });
+
+  it('claims interactiveActions only for an explicitly configured SDK template', () => {
+    const sdk = new DingTalkAdapter(makeConfig({
+      upstream: { mode: 'sdk', clientId: 'ding-app' },
+      card: { createOnFirstDelta: true, interactiveTemplateId: 'my-org-template.schema' },
+    }));
+    expect(sdk.capabilities.interactiveActions).toBe(true);
+
+    // Gateway mode never has the proactive port that the card send needs.
+    const gateway = new DingTalkAdapter(makeConfig({
+      card: { createOnFirstDelta: true, interactiveTemplateId: 'my-org-template.schema' },
+    }));
+    expect(gateway.capabilities.interactiveActions).toBe(false);
+  });
+
   it('maps unknown types to unsupported parts', async () => {
     const fixture = await loadFixture('dingtalk', 'inbound-unknown');
     const event = mapInbound(fixture.payload, { channel: 'dingtalk' as never, accountId: 'main' as never });

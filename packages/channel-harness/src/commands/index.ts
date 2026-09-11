@@ -29,6 +29,8 @@ import { createStatusCommand } from './status.js';
 import { createModelsCommand } from './models.js';
 import { createModelCommand } from './model.js';
 import { createVersionCommand } from './version.js';
+import { createMirrorCommand } from './mirror.js';
+import { createBindCommand } from './bind.js';
 import type { ChannelModelSelectionController } from '../model-selection.js';
 import type { ChannelCommandLocale } from './locale.js';
 
@@ -84,6 +86,44 @@ export interface ChannelCommandDependencies {
    * plane is absent — /version then degrades to the version-only output.
    */
   versionInfo?(): Promise<ChannelVersionInfo | undefined>;
+  /**
+   * Per-conversation mirror toggle backing (issue #5). The bridge binds it to
+   * the durable binding store; the state lives on `SessionBinding.mirror`.
+   */
+  mirror?: {
+    /** Current mirror state for the agent's bound conversation. */
+    get(agent: Agent): Promise<boolean>;
+    /** Toggle and persist the mirror state. */
+    set(agent: Agent, on: boolean): Promise<void>;
+  };
+  /**
+   * Rebind/attach an existing session to the current conversation (issue #6).
+   * `resolve` never mutates: it fail-closes on ambiguous prefixes, sessions
+   * bound elsewhere, and preset conflicts. `confirm` performs the rebind.
+   */
+  bind?: {
+    resolve(agent: Agent, query: string): Promise<ChannelBindResolution>;
+    confirm(agent: Agent, sessionId: string): Promise<void>;
+  };
+}
+
+/**
+ * Outcome of the fail-closed `/bind` resolution (issue #6). `resolved` still
+ * carries the two refusal flags — `boundElsewhere` / `conflict` — so the
+ * command can present the exact refusal reason before any mutation.
+ */
+export interface ChannelBindResolution {
+  kind: 'resolved' | 'missing' | 'ambiguous';
+  /** Unique target when `kind: 'resolved'`. */
+  sessionId?: string;
+  /** Ambiguous prefix candidates when `kind: 'ambiguous'` (bounded list). */
+  candidates?: string[];
+  /** Persisted Agent preset of the target (undefined = none recorded). */
+  preset?: string;
+  /** Target is already bound to a different conversation. */
+  boundElsewhere?: boolean;
+  /** Target's persisted preset conflicts with this conversation's route. */
+  conflict?: boolean;
 }
 
 export type ChannelCommandDisposer = () => Promise<void>;
@@ -96,6 +136,8 @@ const commandFactories = [
   createModelsCommand,
   createModelCommand,
   createVersionCommand,
+  createMirrorCommand,
+  createBindCommand,
 ];
 
 /**

@@ -14,7 +14,7 @@ interface LoadedModule {
 let captured: LoadedModule | undefined;
 
 /**
- * Static shell identities of the rc.2 client module graph
+ * Static shell identities of the current client module graph
  * (`PLATFORM_MODULES` exported by @deepseek-ai/dsh-client-web): compiled into
  * the Vite shell, shared into the frozen module table, and resolvable by
  * every bundle factory's require(). They are NOT dynamic graph rows.
@@ -148,6 +148,13 @@ describe('@wsz987/channel-web client bundle', () => {
     expect(opts.order).toBe(60);
   });
 
+  it('does not reach into the host DOM to customize shell chrome', () => {
+    const code = loadClientCode();
+    expect(code).not.toContain('MutationObserver');
+    expect(code).not.toContain('querySelectorAll');
+    expect(code).not.toContain('createElementNS');
+  });
+
   it('bundles qrcode inline instead of requiring it at runtime', () => {
     const code = loadClientCode();
     // qrcode must be inlined: the Harness ModuleLoader does not provide it.
@@ -167,7 +174,7 @@ describe('@wsz987/channel-web client bundle', () => {
   });
 });
 
-describe('@wsz987/channel-web rc.2 client module graph contract', () => {
+describe('@wsz987/channel-web client module graph contract', () => {
   const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
     dsh?: { client?: { platform?: string; inject?: string[] } };
     peerDependencies?: Record<string, string>;
@@ -179,7 +186,10 @@ describe('@wsz987/channel-web rc.2 client module graph contract', () => {
     expect(pkg.dsh?.client?.platform).toBe('web');
     // The one dynamic client dependency of this entry: the provider of the
     // "locale" service. Static shell identities must never appear here.
-    expect(pkg.dsh?.client?.inject).toEqual(['@deepseek-ai/dsh-client-locale']);
+    expect(pkg.dsh?.client?.inject).toEqual([
+      '@deepseek-ai/dsh-client-locale',
+      '@deepseek-ai/dsh-client-ui-settings',
+    ]);
   });
 
   it('never lists a static shell identity in dsh.client.inject', () => {
@@ -189,22 +199,25 @@ describe('@wsz987/channel-web rc.2 client module graph contract', () => {
     }
   });
 
-  it('layers dependencies per the rc.2 static/dynamic split', () => {
+  it('layers dependencies per the current static/dynamic split', () => {
     // Dynamic client dependency → peer + dev (compile input).
-    expect(pkg.peerDependencies?.['@deepseek-ai/dsh-client-locale']).toBe('0.1.1-rc.2');
-    expect(pkg.devDependencies?.['@deepseek-ai/dsh-client-locale']).toBe('0.1.1-rc.2');
+    expect(pkg.peerDependencies?.['@deepseek-ai/dsh-client-locale']).toBe('0.1.5-rc.2');
+    expect(pkg.devDependencies?.['@deepseek-ai/dsh-client-locale']).toBe('0.1.5-rc.2');
+    expect(pkg.devDependencies?.['@deepseek-ai/dsh-client-ui-slots']).toBe('0.1.5-rc.2');
+    expect(pkg.peerDependencies?.['@deepseek-ai/dsh-client-ui-settings']).toBe('0.1.5-rc.2');
+    expect(pkg.devDependencies?.['@deepseek-ai/dsh-client-ui-settings']).toBe('0.1.5-rc.2');
     // Static UI library → dev-only compilation input, never a peer.
     expect(pkg.peerDependencies?.['@deepseek-ai/dsh-client-ui-primitives']).toBeUndefined();
-    expect(pkg.devDependencies?.['@deepseek-ai/dsh-client-ui-primitives']).toBe('0.1.1-rc.2');
+    expect(pkg.devDependencies?.['@deepseek-ai/dsh-client-ui-primitives']).toBe('0.1.5-rc.2');
     // React is shell-owned: dev-only, not shipped as a dependency.
     expect(pkg.dependencies?.react).toBeUndefined();
     expect(pkg.peerDependencies?.react).toBeUndefined();
     expect(pkg.devDependencies?.react).toBeTruthy();
   });
 
-  it('registers through the rc.2 window.__ModuleLoader__.load protocol', () => {
+  it('registers through the window.__ModuleLoader__.load protocol', () => {
     const code = loadClientCode().replace(/\/\/# sourceMappingURL=[^\n]*(\s*)$/, '');
-    // Same wrapper shape as the official rc.2 dynamic client artifacts: the
+    // Same wrapper shape as the official dynamic client artifacts: the
     // executing script only registers the factory; module body side effects
     // live inside the factory closure.
     expect(code.startsWith('window.__ModuleLoader__.load({\n  id: "@wsz987/channel-web",\n  factory: (require) => {')).toBe(true);

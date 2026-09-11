@@ -1,6 +1,6 @@
 {
   "name": "@wsz987/channel-control",
-  "version": "0.4.2",
+  "version": "0.5.1",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/wsz987/dsh-channels.git"
@@ -33,8 +33,8 @@
     "clean": "rimraf lib"
   },
   "dependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/schemastery": "^3.18.1",
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/schemastery": "^3.18.2",
     "@wsz987/channel-core": "workspace:*",
     "zod": "^4.4.3"
   },

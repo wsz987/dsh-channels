@@ -218,12 +218,17 @@ function turnStartEvent(turn: number): SessionEvent<'turn/start'> {
   return { type: 'turn/start', seq: 0, time: Date.now(), data: { turn } };
 }
 
-function chunkEvent(turn: number, text: string): SessionEvent<'assistant/chunk'> {
+function chunkEvent(turn: number, text: string): SessionEvent<'assistant/message'> {
   return {
-    type: 'assistant/chunk',
+    type: 'assistant/message',
     seq: 1,
     time: Date.now(),
-    data: { turn, step: 0, chunk: { type: 'text-delta', index: 0, text } },
+    data: {
+      turn,
+      step: 0,
+      message: { role: 'assistant', content: [{ type: 'text', text }] },
+      stream: [{ type: 'text-chunks', time0: Date.now(), index: 0, dt: [0], texts: [text] }],
+    },
   };
 }
 

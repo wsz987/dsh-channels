@@ -42,6 +42,7 @@ import { resolveAttachmentsRoot } from '../paths.js';
 import { sanitizeFilename, normalizeMimeHint } from './filename.js';
 import { verifiedMime } from './mime.js';
 import { sha256Hex } from './hash.js';
+import { assetPathSegment } from '../paths.js';
 import { parseStoredChannelAsset } from './schema.js';
 import {
   ASSET_SCHEMA_VERSION,
@@ -128,7 +129,7 @@ export class FileChannelInboundAssetStore implements ChannelInboundAssetStore {
 
   /** Per-asset directory rooted at THIS store's root, not the global default. */
   private assetDir(attachmentId: string, sessionId: string, messageId: string): string {
-    return join(this.root, 'sessions', sessionId, messageId, attachmentId);
+    return join(this.root, 'sessions', sessionId, messageId, assetPathSegment(attachmentId));
   }
 
   /** Run a publish write serialized onto the chain (returns after this op). */

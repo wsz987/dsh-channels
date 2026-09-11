@@ -26,7 +26,6 @@ As a Cordis plugin:
     - agentPresets
     - llm
     - commands
-    - apiProxy
 ```
 
 Channel images follow the official Harness image pipeline: the bridge hands
@@ -45,9 +44,9 @@ original attachment reference.
 | `AgentManager` / `AgentRouter` | Resolves/creates the agent for a conversation via `agent.default` plus per-channel/account/conversation overrides |
 | `MessageConverter` | Maps structured `ChannelEvent` messages to Harness message types |
 | `ReplyRouter` / `ReplyContextStore` | Streams `session/event` output back to the adapter (`ReplyHandle`) |
-| `ChannelQuestionPresenter` (interactions/) | Presents `ask_user_question` requests through generic interactive actions. Web profile answers through the official ApiProxy mux contract; headless deployments register the channel as the official `UserQuestionProvider` (`ctx.userQuestions`) |
+| `ChannelQuestionPresenter` (interactions/) | Presents `ask_user_question` requests through generic interactive actions. One root-level, **prepended** answerer on the official `user-questions/request` Cordis waterfall serves every profile (the official Remote/Web answerer registers first at boot, and a waterfall is first-claim-wins); a declined presentation delegates to the next answerer (the Web UI) via `next()` |
 | `WorkspaceResolver` | Maps conversations to Harness workspaces (`channel-account` by default) |
-| commands | Registers Agent-scoped slash commands (`/new`) through Harness `CommandRuntime` |
+| commands | Registers Agent-scoped slash commands (`/new`, `/stop`, `/help`, `/status`, `/model`, `/version`, `/mirror`, `/bind`) through Harness `CommandRuntime` |
 | outbox | Proactive `send_channel_message` tool support (`OutboxService`) |
 
 Model routing remains Harness-owned. A channel Session uses the model resolved
@@ -62,7 +61,7 @@ run a first-turn model preparation RPC.
 ```yaml
 - id: channels-harness
   name: '@wsz987/channel-harness'
-  inject: [channels, agents, agentDefaultModel, agentPresets, llm, commands, apiProxy]
+  inject: [channels, agents, agentDefaultModel, agentPresets, llm, commands]
   config:
     agent:
       default:

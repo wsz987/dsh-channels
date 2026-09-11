@@ -5,7 +5,7 @@
  * (QR login, getUpdates long-poll, sendmessage). Streaming is `buffered`.
  */
 import { type Context } from '@deepseek-ai/cordis';
-import { settingsNamespace, type SettingsProvider } from '@deepseek-ai/dsh-settings';
+import type { SettingsProvider } from '@deepseek-ai/dsh-settings';
 import { mountChannelAdapter } from '@wsz987/channel-core';
 import type { ChannelAdapter, ChannelDefinition } from '@wsz987/channel-control';
 import type { WeixinConfig } from './config.js';
@@ -159,7 +159,7 @@ export function apply(ctx: Context, config: WeixinConfig, deps: WeixinAdapterDep
     // definition must stay visible so the Web control plane can re-enable it
     // later (doc §19/§20). The M1 QR flow is driven through the mounted adapter.
     const settings = ctx.get('settings') as SettingsProvider | undefined;
-    const scope = settings?.register(settingsNamespace('channels-weixin'), Config, { base: config });
+    const scope = settings?.register('channels-weixin', Config, { base: config });
     // Weixin owner auto-discovery: the control plane never reads
     // weixin credential storage; a closure here maps the stored scanning
     // user's canonical id out of the platform's own AccountCredentialStore.

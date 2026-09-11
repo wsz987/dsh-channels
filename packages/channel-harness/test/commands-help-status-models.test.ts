@@ -5,7 +5,7 @@
  * /status is pure Human Plane (session identity + lifecycle + model block).
  * /models uses a REAL LlmRuntime mounted on the root context with a small fake
  * adapter, so the advisory-catalog and per-provider-failure semantics are the
- * genuine rc.6 behavior.
+ * genuine 0.1.5-rc.2 behavior.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { Context } from '@deepseek-ai/cordis';

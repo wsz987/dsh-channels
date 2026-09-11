@@ -29,17 +29,33 @@ published by this workflow.
 
 | Package                    | Target stable version |
 | -------------------------- | --------------------- |
-| @wsz987/channel-core       | 0.5.0                 |
-| @wsz987/channel-harness    | 0.5.0                 |
-| @wsz987/channel-control    | 0.5.0                 |
-| @wsz987/channel-files      | 0.5.0                 |
-| @wsz987/channel-web        | 0.5.0                 |
-| @wsz987/channel-weixin     | 0.5.0                 |
-| @wsz987/channel-qq         | 0.5.0                 |
-| @wsz987/channel-dingtalk   | 0.5.0                 |
-| @wsz987/channel-lark       | 0.5.0                 |
-| @wsz987/channel-telegram   | 0.5.0                 |
-| @wsz987/dsh-channels       | 0.5.0                 |
+| @wsz987/channel-core       | 0.5.1                 |
+| @wsz987/channel-harness    | 0.5.1                 |
+| @wsz987/channel-control    | 0.5.1                 |
+| @wsz987/channel-files      | 0.5.1                 |
+| @wsz987/channel-web        | 0.5.1                 |
+| @wsz987/channel-weixin     | 0.5.1                 |
+| @wsz987/channel-qq         | 0.5.1                 |
+| @wsz987/channel-dingtalk   | 0.5.1                 |
+| @wsz987/channel-lark       | 0.5.1                 |
+| @wsz987/channel-telegram   | 0.5.1                 |
+| @wsz987/dsh-channels       | 0.5.1                 |
+
+> ⚠️ **Why not 0.5.0 — the published `latest` is a DIFFERENT, older line.**
+> `@wsz987/dsh-channels@0.5.0` is **already published** (2026-08-24) and is built
+> against Harness **`0.1.1-rc.2`**, still peering on the since-retired
+> `@deepseek-ai/dsh-host-apiproxy`. It therefore **cannot run** on Harness
+> `0.1.5-rc.2` (injecting the removed `apiProxy` stalls the Cordis loader).
+> The version number and the content are inverted: the older Harness line owns
+> the higher number while the current `0.1.5-rc.2` line carries newer content.
+> The release-prep versioning therefore targets **`0.5.1`**: `0.4.2 + minor`
+> computes `0.5.0`, which npm already owns, and re-publishing `0.5.0` is a no-op
+> because this workflow skips versions already present on npm (see the release
+> flow above), so the migration would silently never ship. Consuming the pending
+> changesets and renumbering to the next free stable version is what put the
+> tree on `0.5.1`; the remaining action is the `v0.5.1` tag.
+> Verify before releasing: `npm view '@wsz987/channel-harness@<target>' peerDependencies`
+> must name `@deepseek-ai/dsh-*@0.1.5-rc.2` and must **not** name `dsh-host-apiproxy`.
 `apps/*` are private (`"private": true`) and never published.
 
 Internal workspace dependencies are declared as `workspace:*` and rewritten to
@@ -126,7 +142,7 @@ update testedVersion
    `channels-dingtalk`, `channels-lark`, `channels-telegram`,
    `channels-web` — with their
    `inject` lists (`channels-harness` → `[channels, agents, agentDefaultModel,
-   agentPresets, llm, commands, apiProxy]`, `channels-control` →
+   agentPresets, llm, commands]`, `channels-control` →
    `[channels, credentials]`, the channel
    adapters → `[channels, (credentials,) channelControl]`);
 2. dynamically `import()`s every bundle-owned plugin specifier — this enforces

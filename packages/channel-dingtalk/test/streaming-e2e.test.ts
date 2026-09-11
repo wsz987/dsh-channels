@@ -3,7 +3,7 @@
  *
  * Wires a real `DingTalkAdapter` (over a FakeTransport), a real `ReplyRouter`
  * imported from channel-harness source, and a SessionBinding, then drives
- * `assistant/chunk`, `assistant/message` and `turn/end` records through it.
+ * V3 `assistant/message`, `assistant/message.stream` and `turn/end` records through it.
  * All assertions run on the generic pipeline with capability negotiation
  * only (`streaming: 'edit'`) — the harness module is never special-cased and
  * the channel id `'dingtalk'` appears only as binding data.
@@ -150,10 +150,15 @@ function fakeSession(id: string): never {
 
 function chunkEvent(turn: number, text: string): never {
   return {
-    type: 'assistant/chunk',
+    type: 'assistant/message',
     seq: 1,
     time: Date.now(),
-    data: { turn, step: 0, chunk: { type: 'text-delta', index: 0, text } },
+    data: {
+      turn,
+      step: 0,
+      message: { role: 'assistant', content: [{ type: 'text', text }] },
+      stream: [{ type: 'text-chunks', time0: Date.now(), index: 0, dt: [0], texts: [text] }],
+    },
   } as never;
 }
 
@@ -162,7 +167,12 @@ function assistantMessageEvent(turn: number, text: string): never {
     type: 'assistant/message',
     seq: 2,
     time: Date.now(),
-    data: { turn, message: { role: 'assistant', content: [{ type: 'text', text }] } },
+    data: {
+      turn,
+      step: 0,
+      message: { role: 'assistant', content: [{ type: 'text', text }] },
+      stream: [],
+    },
   } as never;
 }
 
@@ -195,7 +205,7 @@ describe('M2 acceptance: AI Card streaming through the generic ReplyRouter', () 
 
     const chunkCount = 20;
     for (let i = 0; i < chunkCount; i += 1) {
-      router.onSessionEvent(session, chunkEvent(0, 'a'));
+      router.onSessionEvent(session, chunkEvent(0, 'a'.repeat(i + 1)));
       await sleep(8);
     }
 

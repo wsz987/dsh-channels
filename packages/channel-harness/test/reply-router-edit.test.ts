@@ -2,8 +2,8 @@
  * ReplyRouter `edit`-strategy contract tests (M2 "Rich Streaming").
  *
  * Locks in the generic capability-negotiated streaming pipeline that the
- * DingTalk AI Card path relies on: `assistant/chunk` (text-delta) → throttled
- * `handle.replace` previews → `finish` at `turn/end` → `fail` on mid-stream
+ * DingTalk AI Card path consumes a V3 `assistant/message.stream` → throttled
+ * `handle.replace` previews → `finish` at `turn/end` → `fail` on settlement
  * errors. No platform identifiers appear anywhere — the strategy comes only
  * from `adapter.capabilities.streaming`.
  */
@@ -29,12 +29,17 @@ function turnStartEvent(turn: number): SessionEvent<'turn/start'> {
   return { type: 'turn/start', seq: 0, time: Date.now(), data: { turn } };
 }
 
-function chunkEvent(turn: number, text: string): SessionEvent<'assistant/chunk'> {
+function chunkEvent(turn: number, text: string): SessionEvent<'assistant/message'> {
   return {
-    type: 'assistant/chunk',
+    type: 'assistant/message',
     seq: 1,
     time: Date.now(),
-    data: { turn, step: 0, chunk: { type: 'text-delta', index: 0, text } },
+    data: {
+      turn,
+      step: 0,
+      message: { role: 'assistant', content: [{ type: 'text', text }] },
+      stream: [{ type: 'text-chunks', time0: Date.now(), index: 0, dt: [0], texts: [text] }],
+    },
   };
 }
 
@@ -45,7 +50,9 @@ function assistantMessageEvent(turn: number, text: string): SessionEvent<'assist
     time: Date.now(),
     data: {
       turn,
+      step: 0,
       message: { role: 'assistant', content: [{ type: 'text', text }] },
+      stream: [],
     },
   };
 }

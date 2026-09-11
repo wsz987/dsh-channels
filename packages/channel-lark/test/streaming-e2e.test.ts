@@ -3,7 +3,8 @@
  *
  * Wires a real `LarkAdapter` (over a fake official SDK WS client + fake
  * OpenAPI client), a real `ReplyRouter` imported from channel-harness source,
- * and a SessionBinding, then drives `assistant/chunk`, `assistant/message`
+ * and a SessionBinding, then drives V3 `assistant/message`,
+ * `assistant/message.stream`
  * and `turn/end` records through it. All assertions run on the generic
  * pipeline with capability negotiation only (`streaming: 'edit'`) — the
  * harness module is never special-cased and the channel id `'lark'` appears
@@ -198,10 +199,15 @@ function fakeSession(id: string): never {
 
 function chunkEvent(turn: number, text: string): never {
   return {
-    type: 'assistant/chunk',
+    type: 'assistant/message',
     seq: 1,
     time: Date.now(),
-    data: { turn, step: 0, chunk: { type: 'text-delta', index: 0, text } },
+    data: {
+      turn,
+      step: 0,
+      message: { role: 'assistant', content: [{ type: 'text', text }] },
+      stream: [{ type: 'text-chunks', time0: Date.now(), index: 0, dt: [0], texts: [text] }],
+    },
   } as never;
 }
 
@@ -210,7 +216,12 @@ function assistantMessageEvent(turn: number, text: string): never {
     type: 'assistant/message',
     seq: 2,
     time: Date.now(),
-    data: { turn, message: { role: 'assistant', content: [{ type: 'text', text }] } },
+    data: {
+      turn,
+      step: 0,
+      message: { role: 'assistant', content: [{ type: 'text', text }] },
+      stream: [],
+    },
   } as never;
 }
 
@@ -239,7 +250,7 @@ describe('CardKit 2.0 native streaming through the generic ReplyRouter', () => {
 
     const chunkCount = 20;
     for (let i = 0; i < chunkCount; i += 1) {
-      router.onSessionEvent(session, chunkEvent(0, 'a'));
+      router.onSessionEvent(session, chunkEvent(0, 'a'.repeat(i + 1)));
       await sleep(8);
     }
 
@@ -323,7 +334,7 @@ describe('CardKit 2.0 native streaming through the generic ReplyRouter', () => {
 
     router.onSessionEvent(session, chunkEvent(0, 'a'));
     await sleep(30);
-    router.onSessionEvent(session, chunkEvent(0, 'b'));
+    router.onSessionEvent(session, chunkEvent(0, 'ab'));
 
     // The router calls handle.fail -> card enters 'failed' with the error.
     await vi.waitFor(() => {

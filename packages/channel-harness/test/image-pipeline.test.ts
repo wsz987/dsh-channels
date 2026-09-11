@@ -1,5 +1,5 @@
 /**
- * Official rc.2 image pipeline integration.
+ * Official 0.1.5-rc.2 image pipeline integration.
  *
  * The channel only hands raw images to the Harness Attachment Store
  * (saveImage -> ImageAttachmentRef -> ImageBlock); whether the model can see
@@ -34,6 +34,7 @@ import { MemoryBindingStore } from '../src/binding-store.ts';
 import { ChannelHarnessBridge } from '../src/bridge.ts';
 import { Config } from '../src/config.ts';
 import { ReplyContextStore } from '../src/reply-context-store.ts';
+import type { ChannelAttachmentProvider } from '../src/file-provider.ts';
 import type { ChannelWorkspaceResolver } from '../src/workspace-resolver.ts';
 import { allowAllAccessResolver } from './access-test-helper.ts';
 
@@ -74,7 +75,11 @@ class FakeLlmAdapter extends LlmAdapter {
 
 interface ScopedAgent {
   id: SessionId;
-  session: { id: string; append(type: string, data: unknown): { type: string; data: unknown } };
+  session: {
+    id: string;
+    append(type: string, data: unknown): { type: string; data: unknown };
+    requestHeader(): undefined;
+  };
   options: { provider?: string; model?: string };
   ctx: Context;
 }
@@ -82,7 +87,7 @@ interface ScopedAgent {
 function scopedAgent(root: Context, id: string): ScopedAgent {
   const agent = {
     id: SessionId(id),
-    session: { id, append: (type, data) => ({ type, data }) },
+    session: { id, append: (type, data) => ({ type, data }), requestHeader: () => undefined },
     options: {},
     ctx: new Context(),
   } as ScopedAgent;
@@ -165,7 +170,7 @@ function imageEvent(): MessageReceived {
   } as unknown as MessageReceived;
 }
 
-function fixture() {
+function fixture(options: { fileProvider?: ChannelAttachmentProvider } = {}) {
   const rootCtx = new Context();
   new CommandRuntime(rootCtx);
   const llm = new LlmRuntime(rootCtx);
@@ -192,6 +197,7 @@ function fixture() {
     logger: silentLogger,
     accessResolver: allowAllAccessResolver,
     saveImage,
+    ...(options.fileProvider ? { fileProvider: options.fileProvider } : {}),
     ctx: rootCtx,
     commandDeps: { startNewSession: (agent) => bridge.startNewSession(agent) },
     workspaceResolver: noopResolver,
@@ -217,7 +223,7 @@ async function preStep(agent: ScopedAgent, messages: UserMessage[]) {
   return decision;
 }
 
-describe('official rc.2 image pipeline (channel side)', () => {
+describe('official 0.1.5-rc.2 image pipeline (channel side)', () => {
   it('delivers the ImageBlock through saveImage and never rewrites it at agent/pre-step', async () => {
     const h = fixture();
     await h.bridge.handleChannelEvent(imageEvent());
@@ -240,6 +246,41 @@ describe('official rc.2 image pipeline (channel side)', () => {
     expect(decision.messages[0]).toBe(delivered);
     expect(decision.messages[0]!.content.map((block) => block.type)).toEqual(['text', 'image', 'text']);
     expect(h.resolveModelInfo).not.toHaveBeenCalled();
+  });
+
+  it('mirrors the inbound image into the asset store under the harness ref id (issue #7)', async () => {
+    const storeImage = vi.fn(async () => undefined);
+    const h = fixture({ fileProvider: { storeImage } as never });
+    await h.bridge.handleChannelEvent(imageEvent());
+
+    // Delivery is unchanged (the official ref still reaches the model)…
+    expect(h.saveImage).toHaveBeenCalledTimes(1);
+    expect(h.gateway.followups).toHaveLength(1);
+    // …and the mirror carries the harness attachment id (the model-visible
+    // `sha256:…`) plus the session-scoped event identity for the ACL.
+    expect(storeImage).toHaveBeenCalledTimes(1);
+    const [context, image] = storeImage.mock.calls[0]!;
+    const sessionId = h.gateway.followups[0]!.sessionId;
+    expect(context).toMatchObject({ sessionId, channelId: 'weixin', messageId: 'm-image-1' });
+    expect(image).toMatchObject({
+      attachmentId: h.savedRef.attachmentId,
+      mimeType: 'image/jpeg',
+    });
+  });
+
+  it('a failing image mirror never breaks delivery of the official ref (issue #7)', async () => {
+    const storeImage = vi.fn(async () => {
+      throw new Error('asset store down');
+    });
+    const h = fixture({ fileProvider: { storeImage } as never });
+    await h.bridge.handleChannelEvent(imageEvent());
+
+    expect(h.saveImage).toHaveBeenCalledTimes(1);
+    expect(h.gateway.followups).toHaveLength(1);
+    const delivered = h.gateway.followups[0]!.message;
+    expect(delivered.content.find((block) => block.type === 'image')).toMatchObject({
+      attachment: h.savedRef,
+    });
   });
 
   it('keeps nested tool-result images untouched as well', async () => {

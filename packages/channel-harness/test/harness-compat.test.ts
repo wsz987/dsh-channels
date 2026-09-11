@@ -1,8 +1,8 @@
 /**
- * Real-contract Harness compatibility regression (pinned rc.6).
+ * Real-contract Harness compatibility regression (pinned 0.1.5-rc.2).
  *
  * This is a *pinned-contract* regression, not a live dsh loop: it pins the
- * exact rc.6 type/runtime surfaces the bridge consumes — `AgentRegistry`
+ * exact 0.1.5-rc.2 type/runtime surfaces the bridge consumes — `AgentRegistry`
  * (`get`/`create`/`resume`/`list`, `create`/`resume` option shapes, the
  * `AgentHandle` the gateway wraps) and the `session/event` vocabulary
  * (`KNOWN_SESSION_EVENT_TYPES`) — mirroring Phase 14's intent as far as this
@@ -34,7 +34,7 @@ import {
 } from '../src/agent-manager.ts';
 import type { AgentRouteSpec as RouteSpec } from '../src/agent-router.ts';
 
-/** Stub `AgentHandle` shaped like the pinned rc.6 contract. */
+/** Stub `AgentHandle` shaped like the pinned 0.1.5-rc.2 contract. */
 function makeHandle(id: SessionId): AgentHandle {
   return {
     agent: {
@@ -59,7 +59,7 @@ function providePresetRoster(ctx: Context, defaultId = 'standard') {
   return roster;
 }
 
-describe('Harness compatibility (pinned rc.6 contract)', () => {
+describe('Harness compatibility (pinned 0.1.5-rc.2 contract)', () => {
   it('AgentRegistry exposes get/create/resume/list', () => {
     const ctx = new Context();
     const agents = new AgentRegistry(ctx);
@@ -249,7 +249,11 @@ describe('Harness compatibility (pinned rc.6 contract)', () => {
       },
     } satisfies AgentFactory);
     const persistence = {
-      inspect: vi.fn(async () => ({ meta: { id: SessionId('s-legacy') }, events: [] })),
+      open: vi.fn(async () => ({
+        header: { id: SessionId('s-legacy') },
+        read: vi.fn(async () => ({ events: [] })),
+        close: vi.fn(),
+      })),
     } as never as SessionPersistence;
 
     const gateway = new HarnessAgentGateway(ctx, () => persistence);
@@ -290,8 +294,8 @@ describe('Harness compatibility (pinned rc.6 contract)', () => {
     await wrapped.dispose();
   });
 
-  it('KNOWN_SESSION_EVENT_TYPES covers the event names ReplyRouter consumes', () => {
-    for (const type of ['turn/start', 'assistant/chunk', 'assistant/message', 'turn/end']) {
+  it('KNOWN_SESSION_EVENT_TYPES covers the V3 event names ReplyRouter consumes', () => {
+    for (const type of ['turn/start', 'assistant/message', 'turn/end']) {
       expect(KNOWN_SESSION_EVENT_TYPES.has(type)).toBe(true);
     }
   });
@@ -360,7 +364,7 @@ describe('sessionPersistence is a LIVE optional capability (no startup snapshot)
   /** Minimal structural SessionPersistence: the gateway probes via list(). */
   function persistenceWith(ids: string[]) {
     return {
-      list: async () => ids.map((id) => ({ id: SessionId(id) })),
+      list: async () => ids.map((id) => ({ header: { id: SessionId(id) }, revision: 0 })),
     } as never as SessionPersistence;
   }
 
@@ -404,7 +408,7 @@ describe('sessionPersistence is a LIVE optional capability (no startup snapshot)
   });
 });
 
-describe('dsh-commands pinned contract (rc.6)', () => {
+describe('dsh-commands pinned contract (0.1.5-rc.2)', () => {
   it('parseCommand returns the official ParsedCommand shape and honors rawInput', () => {
     const parsed = parseCommand('/compact --deep');
     expect(parsed).toEqual({ name: 'compact', rawInput: ' --deep' });

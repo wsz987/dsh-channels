@@ -121,10 +121,21 @@ reconnect.maxRetries = 10
 dedup.enabled = true
 dedup.windowMs = 5000
 card.createOnFirstDelta = true
+card.interactiveTemplateId = <unset by default>   # opt-in question buttons
+card.interactiveTextParam = text
+card.interactiveActionsParam = actions
 upstream.mode = sdk
 upstream.clientId?
 upstream.clientSecretRef = DSH_CHANNEL_DINGTALK_MAIN_CLIENT_SECRET
 ```
+
+`card.interactiveTemplateId` has **no default**: question buttons require a Card
+Platform template published in the operator's own org with matching
+`text`/`actions` variables, so `interactiveActions` is `false` unless the
+operator sets it. Without it questions use the numbered-text path (same as
+Weixin). A configured template whose send still fails degrades to text (see
+`question-presenter.ts`). LIVE-REQUIRED before claiming button verification: a
+real click arriving on the `/v1.0/card/instances/callback` STREAM topic.
 
 Deprecated migration-only:
 
@@ -284,6 +295,11 @@ POST /v1.0/robot/messageFiles/download
 POST /v1.0/card/instances
 POST /v1.0/card/instances/deliver
 PUT  /v1.0/card/streaming
+# OPT-IN question buttons (card.interactiveTemplateId required)
+POST /v1.0/im/interactiveCards/send
+PUT  /v1.0/im/interactiveCards
+# STREAM card callback topic (dingtalk-stream TOPIC_CARD)
+/v1.0/card/instances/callback
 ```
 
 ### Lark

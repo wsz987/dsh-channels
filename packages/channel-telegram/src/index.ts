@@ -20,7 +20,7 @@
  */
 import { type Context } from '@deepseek-ai/cordis';
 import { credentialRef } from '@deepseek-ai/dsh-credentials';
-import { settingsNamespace, type SettingsProvider } from '@deepseek-ai/dsh-settings';
+import type { SettingsProvider } from '@deepseek-ai/dsh-settings';
 import { mountChannelAdapter } from '@wsz987/channel-core';
 import type { ChannelDefinition } from '@wsz987/channel-control';
 import type { TelegramConfig } from './config.js';
@@ -140,7 +140,7 @@ export function apply(ctx: Context, config: TelegramConfig, deps: TelegramAdapte
     // and a disabled definition must stay visible so the Web control plane can
     // re-enable it later (doc §19/§20).
     const settings = ctx.get('settings') as SettingsProvider | undefined;
-    const scope = settings?.register(settingsNamespace('channels-telegram'), Config, { base: config });
+    const scope = settings?.register('channels-telegram', Config, { base: config });
     const effectiveConfig = scope?.get() ?? config;
     control.definitions.register(
       createTelegramDefinition({

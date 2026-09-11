@@ -23,6 +23,7 @@ import type { CardCreateResult, DingTalkUpstream } from './upstream.js';
 import type { HttpTransport } from './transport.js';
 import { sniffImageMime } from './media-mime.js';
 import type { RemoteMediaFetchLike } from './image-hydrator.js';
+import { DEFAULT_DINGTALK_INTERACTIVE_TEMPLATE_ID } from './config.js';
 import type {
   DingTalkOpenApiPort,
   DingTalkOpenApiCredentials,
@@ -36,7 +37,7 @@ import type {
 
 const DINGTALK_API = 'https://api.dingtalk.com';
 const DINGTALK_OAPI = 'https://oapi.dingtalk.com';
-const AI_CARD_TEMPLATE_ID = '02fcf2f4-5e02-4a85-b672-46d1f715543e.schema';
+const AI_CARD_TEMPLATE_ID = DEFAULT_DINGTALK_INTERACTIVE_TEMPLATE_ID;
 
 const tokenSchema = z.object({
   accessToken: z.string().trim().min(1),

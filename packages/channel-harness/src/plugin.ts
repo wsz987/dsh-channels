@@ -10,19 +10,12 @@
  * `commands` is a required capability (no optional fallback) so the bridge can
  * install Agent-scoped channel commands.
  *
- * `apiProxy` is deliberately absent from the PLUGIN's own `inject`: the Web profile mounts it (questions then ride the official
- * ApiProxy mux), but headless deployments do not, and the channel-harness
- * must still start there — its question backend probes `apiProxy` once at
- * startup and otherwise registers the official UserQuestionProvider through
- * `ctx.userQuestions`.
- *
- * ORDERING CONTRACT: fibers load in parallel waves, and both the api-gateway
- * and a direct provider claim the single official UserQuestion provider slot.
- * Whoever registers second throws DUPLICATE_PROVIDER and kills the boot. The
- * stock bundle therefore declares `inject: [apiProxy, ...]` on its
- * `channels-harness` patch row, which orders this plugin after the gateway.
- * Any custom composition that mounts the api-gateway MUST give its harness
- * entry the same inject; only gateway-free (headless) hosts may omit it.
+ * `userQuestions` is deliberately absent from the PLUGIN's own `inject`: the
+ * service is probed LIVE at question-backend startup (headless deployments
+ * and Web profiles alike compose the channel's answerer on the official
+ * `user-questions/request` waterfall, dsh 0.1.2; there is no single provider
+ * slot anymore, so no ordering contract with other consumers is required —
+ * a declined channel presentation simply delegates to the next answerer).
  *
  * The whole bridge lifecycle is registered as one `ctx.effect` whose disposer
  * is the teardown chain from `startBridge`.

@@ -6,7 +6,7 @@
  * the "渠道" Settings section via the settings.section slot and the
  * 'channels' locale namespace.
  *
- * rc.2 client module graph notes: React, react/jsx-runtime and
+ * 0.1.5 client module graph notes: React, react/jsx-runtime and
  * @deepseek-ai/dsh-client-ui-primitives are static shell identities
  * (PLATFORM_MODULES seeds compiled into the Vite shell), so the bundle keeps
  * them as require() externals instead of inlining them. The dynamic client
@@ -18,6 +18,7 @@
  */
 import { ChannelsSection } from './ChannelsSection.js';
 import { locales } from './locales.js';
+import type { SettingsSectionOwnerProps } from '@deepseek-ai/dsh-client-ui-settings/client';
 
 export const name = 'channel-web';
 
@@ -54,49 +55,6 @@ type ClientContext = EffectContext & {
   slots: SlotsContext;
 };
 
-const linkIconPaths = [
-  'M10 13a5 5 0 0 0 7.07.07l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71',
-  'M14 11a5 5 0 0 0-7.07-.07l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
-];
-
-/**
- * The current Harness settings slot exposes a section label but not a nav
- * icon. Replace only this section's fallback gear after the host renders it.
- */
-function installChannelsNavIcon(label: () => string): (() => void) | undefined {
-  if (typeof document === 'undefined') return undefined;
-
-  const replaceFallbackIcon = () => {
-    const navItem = Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.trim() === label());
-    const previousIcon = navItem?.querySelector('svg');
-    if (!previousIcon || previousIcon.dataset.channelNavIcon === 'link') return;
-
-    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    icon.dataset.channelNavIcon = 'link';
-    icon.setAttribute('aria-hidden', 'true');
-    icon.setAttribute('fill', 'none');
-    icon.setAttribute('height', '16');
-    icon.setAttribute('stroke', 'currentColor');
-    icon.setAttribute('stroke-linecap', 'round');
-    icon.setAttribute('stroke-linejoin', 'round');
-    icon.setAttribute('stroke-width', '2');
-    icon.setAttribute('viewBox', '0 0 24 24');
-    icon.setAttribute('width', '16');
-    icon.setAttribute('class', previousIcon.getAttribute('class') ?? '');
-    for (const d of linkIconPaths) {
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('d', d);
-      icon.append(path);
-    }
-    previousIcon.replaceWith(icon);
-  };
-
-  const observer = new MutationObserver(replaceFallbackIcon);
-  observer.observe(document.body, { childList: true, subtree: true });
-  replaceFallbackIcon();
-  return () => observer.disconnect();
-}
-
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     ctx.locale.register('channels', locales as Record<string, Record<string, string>>);
@@ -104,11 +62,9 @@ export function apply(ctx: ClientContext): void {
 
   const t = ctx.locale.bind('channels');
 
-  ctx.effect(() => installChannelsNavIcon(() => t('nav')), 'channel-web: channels nav icon');
-
   // Give the section a translator so its body text follows the active locale.
-  const Section = function Section(props: Record<string, unknown>) {
-    return ChannelsSection({ ...(props as object), __t: t });
+  const Section = function Section(props: SettingsSectionOwnerProps) {
+    return ChannelsSection({ ...props, __t: t });
   };
 
   ctx.slots.inject('settings.section', () => {

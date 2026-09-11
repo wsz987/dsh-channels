@@ -28,7 +28,7 @@
  */
 import { type Context } from '@deepseek-ai/cordis';
 import { credentialRef } from '@deepseek-ai/dsh-credentials';
-import { settingsNamespace, type SettingsProvider } from '@deepseek-ai/dsh-settings';
+import type { SettingsProvider } from '@deepseek-ai/dsh-settings';
 import { mountChannelAdapter } from '@wsz987/channel-core';
 import type { ChannelDefinition } from '@wsz987/channel-control';
 import type { LarkConfig } from './config.js';
@@ -143,7 +143,7 @@ export function apply(ctx: Context, config: LarkConfig, deps: LarkAdapterDeps = 
     // definition must stay visible so the Web control plane can re-enable it
     // later.
     const settings = ctx.get('settings') as SettingsProvider | undefined;
-    const scope = settings?.register(settingsNamespace('channels-lark'), Config, { base: config });
+    const scope = settings?.register('channels-lark', Config, { base: config });
     control.definitions.register(
       createLarkDefinition({
         config: scope?.get() ?? config,
