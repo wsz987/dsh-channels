@@ -72,6 +72,41 @@
   多选 `1,3` 回答；群聊文字回答支持平台 `replyTo` 或每道题生成的短关联码
   （`Q-XXXXXX`）两种关联方式；越界多选输入提示重新输入而不取消整个问题。
   Telegram 原生按钮 + ForceReply 路径保持不变。
+- 41ef1ef: 修复渠道 `ask_user_question` 全渠道失效（Web profile 下问题被官方 Remote answerer 吞掉）。
+
+  0.1.2 起官方问题域改为 `user-questions/request` waterfall（串行、先认领者胜），
+  官方 `@deepseek-ai/dsh-api-remotes` 在 web profile 开机即注册转发 answerer，早于
+  `channels-harness`，因此普通 `ctx.on()` 注册的渠道 answerer 永远排在后面：有浏览器
+  连接时问题被 Web UI 认领并挂起，无连接时请求 park 在 `pendingRemoteEvents`，渠道
+  （含微信文字兜底）两种情况下都收不到问题。
+
+  - `WaterfallQuestionBackend` 改用 `{ prepend: true }` 注册：渠道能展示就认领
+    （按钮或编号文字兜底），不能展示仍 `next()` 委托官方 Web answerer。
+  - 启动探测 `ctx.userQuestions` 失败不再永久关闭渠道问答，只 `warn`：服务可能晚于
+    bridge 挂载（profile 行并发创建 / patch 热重载），answerer 本身只需要根 context。
+  - 新增「Web answerer 先注册，渠道仍须拿到问题」与「渠道 decline 后仍到达 Web
+    answerer」回归测试。
+- 41ef1ef: 修复钉钉 `ask_user_question` 总是回「无法在当前渠道展示问题，已取消。」
+
+  钉钉协议**支持**卡片按钮问答（互动卡片「回传请求」+ STREAM 回调），但按钮要求卡片模板
+  已在本组织卡片平台发布、且含 `text`/`actions` 变量。此前 `card.interactiveTemplateId`
+  有内置默认值（第三方 Claw Bot AI Card 模板），SDK 模式下 `interactiveActions` 因此对任何
+  默认配置都是 `true`，卡片发送在该模板不存在/变量不匹配时抛错，而 presenter 直接取消问题。
+
+  - `channel-dingtalk`：`card.interactiveTemplateId` 取消内置默认（fail closed）。未显式
+    配置即 `interactiveActions: false`，问题走编号文字回复（与微信一致）；`02fcf2f4-…`
+    常量仅保留给流式 AI Card 路径。gateway 模式永不声明按钮能力。
+  - `channel-harness`（通用，非渠道特判）：actions 模式发送失败时，把该批问题降级为
+    `text` 并重新渲染发送（带上「回复 1/2/3」说明与群聊关联码），只有文字也失败才取消。
+    QQ / Telegram / Lark 同样受益。
+  - 回归测试覆盖两种降级路径与「默认不声明按钮能力」。
+- 08622da: 清理残留的旧描述（仅注释，无 API 变化）。
+
+  - 移除只讲述历史演进的注释（旧 provider / ApiProxy / `resolveSessionPreset` / 旧网关等），
+    改为描述当前契约。
+  - 修正 `ChannelWorkspaceAttachError` 文档注释中重复的 “soft-attach semantics” 短语。
+    该导出**保留不动**：它是已发布版本（0.5.0）的公开 API 面，`@deprecated` 兼容 shim 是有意
+    保留的，删除会影响下游 `instanceof` / catch。
 - Updated dependencies [f085a55]
 - Updated dependencies [d0df3dc]
 - Updated dependencies [213fd5c]
