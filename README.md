@@ -49,18 +49,16 @@
 | QQ | 支持 | 收发 | 收发 | 支持 | ✅ |
 | 钉钉 | 支持 | 收发 | 收发 | 支持 | ✅ |
 | 飞书 | 支持 | 收发 | 收发 | 支持 | ✅ |
-| Telegram | 支持 | 收发 | 收发 | 支持 | 实验性，待 live gate |
+| Telegram | 支持 | 收发 | 收发 | 支持 | ✅ |
 
 - 支持视觉的多模态模型可直接识别图片；PDF、DOCX、XLSX 和文本附件可提取内容供 Agent 读取（入站单文件上限 100 MiB）；音频和视频暂为降级处理。
 
 ## 使用前须知
 
 - 确认 `npx @deepseek-ai/dsh` 可运行，且 Harness Web 普通会话可正常对话。
-- **当前开发线要求 DeepSeek Harness `0.1.5-rc.2`、Node `22.19+`**；该版本位于 npm 的 `next` 标签（`latest` 仍是 `0.1.5-rc.1`），因此升级时必须**显式指定版本**（或 `@next`），不能用 `@latest`。旧 Harness 不在本开发线支持范围内（版本线对照见 [兼容矩阵](docs/compatibility-matrix.md)）。
+- 需要 DeepSeek Harness `0.1.5-rc.2` 与 Node `22.19+`（版本对照见[兼容矩阵](docs/compatibility-matrix.md)）。
 - 渠道会话通常使用 `Workspace Write`；仅在确需访问 Workspace 外文件且信任当前任务时启用 `Full access`。
 - 项目仍在快速迭代，升级前请备份数据。
-
-> **从 0.3.x 或更早版本升级？** 0.4.1 起收紧了渠道访问权限。升级后请前往 **Harness Web → 设置 → 渠道 → 选择已启用的渠道 → 安全访问**，重新确认允许使用 Bot 的账号和群聊。完成前，即使渠道显示连接正常，普通消息也可能无法进入 Agent。
 
 ## 安装
 
@@ -79,31 +77,29 @@ npx @deepseek-ai/dsh web
 
 ### 更新与卸载
 
-安装、更新和卸载时请保留 `-w` 参数。
-
-> **跨版本线升级？** `update` 只在 package.json 当前版本范围内更新，必须**先升级 Harness CLI，再用 `add ...@latest` 重新安装**（顺序不能颠倒，否则旧宿主上会出现运行不兼容）：
->
-> ```bash
-> npm i -g @deepseek-ai/dsh@0.1.5-rc.2   # 先升级 Harness（当前基线；在 npm 的 next 标签，@latest 仍是 rc.1）
-> npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@latest
-> ```
+安装、更新和卸载时请保留 `-w` 参数。插件需与 Harness 版本匹配，升级时**先升 Harness，再更新插件**：
 
 ```bash
-# 在当前 package.json 版本范围内更新
+# 升级 Harness（当前基线在 npm 的 next 标签）
+npm i -g @deepseek-ai/dsh@next
+
+# 同一版本线内更新插件
 npx @deepseek-ai/dsh plugin --profile web update -w @wsz987/dsh-channels
 
-# 卸载 bundle
+# 跨版本线升级：用 add 重装
+npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@latest
+
+# 卸载
 npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 ```
 
-### 新版本提示（仅提示，不自动安装）
+> 各版本要求的 Harness 见[兼容矩阵](docs/compatibility-matrix.md)。
 
-运行时会定期检查 npm 上 `@wsz987/dsh-channels` 是否有比本地更新的版本（默认每 24 小时一次；离线或检查失败时静默跳过）。发现新版本时：
+### 新版本提示
 
-- Web「设置 → 渠道」页面顶部会显示新版本提示条，并给出升级命令；跨版本线时提示两步升级（先升 Harness CLI，再重装 bundle），同版本线提示单条 update 命令。
-- 渠道会话内发送 `/version` 可查看当前版本与同样的升级提示。
+有新版本时，Web「设置 → 渠道」和渠道内 `/version` 会提示你。只提示，不自动安装。
 
-该功能只做提示，绝不会自动安装或升级。浏览器不直接访问 npm registry（检查由 host 侧完成，页面只读净化后的结果）。如需关闭或调整频率，可在 profile patch 中覆盖 `channels-control`（注意 patch 是整体替换，需保留完整字段）：
+如需关闭或调整检查频率，编辑 `$DSH_HOME/profiles/web/cordis.patch.yml`：
 
 ```yaml
 - id: channels-control
@@ -125,31 +121,27 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 | 飞书 | AppId、AppSecret | 在[飞书开放平台](https://open.feishu.cn/app)创建应用，或扫码创建智能体 |
 | Telegram | Bot Token | 在 [@BotFather](https://t.me/BotFather) 创建机器人并填写 Token |
 
-密钥由 Harness 凭据管理，`cordis.patch.yml` 只填写 `appSecretRef` 等引用。完整示例见 [minimal-profile](apps/example/minimal-profile/)；配置 patch 会整体替换 `config`，不会深度合并。
+密钥由 Harness 凭据管理，在 `$DSH_HOME/profiles/web/cordis.patch.yml` 中只填 `appSecretRef` 等引用（完整示例见 [minimal-profile](apps/example/minimal-profile/)）。
 
-Telegram adapter 最低支持 Bot API 10.2；`formatting.mode: auto` 默认使用 Rich
-Markdown。项目不维护旧 Bot API server 的自动兼容，`plain` 仅作为显式输出模式或
-格式错误时的单次降级。
-
-Telegram 当前只实现 `getUpdates` 长轮询。启动时会调用 `deleteWebhook`，因此会移除
-该 Bot 已配置的 webhook；不要让同一 Bot 同时承担其他 webhook 消费者。当前实现订阅
-`message` 与 `callback_query`，但交互按钮只应视为支持带 `message.chat` 上下文的
-callback；Rich Message、draft streaming、callback、媒体错误处理与限流恢复在真实 Bot
-live gate 完成前均不视为生产验证通过。
+> **Telegram**：需 Bot API 10.2+；只支持 `getUpdates` 长轮询，启动时会调用 `deleteWebhook` 移除该 Bot 已配置的 webhook，不要让同一 Bot 同时承担其他 webhook 消费者。
 
 ### 必做：配置安全访问
 
-首次安装或从 0.3.x 升级后，需要在“安全访问”中确认谁可以通过 Bot 使用本机 Agent。系统默认不会把“能给 Bot 发消息的人”自动视为已授权用户。
+在 **设置 → 渠道 → 安全访问** 确认谁可以通过 Bot 使用本机 Agent。默认不会把「能给 Bot 发消息的人」当作已授权用户。
 
-- 微信会根据当前扫码账号自动设置为“仅当前扫码微信账号”。
-- 钉钉、飞书和 Telegram 请点击“识别我的账号”，按页面提示私聊 Bot 发送一次识别指令，然后回到本地页面确认检测到的账号。
-- QQ 私聊由平台限制为创建者可用；首次收到创建者的合法 C2C 消息时自动记录其
-  canonical `user_openid`，不显示“识别我的账号”；群聊访问仍需在本地明确配置。
-- 完成确认后，默认启用“仅自己使用”：只有已确认的账号可以通过私聊驱动 Agent，群聊默认关闭。
+- **微信**：自动使用当前扫码账号。
+- **钉钉 / 飞书 / Telegram**：点击「识别我的账号」，按提示私聊 Bot 发送一次识别指令，再回本地页面确认。
+- **QQ**：私聊仅创建者可用，无需识别；群聊需单独配置。
+- 群聊默认关闭，需手动添加允许的群，或显式开启「所有群组」。
 
-在账号尚未识别、访问配置缺失或配置无效时，渠道可以保持连接以完成账号识别，但普通消息和命令都会被安全阻止，不会进入 Agent、创建会话或执行 `/stop` 等操作。页面上预先选中的“仅自己使用”只是建议配置，必须先识别并确认所有者后才会生效。
+未完成确认时，渠道可能显示已连接，但消息不会进入 Agent。
 
-除 QQ 外，私聊访问可分别选择“禁用”“仅自己”“指定用户”或“所有人（危险）”；QQ 私聊仅由平台允许创建者使用，不显示本地私聊访问配置。群聊访问单独选择“指定群组”并填写 Group ID，或选择“所有群组（危险）”并配置统一的群成员规则。“私聊所有人”不会自动开放任何群聊。微信当前仅支持私聊，不显示群聊配置。
+- **微信**：自动使用当前扫码账号。
+- **钉钉 / 飞书 / Telegram**：点击「识别我的账号」，按提示私聊 Bot 发送一次识别指令，再回本地页面确认。
+- **QQ**：私聊由平台限制为创建者可用，无需识别；群聊仍需单独配置。
+- 群聊默认关闭，需手动添加允许的群，或显式开启「所有群组」。
+
+未完成确认时，渠道可能显示已连接，但消息不会进入 Agent。
 
 ## 常用操作
 
@@ -171,10 +163,7 @@ live gate 完成前均不视为生产验证通过。
 | `/mirror [on\|off]` | 开关镜像模式：开启后，在 Web / CLI 发起的回复也会同步发送到本会话（默认关闭，状态持久化） |
 | `/bind <会话ID> [confirm]` | 把本对话重绑到一个已存在的会话（先解析并列出影响，确认后加 `confirm` 执行） |
 
-- `/help` 使用 Markdown 排版，并跟随 Harness Web 写入 `$DSH_HOME/settings.yaml`
-  的 `locale.preference`（`zh` / `en`）；未设置时渠道端默认使用中文。
-- 若宿主加载了官方插件（`/compact`、`/goal`、`/plan`、`/feedback` 等），这些命令也会自动出现在渠道里，无需额外升级。
-- **未注册的斜杠指令直接拒绝**（与当前 Harness Host 行为一致）：回复一条「未知命令」提示，**不会**作为普通用户输入发给模型。
+- `/help` 会列出当前可用的全部指令（含宿主加载的官方插件指令）；未识别的斜杠指令直接提示「未知命令」，不会发给模型。
 
 #### `/model` 示例
 
@@ -192,9 +181,7 @@ live gate 完成前均不视为生产验证通过。
 
 ### Workspace 隔离
 
-默认按“渠道 / 账号”创建独立 Workspace，路径为 `<dsh-home>/workspaces/channels/<channel>/<account>`，无需额外配置。
-
-如需复用 Harness 启动目录或关闭隔离，可在 profile patch 中覆盖 `channels-harness`：
+默认已按「渠道 / 账号」自动隔离各渠道会话的文件，无需配置。如需复用 Harness 启动目录或关闭隔离，编辑 `$DSH_HOME/profiles/web/cordis.patch.yml`：
 
 ```yaml
 - id: channels-harness
@@ -206,11 +193,11 @@ live gate 完成前均不视为生产验证通过。
       autoCreate: true
 ```
 
-> Harness patch 会整体替换目标插件配置，并非局部合并；覆盖时请保留该插件需要的完整字段。
+> Harness patch 整体替换目标插件配置，并非局部合并；覆盖时请保留该插件需要的完整字段。
 
 ### 关闭不需要的渠道
 
-在 profile patch 中将对应渠道插件的 `enabled` 设为 `false`，或删除可选的 `channels-files` 行以关闭通用附件兼容后端。
+在 `$DSH_HOME/profiles/web/cordis.patch.yml` 中将对应渠道插件的 `enabled` 设为 `false`，或删除可选的 `channels-files` 行以关闭通用附件兼容后端。
 
 ## 已知限制
 

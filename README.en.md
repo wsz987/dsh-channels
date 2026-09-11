@@ -51,18 +51,16 @@ Once installed, configure and authorize channels via QR code in the Harness Web 
 | QQ | Yes | send/receive | send/receive | Yes | ✅ |
 | DingTalk | Yes | send/receive | send/receive | Yes | ✅ |
 | Lark | Yes | send/receive | send/receive | Yes | ✅ |
-| Telegram | Yes | send/receive | send/receive | Yes | Experimental, pending live gate |
+| Telegram | Yes | send/receive | send/receive | Yes | ✅ |
 
 - Vision-capable multimodal models can inspect images directly; PDF, DOCX, XLSX and text attachments can be extracted for the Agent to read (100 MiB inbound limit per file); audio and video are currently degraded.
 
 ## Before you start
 
 - Confirm that `npx @deepseek-ai/dsh` runs and a normal Harness Web session can chat.
-- **The 0.5.x line requires DeepSeek Harness `0.1.5-rc.2` and Node `22.19+`**; that version sits on npm's `next` tag (`latest` is still `0.1.5-rc.1`), so upgrade with an **explicit version** (or `@next`) rather than `@latest`. Users still on Harness `0.1.0-rc.7` / `0.1.1-rc.2` should stay on `0.4.x` (see the [compatibility matrix](docs/compatibility-matrix.md)).
+- Requires DeepSeek Harness `0.1.5-rc.2` and Node `22.19+` (see the [compatibility matrix](docs/compatibility-matrix.md)).
 - Channel sessions normally use `Workspace Write`; enable `Full access` only when the task must access files outside the Workspace and you trust it.
 - The project is evolving quickly; back up your data before upgrading.
-
-> **Upgrading from 0.3.x or earlier?** Channel access controls are stricter starting with 0.4.1. After upgrading, open **Harness Web → Settings → Channels → an enabled channel → Secure access** and confirm which accounts and group chats may use the bot. Until this is configured, a channel may appear connected while ordinary messages remain blocked.
 
 ## Installation
 
@@ -81,31 +79,29 @@ After installation, configure or log in to the channels you need in Harness Web 
 
 ### Update and uninstall
 
-Keep the `-w` flag when installing, updating and uninstalling.
-
-> **Crossing a release line (e.g. 0.4.x → 0.5.x)?** `update` only refreshes within the current package.json range. Crossing a release line requires **upgrading the Harness CLI first, then re-adding the bundle with `@latest`** (in that order — running the newer bundle on an old host is not supported):
->
-> ```bash
-> npm i -g @deepseek-ai/dsh@0.1.5-rc.2   # upgrade Harness first (current baseline; on npm's next tag — @latest is still rc.1)
-> npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@latest
-> ```
+Keep the `-w` flag when installing, updating and uninstalling. The bundle must match your Harness version, so **upgrade Harness first, then update the bundle**:
 
 ```bash
-# Update within the current package.json version range
+# Upgrade Harness (the current baseline is on npm's next tag)
+npm i -g @deepseek-ai/dsh@next
+
+# Update the bundle within the current release line
 npx @deepseek-ai/dsh plugin --profile web update -w @wsz987/dsh-channels
 
-# Uninstall the bundle
+# Crossing a release line: re-add it instead
+npx @deepseek-ai/dsh plugin --profile web add -w @wsz987/dsh-channels@latest
+
+# Uninstall
 npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 ```
 
-### New-version notice (prompt-only, never auto-installs)
+> See the [compatibility matrix](docs/compatibility-matrix.md) for the Harness version each bundle release needs.
 
-At runtime the bundle periodically checks whether npm has a newer `@wsz987/dsh-channels` than the installed one (default: once every 24 hours; offline or failed checks are skipped silently). When a newer version is found:
+### New-version notice
 
-- The Web **Settings → Channels** page shows a banner at the top with the upgrade commands. Crossing a release line (e.g. 0.4.x → 0.5.x) shows the two-step upgrade (Harness CLI first, then re-add the bundle); within the same line it shows a single `update` command.
-- Sending `/version` in any channel conversation shows the current version and the same hint.
+When a newer version exists, Web **Settings → Channels** and the in-channel `/version` command tell you. Prompt only — nothing is installed automatically.
 
-This feature only ever prompts — it never installs or upgrades anything. The browser never contacts the npm registry (the check runs host-side; the page only reads a sanitized result). To disable it or tune the interval, override `channels-control` in your profile patch (a config patch replaces the whole plugin config — keep every field):
+To disable it or tune the interval, edit `$DSH_HOME/profiles/web/cordis.patch.yml`:
 
 ```yaml
 - id: channels-control
@@ -127,24 +123,27 @@ This feature only ever prompts — it never installs or upgrades anything. The b
 | Lark | AppId, AppSecret | Create an app on the [Lark open platform](https://open.feishu.cn/app), or scan a QR code to create an agent |
 | Telegram | Bot Token | Create a bot in [@BotFather](https://t.me/BotFather) and enter the token |
 
-Harness manages secrets; put only references such as `appSecretRef` in `cordis.patch.yml`. See [minimal-profile](apps/example/minimal-profile/) for a complete example. A config patch replaces the whole `config`; it is not a deep merge.
+Harness manages secrets; put only references such as `appSecretRef` in `$DSH_HOME/profiles/web/cordis.patch.yml` (see [minimal-profile](apps/example/minimal-profile/) for a complete example).
 
-The Telegram adapter requires Bot API 10.2 or newer; `formatting.mode: auto` defaults to Rich Markdown. This project does not maintain automatic compatibility with older Bot API servers — `plain` is only an explicit output mode or a one-shot downgrade on a formatting error.
-
-Telegram currently implements only `getUpdates` long polling. It calls `deleteWebhook` on startup, which removes any webhook already configured for that bot; do not let the same bot serve another webhook consumer at the same time. The current implementation subscribes to `message` and `callback_query`, but interactive buttons should only be treated as supporting callbacks that carry a `message.chat` context. Rich Messages, draft streaming, callbacks, media error handling and rate-limit recovery are not considered production-verified until a real-bot live gate passes.
+> **Telegram**: requires Bot API 10.2+; only `getUpdates` long polling is implemented, and startup calls `deleteWebhook`, removing any webhook already configured for that bot — do not let the same bot serve another webhook consumer.
 
 ### Required: configure secure access
 
-After a first installation or an upgrade from 0.3.x, use **Secure access** to confirm who may use the local Agent through the bot. The system never treats everyone who can message the bot as authorized by default.
+Use **Settings → Channels → Secure access** to confirm who may use the local Agent through the bot. Everyone who can message the bot is **not** treated as authorized by default.
 
-- WeChat automatically selects the account used for the current QR-code login and limits access to that account.
-- For DingTalk, Lark, and Telegram, select **Identify my account**, send the one-time identification command to the bot in a private chat, then confirm the detected account on the local page.
-- QQ private chats are restricted by the platform to the bot creator, so QQ does not show **Identify my account**. Group access must still be configured locally.
-- After confirmation, the default mode is **Owner only**: only the confirmed account may drive the Agent in a private chat, and group access remains disabled.
+- **WeChat**: automatically uses the account from the current QR-code login.
+- **DingTalk / Lark / Telegram**: select **Identify my account**, send the one-time identification command to the bot in a private chat, then confirm on the local page.
+- **QQ**: private chats are limited to the bot creator, so no identification is needed; group access is configured separately.
+- Group chats start disabled: add specific groups, or explicitly enable **All groups**.
 
-While the owner is unidentified, or when the access policy is missing or invalid, the channel may stay connected so account identification can work. All ordinary messages and commands are blocked before they reach the Agent, create a session, or execute operations such as `/stop`. A preselected **Owner only** option is only a suggested draft; it does not take effect until an owner has been identified and confirmed.
+Until this is confirmed, a channel may appear connected while messages never reach the Agent.
 
-Except for QQ, direct-message access can be set to **Disabled**, **Owner only**, **Specific users**, or **Everyone (danger)**. QQ private chats remain limited to the bot creator and do not expose local direct-message controls. Group-chat access is configured separately: add specific Group IDs, or explicitly select **All groups (danger)** and configure one shared member rule. Selecting **Everyone** for direct messages never opens any group chat automatically. WeChat currently supports private chats only, so it does not show group settings.
+- **WeChat**: automatically uses the account from the current QR-code login.
+- **DingTalk / Lark / Telegram**: select **Identify my account**, send the one-time identification command to the bot in a private chat, then confirm on the local page.
+- **QQ**: private chats are restricted by the platform to the bot creator, so no identification is needed; group access is still configured separately.
+- Group chats start disabled: add specific groups, or explicitly enable **All groups**.
+
+Until this is confirmed, a channel may appear connected while messages never reach the Agent.
 
 ## Common operations
 
@@ -166,9 +165,7 @@ In any channel conversation you can send slash commands, parsed and executed by 
 | `/mirror [on\|off]` | Toggle mirror mode: when on, replies to turns you start in Web / CLI are also delivered to this conversation (off by default, persisted) |
 | `/bind <session-id> [confirm]` | Rebind this conversation to an existing session (resolve first, then add `confirm` to apply) |
 
-If the host loads official plugins (`/compact`, `/goal`, `/plan`, `/feedback`, ...), those commands also appear in channels automatically — no channel upgrade needed.
-`/help` renders with Markdown and follows the `locale.preference` (`zh` / `en`) that Harness Web writes to `$DSH_HOME/settings.yaml`; when unset, the channel side defaults to Chinese.
-**Unregistered slash commands are rejected** (matching the official rc.2 Host behavior): the channel replies with an "unknown command" notice and the line is **never** sent to the model as ordinary user input.
+- `/help` lists every command available in the session (including commands from official plugins the host loads). An unrecognized slash command gets an "unknown command" reply and is never sent to the model.
 
 #### `/model` examples
 
@@ -186,9 +183,7 @@ Have the Agent call `send_channel_message` inside a channel session to proactive
 
 ### Workspace isolation
 
-By default each channel / account pair gets an isolated Workspace at `<dsh-home>/workspaces/channels/<channel>/<account>` — no extra configuration required.
-
-To reuse the Harness launch directory or disable isolation, override `channels-harness` in the profile patch:
+By default each channel / account pair is isolated automatically — no configuration needed. To reuse the Harness launch directory or disable isolation, edit `$DSH_HOME/profiles/web/cordis.patch.yml`:
 
 ```yaml
 - id: channels-harness
@@ -204,7 +199,7 @@ To reuse the Harness launch directory or disable isolation, override `channels-h
 
 ### Disable unused channels
 
-Set the corresponding channel plugin's `enabled` to `false` in the profile patch, or delete the optional `channels-files` line to turn off the generic attachment compatibility backend.
+Set the corresponding channel plugin's `enabled` to `false` in `$DSH_HOME/profiles/web/cordis.patch.yml`, or delete the optional `channels-files` line to turn off the generic attachment compatibility backend.
 
 ## Known limitations
 
