@@ -13,7 +13,7 @@
  * is resolved through the official registry and its `CommandResult` is
  * rendered directly to the channel — it is never sent to the model and never
  * creates `assistant/message` (`ReplyRouter` is bypassed). An UNREGISTERED
- * slash command follows 0.1.5-rc.2 official Host semantics: it is rejected with a
+ * slash command follows official Host semantics: it is rejected with a
  * direct channel notice and never enters the Agent prompt — `commands.execute`
  * returns `undefined` for admission misses, which (given the syntax already
  * parsed) means `ctx.commands.find(agent, name)` missed.
@@ -154,39 +154,6 @@ export interface ChannelHarnessBridgeOptions {
    * probed.
    */
   questionPresenter?: ChannelQuestionPresenter;
-}
-
-/**
- * Retained for API compatibility: an error historically raised when Workspace
- * attach failed inside fresh Session creation. As of the soft-attach semantics
- * (soft-attach semantics), a Workspace attach failure NO LONGER throws — the
- * freshly-created session is kept, grouped as ungrouped, and the binding +
- * followup continue. This class is no longer produced by the bridge.
- *
- * @deprecated Workspace attachment failures are now non-fatal and no longer
- * produce this error. Retained only for compatibility with existing imports.
- */
-export class ChannelWorkspaceAttachError extends Error {
-  readonly sessionId: string;
-  readonly workspaceId: string;
-  readonly cwd: string;
-  readonly channelId: string;
-  readonly accountId: string;
-  constructor(input: {
-    sessionId: string;
-    workspaceId: string;
-    cwd: string;
-    channelId: string;
-    accountId: string;
-  }) {
-    super(`channel session '${input.sessionId}' could not attach to workspace '${input.workspaceId}'`);
-    this.name = 'ChannelWorkspaceAttachError';
-    this.sessionId = input.sessionId;
-    this.workspaceId = input.workspaceId;
-    this.cwd = input.cwd;
-    this.channelId = input.channelId;
-    this.accountId = input.accountId;
-  }
 }
 
 export class ChannelHarnessBridge {
@@ -474,7 +441,7 @@ export class ChannelHarnessBridge {
    * session gets the channel commands and channel hooks before any driving
    * happens. Harness still resolves the Session model at creation/resume.
    * Channel images are NOT rewritten here: the inbound converter hands raw
-   * images to the Harness Attachment Store and the official 0.1.5-rc.2 image
+   * images to the Harness Attachment Store and the official image
    * pipeline owns model-capability projection (vision variant / text-only
    * deterministic placeholder), so the Agent-scoped history keeps the
    * original ImageBlock.
@@ -760,7 +727,7 @@ export class ChannelHarnessBridge {
       // Every other first message (ordinary text, /help, /status, /models,
       // /model, or an unknown /foo) mints the session and continues below —
       // first-message /help/status/models/model must work (spec §38). An
-      // unknown /foo is then rejected at command admission (0.1.5-rc.2 Host parity;
+      // unknown /foo is then rejected at command admission (Host parity;
       // the session must exist first because channel commands register in the
       // Agent scope and cannot be resolved without one).
       const fresh = await this.sessionFactory.create(this.conversationInput(event), route);
@@ -814,14 +781,14 @@ export class ChannelHarnessBridge {
       this.options.agentManager.registerBinding(binding);
     }
 
-    // --- Command admission (0.1.5-rc.2 Host parity) -------------------------------
+    // --- Command admission (Host parity) ------------------------------------
     // Registered commands run on the Human Command Plane; an UNREGISTERED
     // slash command is always rejected with a direct channel notice and never
     // enters the Agent prompt.
     if (parsed) {
       const beforeSessionId = binding.sessionId;
       const controller = new AbortController();
-      // 0.1.5-rc.2 commands.execute takes base64 composer images; channel command
+      // `commands.execute` takes base64 composer images; channel command
       // admission is text-only for now (command image parity is a later phase).
       const execution = await this.options.ctx.commands.execute(
         agentRef!.agent,
@@ -842,7 +809,7 @@ export class ChannelHarnessBridge {
       }
       // `execution === undefined` with syntax already parsed means the
       // registry missed the name (`ctx.commands.find(agent, parsed.name)`
-      // returned nothing) — 0.1.5-rc.2 official Host answers `unknown-command` and
+      // returned nothing) — the official Host answers `unknown-command` and
       // never forwards the line to the model.
       this.options.logger.info('[channel-harness] rejected unknown command', {
         channel: event.channel,
@@ -906,7 +873,7 @@ export class ChannelHarnessBridge {
       if (agent) {
         try {
           const controller = new AbortController();
-          // 0.1.5-rc.2 commands.execute takes base64 composer images; none accompany
+          // `commands.execute` takes base64 composer images; none accompany
           // an inbound IM stop command.
           const execution = await this.options.ctx.commands.execute(agent, text, [], controller.signal);
           if (execution !== undefined) {

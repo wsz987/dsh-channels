@@ -7,14 +7,13 @@
  * current Session. There is no per-Agent owner pin, host identity cache,
  * first-turn prepare, or fallback state machine.
  *
- * Host transport (dsh 0.1.2): the retired ApiProxy `sessions.models` /
- * `sessions.selectModel` RPCs are replaced by the official
- * `ctx.sessionController` (`@deepseek-ai/dsh-api-session-controller`), which
- * the Web profile mounts as the session business API. Selection goes through
- * `sessionController.selectModel()`; the current-selection read uses the same
- * best-effort local chain as before (a Web-side selection that is pending but
- * not yet used by a request is not visible here — the official controller
- * does not expose a host-side current-selection read).
+ * Host transport: the official `ctx.sessionController`
+ * (`@deepseek-ai/dsh-api-session-controller`), which the Web profile mounts as
+ * the session business API. Selection goes through
+ * `sessionController.selectModel()`; the current-selection read is a
+ * best-effort local chain (a Web-side selection that is pending but not yet
+ * used by a request is not visible here — the official controller does not
+ * expose a host-side current-selection read).
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent, ModelSelection, ModelSelectionRef } from '@deepseek-ai/dsh-agent';

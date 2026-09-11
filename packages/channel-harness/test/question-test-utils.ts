@@ -2,7 +2,7 @@
  * Shared fixtures for the question interaction tests (interactions/ modules).
  *
  * Questions are driven through the OFFICIAL `ctx.userQuestions.ask()` — the
- * same waterfall dispatch the `ask_user_question` tool uses in dsh 0.1.2 —
+ * same waterfall dispatch the `ask_user_question` tool uses —
  * so the tests exercise the real `user-questions/request` contract (items
  * incl. `intent`, agent-scoped dispatch, NO_PROVIDER delegation) rather than
  * a local mirror.

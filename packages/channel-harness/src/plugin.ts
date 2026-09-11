@@ -11,11 +11,10 @@
  * install Agent-scoped channel commands.
  *
  * `userQuestions` is deliberately absent from the PLUGIN's own `inject`: the
- * service is probed LIVE at question-backend startup (headless deployments
- * and Web profiles alike compose the channel's answerer on the official
- * `user-questions/request` waterfall, dsh 0.1.2; there is no single provider
- * slot anymore, so no ordering contract with other consumers is required —
- * a declined channel presentation simply delegates to the next answerer).
+ * channel composes its answerer on the official `user-questions/request`
+ * waterfall and only probes the service for diagnostics (see
+ * `interactions/question-backend.ts`). Listener ORDER is a contract there, so
+ * the answerer is prepended rather than relying on fiber order.
  *
  * The whole bridge lifecycle is registered as one `ctx.effect` whose disposer
  * is the teardown chain from `startBridge`.

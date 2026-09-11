@@ -20,13 +20,13 @@
     - id: channels-files
       name: '@wsz987/dsh-channels/files'
 
-    # No apiProxy here (dsh 0.1.2 removed it): questions compose on the
-    # official `user-questions/request` waterfall. Untagged root listeners are
-    # always ADMITTED, but the waterfall is sequential and first-claim-wins:
-    # `@deepseek-ai/dsh-api-remotes` (official web profile) registers its
-    # forwarding answerer at boot, before this row, so the bridge PREPENDS its
-    # own answerer (see WaterfallQuestionBackend) instead of relying on fiber
-    # order. Declined presentations still delegate via `next()`.
+    # Questions compose on the official `user-questions/request` waterfall.
+    # Untagged root listeners are always ADMITTED, but the waterfall is
+    # sequential and first-claim-wins: `@deepseek-ai/dsh-api-remotes` (official
+    # web profile) registers its forwarding answerer at boot, before this row,
+    # so the bridge PREPENDS its own answerer (see WaterfallQuestionBackend)
+    # instead of relying on fiber order. Declined presentations still delegate
+    # via `next()`.
     - id: channels-harness
       name: '@wsz987/dsh-channels/harness'
       inject:

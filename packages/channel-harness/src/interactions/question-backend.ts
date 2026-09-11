@@ -2,20 +2,15 @@
  * Question interaction backend contract + answerer assembly.
  *
  * The official question domain (`ask_user_question` -> `ctx.userQuestions`)
- * dispatches the `user-questions/request` Cordis waterfall (dsh 0.1.2);
- * answerers claim a request by returning an answer or delegate with
- * `next()`. The channel composes ONE waterfall answerer that serves every
- * profile:
+ * dispatches the `user-questions/request` Cordis waterfall; answerers claim a
+ * request by returning an answer or delegate with `next()`. The channel
+ * composes ONE waterfall answerer that serves every profile:
  *
  * - **Headless**: the channel is typically the only answerer, so a declined
  *   presentation fails the ask (`NO_PROVIDER` from the official service).
  * - **Web profile**: the official Remote/Web answerer is composed on the same
  *   waterfall and claims first unless the channel answerer is PREPENDED (see
  *   `question-waterfall-backend.ts`); a channel decline still delegates to it.
- *   (Before 0.1.2 this required the ApiProxy question mux, which broadcast to
- *   every consumer; ApiProxy was removed in 0.1.2 and the first-claim
- *   waterfall replaced it, so the old DUPLICATE_PROVIDER ordering contract is
- *   gone — but a NEW ordering contract took its place.)
  *
  * There is no version branching here: the waterfall is the only transport,
  * and the `userQuestions` probe is diagnostic (never an admission gate).

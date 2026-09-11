@@ -89,7 +89,7 @@ function textOf(event: MessageReceived): string {
 
 /**
  * Presents Harness-origin questions (the official `user-questions/request`
- * waterfall, dsh 0.1.2) through generic channel actions.
+ * waterfall) through generic channel actions.
  */
 export class ChannelQuestionPresenter implements QuestionInteractionSink {
   private readonly state = new QuestionStateStore();

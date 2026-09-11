@@ -73,12 +73,12 @@ export function startBridge(
     channels.get(channelId);
 
   const replyContexts = new ReplyContextStore();
-  // Question answerer composition (dsh 0.1.2): the channel composes ONE
-  // PREPENDED answerer on the official `user-questions/request` waterfall —
-  // headless it is typically the only answerer; in the Web profile it must win
-  // over the official Remote/Web answerer (which registers at boot, before
-  // this bridge) or every channel-bound ask would be swallowed by the browser.
-  // A declined presentation still delegates via `next()`. Everything lives in
+  // Question answerer composition: the channel composes ONE PREPENDED answerer
+  // on the official `user-questions/request` waterfall — headless it is
+  // typically the only answerer; in the Web profile it must win over the
+  // official Remote/Web answerer (which registers at boot, before this bridge)
+  // or every channel-bound ask would be swallowed by the browser. A declined
+  // presentation still delegates via `next()`. Everything lives in
   // interactions/question-backend.ts.
   const questionPresenter = config.userQuestions.enabled
     ? createQuestionInteraction({

@@ -260,9 +260,8 @@ export interface PersistedInspection {
 /**
  * Reconstruct the preset a persisted session actually runs, from its durable
  * inspection: the creation header's `agentPreset` advanced by every
- * `agent-preset/selected` event — the official `agentPresetProjectionDefinition`
- * fold (dsh 0.1.2 replaced the retired `resolveSessionPreset` helper with the
- * projection definition; the reconstruction semantics are unchanged).
+ * `agent-preset/selected` event via the official
+ * `agentPresetProjectionDefinition` fold.
  */
 function resolvePersistedPreset(
   header: SessionHeader,

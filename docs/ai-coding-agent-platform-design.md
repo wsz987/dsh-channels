@@ -2,8 +2,8 @@
 
 > **v2（2026-09-06）**：新增 DeepSeek Harness（dsh）对接设计，对齐官方 [dsh-v0.1.2-rc.1](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.2-rc.1)。v1 的 Codex 分发设计全部保留并泛化为多 Agent 模型；dsh 对接专章见 §52–§63。
 >
-> ⚠️ **版本时效声明（2026-09-10）**：本文是 2026-09-06 的**设计快照**，文中所有 `dsh-v0.1.2-rc.1` / `0.1.1-rc.2` 引用均为**当时的历史证据标签**，不是当前基线。
-> 当前实际基线是 **DeepSeek Harness `0.1.5-rc.2`**（npm `latest` 与 `next`），权威来源见
+> ⚠️ **版本时效声明（2026-09-12）**：本文是 2026-09-06 的**设计快照**，文中所有 `dsh-v0.1.2-rc.1` / `0.1.1-rc.2` 引用均为**当时的历史证据标签**，不是当前基线。
+> 当前实际基线是 **DeepSeek Harness `0.1.5-rc.2`**（位于 npm `next` 标签；`latest` 仍是 `0.1.5-rc.1`），权威来源见
 > [`docs/harness-0.5.x-migration-plan.md`](harness-0.5.x-migration-plan.md) 与
 > [`docs/compatibility-matrix.md`](compatibility-matrix.md)。设计结论（分发模型、注册表、Skill 治理）
 > 与具体 Harness 版本号无关，仍然有效；涉及具体 API/字段时以当前基线文档为准。

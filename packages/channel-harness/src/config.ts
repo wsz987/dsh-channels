@@ -116,7 +116,7 @@ export interface Config {
   /**
    * Upper bound (ms) the bridge waits for in-flight agent turns to go idle
    * during unload before giving up and finalizing replies from the durable
-   * log. Deployment-tunable (was previously a hardcoded 5000).
+   * log.
    */
   drainTimeoutMs: number;
   /** Prefix inbound user messages with `[channel=.. sender=.. message=..]` when explicitly enabled. */

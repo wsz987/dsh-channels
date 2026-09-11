@@ -91,10 +91,10 @@ const EXPECTED_ITEMS: PatchItem[] = [
   { id: 'channels-service', name: '@wsz987/dsh-channels/service' },
   { id: 'channels-files', name: '@wsz987/dsh-channels/files' },
   // channel-harness injects the command-plane capabilities. `apiProxy` is
-  // deliberately absent (dsh 0.1.2 removed it): questions compose on the
-  // official `user-questions/request` waterfall, which admits untagged root
-  // listeners regardless of fiber order, and declined presentations delegate
-  // to the next answerer — no ordering contract with other consumers.
+  // deliberately absent: questions compose on the official
+  // `user-questions/request` waterfall, where listener ORDER is a contract, so
+  // the bridge prepends its answerer (declined presentations delegate to the
+  // next answerer via `next()`).
   { id: 'channels-harness', name: '@wsz987/dsh-channels/harness', inject: ['channels', 'agents', 'agentDefaultModel', 'agentPresets', 'llm', 'commands'] },
   // channel-control is the universal control plane: it must load before the
   // channel plugins so ctx.channelControl exists when they register definitions.

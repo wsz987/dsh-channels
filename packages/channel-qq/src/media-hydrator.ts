@@ -33,8 +33,7 @@
  * - On success the part gets `localData` (the downloaded bytes), `size` (the
  *   hydrated byte length) and `mimeType` (prefer the fetcher's Content-Type,
  *   else keep the platform hint, else sniff the filename). Image parts keep
- *   their legacy shape: the `size` field is intentionally NOT set there, so
- *   existing image consumers observe exactly the same part as before.
+ *   their intrinsic shape: the `size` field is intentionally NOT set there.
  * - On ANY failure the part is NOT dropped: its `url` is kept, a stable
  *   `ingressFailure` code is set, and hydration of other parts continues.
  *   A download failure must never block text delivery, and this
@@ -127,8 +126,7 @@ export async function hydrateMediaParts(
         },
         { maxBytes, signal },
       );
-      // Legacy image ingestion never carried `size`; keep that exact shape so
-      // existing consumers observe the same image part as before while
+      // Image parts never carry `size` (keep that shape stable), while
       // audio/video/file take the authoritative `size` from the real bytes.
       if (isImage) delete part.size;
     }),

@@ -6,7 +6,7 @@
  * the "渠道" Settings section via the settings.section slot and the
  * 'channels' locale namespace.
  *
- * 0.1.5 client module graph notes: React, react/jsx-runtime and
+ * Client module graph notes: React, react/jsx-runtime and
  * @deepseek-ai/dsh-client-ui-primitives are static shell identities
  * (PLATFORM_MODULES seeds compiled into the Vite shell), so the bundle keeps
  * them as require() externals instead of inlining them. The dynamic client

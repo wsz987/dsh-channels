@@ -144,7 +144,7 @@ export interface WeixinUpstream {
   /** Send a video message. */
   sendVideo(params: WeixinVideoParams): Promise<WeixinSendResult>;
 
-  /** Download + decrypt an inbound image (zero-change with legacy download). */
+  /** Download + decrypt an inbound image. */
   downloadImage(ref: WeixinMediaRef): Promise<WeixinDownloadResult>;
   /** Download + decrypt an inbound file. */
   downloadFile(ref: WeixinMediaRef): Promise<WeixinDownloadResult>;

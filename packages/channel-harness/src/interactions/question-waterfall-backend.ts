@@ -1,27 +1,21 @@
 /**
  * Unified question backend: the official `user-questions/request` waterfall.
  *
- * Since dsh 0.1.2 the question domain (`ask_user_question` ->
- * `ctx.userQuestions.ask`) dispatches a Cordis waterfall event instead of
- * using a single registered `UserQuestionProvider`: every interested surface
- * composes an answerer listener, claims the request by returning an answer,
- * or delegates with `next()` (the official service rejects with
- * `UserQuestionError` `NO_PROVIDER` when the whole waterfall delegates).
- * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`) admits untagged
- * listeners globally, so ONE root-level listener serves every profile:
+ * The question domain (`ask_user_question` -> `ctx.userQuestions.ask`)
+ * dispatches a Cordis waterfall event: every interested surface composes an
+ * answerer listener, claims the request by returning an answer, or delegates
+ * with `next()` (the official service rejects with `UserQuestionError`
+ * `NO_PROVIDER` when the whole waterfall delegates). Scope-filtered dispatch
+ * (`@deepseek-ai/dsh-scope`) admits untagged listeners globally, so ONE
+ * root-level listener serves every profile:
  *
- * - headless: the channel is typically the only answerer — the old direct
- *   backend semantics (declined presentation fails the ask) survive as
- *   "decline -> next() -> NO_PROVIDER";
+ * - headless: the channel is typically the only answerer, so a declined
+ *   presentation fails the ask ("decline -> next() -> NO_PROVIDER");
  * - web profile: the official Web UI composes its own answerer on the same
- *   waterfall, so a channel decline now DELEGATES to it instead of racing a
- *   duplicate provider registration. This replaces the retired ApiProxy
- *   question mux (dsh-host-apiproxy was removed in 0.1.2).
+ *   waterfall, so a channel decline DELEGATES to it.
  *
- * The listener is registered on the ROOT context in `start()`; per-request
- * settlement follows the official provider semantics observed in the former
- * ApiProxy reference implementation: an abort or teardown rejects the ask
- * with `UserQuestionError` (`ASK_ABORTED`).
+ * The listener is registered on the ROOT context in `start()`; an abort or
+ * teardown rejects the ask with `UserQuestionError` (`ASK_ABORTED`).
  *
  * ## Why the listener is PREPENDED (ordering IS a contract)
  *

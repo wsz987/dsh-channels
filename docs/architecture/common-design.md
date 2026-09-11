@@ -1052,7 +1052,7 @@ pnpm 将传递依赖提升到 profile 根目录。根入口同时承载 Web host
 - **DSH Bundle**：`package.json` 的 `dsh.bundle.patch` 指向 `cordis.patch.yml`；patch 行只引用 bundle 自己的 exports，实现包作内部依赖，不要求 pnpm 提升传递依赖到 profile 根。
 - **patch 语义**：`cordis.patch.yml` / profile patch 是**整体替换**目标插件 `config`，不是深度合并；覆盖时必须保留该插件完整字段。
 - **Cordis 插件形态**：`export const name` / `export const inject` / `export function apply(ctx, config)`；WS、long-poll、Gateway、heartbeat 等手动资源放 `ctx.effect()`；事件监听走 `ctx.on()` 由框架自动清理。
-- **inject 名称**：只用 Harness public service 名（`channels`、`channelControl`、`agents`、`credentials`、`llm`、`commands`、`agentDefaultModel`；当前 0.1.5 已移除 `apiProxy`），禁止私造 key。
+- **inject 名称**：只用 Harness public service 名（`channels`、`channelControl`、`agents`、`credentials`、`llm`、`commands`、`agentDefaultModel`），禁止私造 key（问题域无需 inject：`user-questions/request` 是 Cordis waterfall 事件）。
 - **命令**：统一走 `commandFactories` / `ctx.commands.register`；命令名 lowercase、以 `/` 开头；handler 返回 `{ kind: 'success' | 'error', text }`；**未注册斜杠指令直接拒绝**（`commands.execute` 未命中注册名时回复「未知命令」提示，**不进**模型历史，也不作为普通用户输入交给模型，与当前 Host 一致）；命令结果不进模型历史。
 - **Agent 输入语义**：普通聊天 `agent.followup()`；执行中纠偏才用 `agent.steer()`；额外上下文用 `agent.inject()`（不得代替聊天）。
 - **回复只消费官方 `session/event`**：`assistant/message.stream`、`assistant/message`、`turn/end`；瞬时 `agent/assistant-stream` 只用于当前 Agent 的预览，`tool/call` / `tool/result` 不混入回复协议。
