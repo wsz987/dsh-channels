@@ -95,22 +95,6 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 
 > 各版本要求的 Harness 见[兼容矩阵](docs/compatibility-matrix.md)。
 
-### 新版本提示
-
-有新版本时，Web「设置 → 渠道」和渠道内 `/version` 会提示你。只提示，不自动安装。
-
-如需关闭或调整检查频率，编辑 `$DSH_HOME/profiles/web/cordis.patch.yml`：
-
-```yaml
-- id: channels-control
-  name: '@wsz987/dsh-channels/control'
-  inject: [channels, credentials]
-  config:
-    updateCheck:
-      enabled: true       # 设为 false 关闭新版本检查
-      intervalHours: 24   # 两次检查的最小间隔（小时）
-```
-
 ## 配置与登录
 
 | 渠道 | 必要信息 | 登录方式 |
@@ -121,8 +105,6 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 | 飞书 | AppId、AppSecret | 在[飞书开放平台](https://open.feishu.cn/app)创建应用，或扫码创建智能体 |
 | Telegram | Bot Token | 在 [@BotFather](https://t.me/BotFather) 创建机器人并填写 Token |
 
-密钥由 Harness 凭据管理，在 `$DSH_HOME/profiles/web/cordis.patch.yml` 中只填 `appSecretRef` 等引用（完整示例见 [minimal-profile](apps/example/minimal-profile/)）。
-
 > **Telegram**：需 Bot API 10.2+；只支持 `getUpdates` 长轮询，启动时会调用 `deleteWebhook` 移除该 Bot 已配置的 webhook，不要让同一 Bot 同时承担其他 webhook 消费者。
 
 ### 必做：配置安全访问
@@ -132,13 +114,6 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 - **微信**：自动使用当前扫码账号。
 - **钉钉 / 飞书 / Telegram**：点击「识别我的账号」，按提示私聊 Bot 发送一次识别指令，再回本地页面确认。
 - **QQ**：私聊仅创建者可用，无需识别；群聊需单独配置。
-- 群聊默认关闭，需手动添加允许的群，或显式开启「所有群组」。
-
-未完成确认时，渠道可能显示已连接，但消息不会进入 Agent。
-
-- **微信**：自动使用当前扫码账号。
-- **钉钉 / 飞书 / Telegram**：点击「识别我的账号」，按提示私聊 Bot 发送一次识别指令，再回本地页面确认。
-- **QQ**：私聊由平台限制为创建者可用，无需识别；群聊仍需单独配置。
 - 群聊默认关闭，需手动添加允许的群，或显式开启「所有群组」。
 
 未完成确认时，渠道可能显示已连接，但消息不会进入 Agent。
@@ -175,10 +150,6 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 
 > `/model` 切换当前会话，并同步写入 Harness 的全局默认模型，供后续新会话使用。
 
-### 主动外发
-
-在渠道会话中让 Agent 调用 `send_channel_message`，可以主动向当前渠道发送文本、图片或支持的文件。Harness Web 直接创建的普通会话没有渠道绑定，不能执行渠道外发。
-
 ### Workspace 隔离
 
 默认已按「渠道 / 账号」自动隔离各渠道会话的文件，无需配置。如需复用 Harness 启动目录或关闭隔离，编辑 `$DSH_HOME/profiles/web/cordis.patch.yml`：
@@ -192,20 +163,6 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
       mode: channel-account # channel-account（默认）| host-cwd | disabled
       autoCreate: true
 ```
-
-> Harness patch 整体替换目标插件配置，并非局部合并；覆盖时请保留该插件需要的完整字段。
-
-### 关闭不需要的渠道
-
-在 `$DSH_HOME/profiles/web/cordis.patch.yml` 中将对应渠道插件的 `enabled` 设为 `false`，或删除可选的 `channels-files` 行以关闭通用附件兼容后端。
-
-## 已知限制
-
-| 当前限制 | 临时处理方式 | 后续方向 |
-| --- | --- | --- |
-| 渠道内没有权限切换指令 | 在 Harness Web 中调整未来新会话的默认权限，或修改对应会话的 Access 设置 | 完善渠道内的会话管理能力 |
-
-该限制是当前渠道交互层尚未接入对应能力，不代表 Harness 不支持。相关上游能力可查阅 [Harness Reference](https://deepseek-harness.github.io/deepseek-harness/reference/)。
 
 ## Roadmap
 

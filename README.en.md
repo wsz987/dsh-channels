@@ -97,22 +97,6 @@ npx @deepseek-ai/dsh plugin --profile web remove -w @wsz987/dsh-channels
 
 > See the [compatibility matrix](docs/compatibility-matrix.md) for the Harness version each bundle release needs.
 
-### New-version notice
-
-When a newer version exists, Web **Settings → Channels** and the in-channel `/version` command tell you. Prompt only — nothing is installed automatically.
-
-To disable it or tune the interval, edit `$DSH_HOME/profiles/web/cordis.patch.yml`:
-
-```yaml
-- id: channels-control
-  name: '@wsz987/dsh-channels/control'
-  inject: [channels, credentials]
-  config:
-    updateCheck:
-      enabled: true       # set to false to disable the check
-      intervalHours: 24   # minimum hours between two checks
-```
-
 ## Configuration and login
 
 | Channel | Required | Login |
@@ -123,8 +107,6 @@ To disable it or tune the interval, edit `$DSH_HOME/profiles/web/cordis.patch.ym
 | Lark | AppId, AppSecret | Create an app on the [Lark open platform](https://open.feishu.cn/app), or scan a QR code to create an agent |
 | Telegram | Bot Token | Create a bot in [@BotFather](https://t.me/BotFather) and enter the token |
 
-Harness manages secrets; put only references such as `appSecretRef` in `$DSH_HOME/profiles/web/cordis.patch.yml` (see [minimal-profile](apps/example/minimal-profile/) for a complete example).
-
 > **Telegram**: requires Bot API 10.2+; only `getUpdates` long polling is implemented, and startup calls `deleteWebhook`, removing any webhook already configured for that bot — do not let the same bot serve another webhook consumer.
 
 ### Required: configure secure access
@@ -134,13 +116,6 @@ Use **Settings → Channels → Secure access** to confirm who may use the local
 - **WeChat**: automatically uses the account from the current QR-code login.
 - **DingTalk / Lark / Telegram**: select **Identify my account**, send the one-time identification command to the bot in a private chat, then confirm on the local page.
 - **QQ**: private chats are limited to the bot creator, so no identification is needed; group access is configured separately.
-- Group chats start disabled: add specific groups, or explicitly enable **All groups**.
-
-Until this is confirmed, a channel may appear connected while messages never reach the Agent.
-
-- **WeChat**: automatically uses the account from the current QR-code login.
-- **DingTalk / Lark / Telegram**: select **Identify my account**, send the one-time identification command to the bot in a private chat, then confirm on the local page.
-- **QQ**: private chats are restricted by the platform to the bot creator, so no identification is needed; group access is still configured separately.
 - Group chats start disabled: add specific groups, or explicitly enable **All groups**.
 
 Until this is confirmed, a channel may appear connected while messages never reach the Agent.
@@ -177,10 +152,6 @@ In any channel conversation you can send slash commands, parsed and executed by 
 
 > `/model` also sets the global default model at the same time (visible in the Web UI / new sessions, no refresh needed).
 
-### Proactive send
-
-Have the Agent call `send_channel_message` inside a channel session to proactively send text, images or supported files to the current channel. Plain sessions created directly in Harness Web have no channel binding and cannot send out of band.
-
 ### Workspace isolation
 
 By default each channel / account pair is isolated automatically — no configuration needed. To reuse the Harness launch directory or disable isolation, edit `$DSH_HOME/profiles/web/cordis.patch.yml`:
@@ -194,20 +165,6 @@ By default each channel / account pair is isolated automatically — no configur
       mode: channel-account # channel-account (default) | host-cwd | disabled
       autoCreate: true
 ```
-
-> A Harness patch replaces the whole target plugin config — it is not a merge; keep all required fields when overriding.
-
-### Disable unused channels
-
-Set the corresponding channel plugin's `enabled` to `false` in `$DSH_HOME/profiles/web/cordis.patch.yml`, or delete the optional `channels-files` line to turn off the generic attachment compatibility backend.
-
-## Known limitations
-
-| Current limitation | Workaround | Planned direction |
-| --- | --- | --- |
-| No permission-switching command in channels | Adjust the default permission for future sessions in Harness Web, or change the Access setting of the session | Improve in-channel session management |
-
-This limitation means the channel interaction layer has not yet wired up the corresponding capability — not that Harness lacks it. See the [Harness Reference](https://deepseek-harness.github.io/deepseek-harness/reference/) for the underlying upstream capabilities.
 
 ## Roadmap
 
